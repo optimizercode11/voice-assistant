@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+"""Verify that fresh, machine-recorded evidence closes a workflow profile."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import subprocess
+import sys
+import re
+from datetime import datetime
+from pathlib import Path
+
+
+PROFILES = {
+    "audit": {"positive", "negative", "regression"},
+    "bugfix": {"reproduce", "positive", "negative", "regression"},
+    "gpu-bugfix": {
+        "reproduce",
+        "positive",
+        "negative",
+        "regression",
+        "gpu-acceptance",
+    },
+    "perf": {
+        "baseline",
+        "positive",
+        "negative",
+        "regression",
+        "benchmark",
+        "gpu-acceptance",
+    },
+}
+STALE_ALLOWED = {"reproduce", "baseline"}
+
+
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def timestamp(raw: object) -> datetime | None:
+    if not isinstance(raw, str):
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def main() -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument("engine", help="engine directory or '.'")
+    p.add_argument("--profile", choices=sorted(PROFILES), required=True)
+    p.add_argument("--campaign", required=True)
+    p.add_argument("--evidence-dir")
+    args = p.parse_args()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", args.campaign):
+        p.error("campaign must match [a-z0-9][a-z0-9._-]*")
+
+    engine = Path(args.engine).resolve()
+    if not engine.is_dir():
+        p.error(f"engine directory does not exist: {engine}")
+    evidence_dir = Path(args.evidence_dir).resolve() if args.evidence_dir else engine / "evidence"
+    helper = Path(__file__).resolve().with_name("worktree-fingerprint")
+    fp = subprocess.run(
+        [str(helper), str(engine)], text=True, capture_output=True, check=False
+    )
+    if fp.returncode:
+        print(f"FAIL  cannot fingerprint current source: {fp.stderr.strip()}")
+        return 2
+    current_fp = fp.stdout.strip()
+
+    valid: dict[str, list[tuple[str, Path, dict]]] = {}
+    failures: list[str] = []
+    for path in sorted(evidence_dir.glob(f"guarded-{args.campaign}-*.json")):
+        try:
+            doc = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            failures.append(f"{path.name}: unreadable manifest: {exc}")
+            continue
+        label = doc.get("label")
+        if doc.get("schema_version") != 2 or not isinstance(label, str):
+            failures.append(f"{path.name}: unsupported schema or missing label")
+            continue
+        if doc.get("campaign") != args.campaign:
+            failures.append(f"{path.name}: campaign field does not match filename/check")
+            continue
+        started = timestamp(doc.get("started_utc"))
+        finished = timestamp(doc.get("finished_utc"))
+        if started is None or finished is None or finished < started:
+            failures.append(f"{path.name}: invalid or reversed timestamps")
+            continue
+        if doc.get("status") != "PASS":
+            continue
+        if doc.get("command_exit_code") != doc.get("expected_exit_code"):
+            failures.append(f"{path.name}: PASS contradicts command exit evidence")
+            continue
+        containment = doc.get("containment", {})
+        if containment.get("verdict") in {"violation", "sampler_error"}:
+            failures.append(f"{path.name}: PASS contradicts containment verdict")
+            continue
+        inputs = doc.get("inputs", [])
+        if not isinstance(inputs, list):
+            failures.append(f"{path.name}: inputs is not an array")
+            continue
+        for item in inputs:
+            if not isinstance(item, dict):
+                failures.append(f"{path.name}: input entry is not an object")
+                continue
+            raw = item.get("path")
+            expected = item.get("sha256")
+            if not raw or item.get("exists") is not True or not expected:
+                failures.append(f"{path.name}: required input is missing from evidence: {raw!r}")
+                continue
+            candidate = Path(raw)
+            if not candidate.is_absolute():
+                candidate = engine / candidate
+            if item.get("verification") == "recorded_remote":
+                continue
+            if not candidate.is_file():
+                failures.append(f"{path.name}: recorded input no longer exists: {raw}")
+            elif sha256(candidate) != expected:
+                failures.append(f"{path.name}: input changed: {raw}")
+        valid.setdefault(label, []).append((doc.get("finished_utc", ""), path, doc))
+
+    chosen: dict[str, tuple[Path, dict]] = {}
+    for label, rows in valid.items():
+        _, path, doc = sorted(rows, key=lambda row: row[0])[-1]
+        chosen[label] = (path, doc)
+
+    required = PROFILES[args.profile]
+    for label in sorted(required):
+        if label not in chosen:
+            failures.append(f"missing current PASS evidence for label '{label}'")
+            continue
+        path, doc = chosen[label]
+        recorded_fp = doc.get("source_fingerprint")
+        if label not in STALE_ALLOWED and recorded_fp != current_fp:
+            failures.append(
+                f"{label}: source changed since {path.name} "
+                f"({recorded_fp or 'missing'} != {current_fp})"
+            )
+        if label == "gpu-acceptance":
+            containment = doc.get("containment", {})
+            if containment.get("mode") != "gpu" or containment.get("verdict") != "clean":
+                failures.append(f"{label}: GPU containment is not CLEAN in {path.name}")
+
+    campaign_inputs: dict[str, tuple[str, str]] = {}
+    for label in sorted(required):
+        if label not in chosen:
+            continue
+        path, doc = chosen[label]
+        for item in doc.get("inputs", []):
+            if not isinstance(item, dict) or not item.get("path") or not item.get("sha256"):
+                continue
+            raw = item["path"]
+            previous = campaign_inputs.get(raw)
+            if previous is not None and previous[0] != item["sha256"]:
+                failures.append(
+                    f"{path.name}: input hash changed within campaign for {raw} "
+                    f"(first seen in {previous[1]})"
+                )
+            else:
+                campaign_inputs[raw] = (item["sha256"], path.name)
+
+    def finished(label: str) -> datetime:
+        value = timestamp(chosen[label][1].get("finished_utc"))
+        assert value is not None
+        return value
+
+    if "reproduce" in chosen and "positive" in chosen:
+        if finished("reproduce") > finished("positive"):
+            failures.append("reproduce evidence must precede positive evidence")
+    if "baseline" in chosen and "benchmark" in chosen:
+        if finished("baseline") > finished("benchmark"):
+            failures.append("baseline evidence must precede benchmark evidence")
+    if "positive" in chosen:
+        for label in ("negative", "regression", "benchmark", "gpu-acceptance"):
+            if label in chosen and finished(label) < finished("positive"):
+                failures.append(f"{label} evidence must not precede positive evidence")
+
+    print(f"== guardrail-check: {engine} profile={args.profile} campaign={args.campaign} ==")
+    for label in sorted(required):
+        if label in chosen:
+            path, doc = chosen[label]
+            freshness = "historical" if label in STALE_ALLOWED else "current"
+            print(
+                f"ok    {label:<15} {freshness:<10} {path.name} "
+                f"rc={doc.get('command_exit_code')}"
+            )
+    for failure in failures:
+        print(f"FAIL  {failure}")
+    if failures:
+        print(f"guardrail-check: RED ({len(failures)} failure(s))")
+        return 1
+    print("guardrail-check: GREEN")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

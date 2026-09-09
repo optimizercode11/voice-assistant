@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Hash the current source content under one path, independent of commit state.
+# Evidence and generated binaries are intentionally excluded.
+set -euo pipefail
+
+TARGET="${1:-.}"
+ROOT="$(git -C "$TARGET" rev-parse --show-toplevel 2>/dev/null || git rev-parse --show-toplevel)"
+TARGET_ABS="$(realpath -m "$TARGET")"
+case "$TARGET_ABS/" in
+  "$ROOT"/*) REL="${TARGET_ABS#"$ROOT"/}" ;;
+  *) echo "worktree-fingerprint: $TARGET is outside $ROOT" >&2; exit 2 ;;
+esac
+[ "$TARGET_ABS" = "$ROOT" ] && REL="."
+
+is_source() {
+  case "$1" in
+    */evidence/*|evidence/*|*/.codex/*|.codex/*) return 1 ;;
+    # The harness is source too. These files carry no extension, and evidence
+    # recorded through them must go stale when they change: a fingerprint that
+    # omits guarded-run cannot tell a re-run from a reverted guard.
+    scripts/*) return 0 ;;
+    Makefile|*/Makefile|CMakeLists.txt|*/CMakeLists.txt|*.c|*.h|*.cc|*.cpp|*.cu|*.cuh|*.hpp|*.inc|*.S|*.py|*.sh|*.mk|*.toml|*.json|*.yaml|*.yml|*.jinja) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+TMP="$(mktemp)"
+trap 'rm -f "$TMP"' EXIT
+{
+  git -C "$ROOT" ls-files -z -- "$REL"
+  git -C "$ROOT" ls-files -z --others --exclude-standard -- "$REL"
+} | sort -zu | while IFS= read -r -d '' path; do
+  is_source "$path" || continue
+  printf '%s\0' "$path"
+  if [ -f "$ROOT/$path" ]; then
+    sha256sum "$ROOT/$path" | awk '{print $1}'
+  else
+    echo MISSING
+  fi
+done > "$TMP"
+
+sha256sum "$TMP" | awk '{print $1}'

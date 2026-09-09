@@ -1,0 +1,29 @@
+[Unit]
+# Qwen3.8-27B (LLM) + Kokoro-82M (TTS) + Qwen3-ASR (STT) + the speech bridge,
+# all on the one authorized device.  Paths here must match deploy/site_config.py
+# (DEPLOY_ROOT, UNIT); `make check-deploy` fails if they drift.
+Description=Voice assistant: Qwen3.8-27B + Kokoro TTS + Qwen3-ASR on GPU 2
+After=network-online.target
+Wants=network-online.target
+Conflicts=q38-server.service
+StartLimitIntervalSec=900
+StartLimitBurst=3
+
+[Service]
+Type=forking
+WorkingDirectory=%h/qwen36/voice-stack/voice-restore-20260908
+PIDFile=%h/qwen36/voice-stack/voice-restore-20260908/run/stack.pid
+ExecStart=/bin/bash %h/qwen36/voice-stack/voice-restore-20260908/deploy/start-voice-stack.sh
+Restart=on-failure
+RestartSec=10
+# The supervisor terminates its children in reverse order and waits; a forced
+# kill mid-teardown is how a 30 GiB stack leaves a wedged device behind.
+KillMode=mixed
+KillSignal=SIGTERM
+SendSIGKILL=no
+TimeoutStartSec=360
+TimeoutStopSec=180
+LimitNOFILE=65536
+
+[Install]
+WantedBy=default.target

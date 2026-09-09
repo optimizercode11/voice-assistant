@@ -1,0 +1,16 @@
+# Deployment artifacts, written on the host, never in a checkout.
+deploy/source.env
+run/
+rollback/
+.guarded-run
+
+# Guard manifests and browser screenshots stay on disk but out of history:
+# they describe a machine and a moment, and worktree-fingerprint excludes
+# evidence/ anyway.
+evidence/*
+!evidence/.gitkeep
+
+__pycache__/
+*.pyc
+.incoming/
+.DS_Store

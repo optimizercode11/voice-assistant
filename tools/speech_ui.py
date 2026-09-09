@@ -1,0 +1,460 @@
+#!/usr/bin/env python3
+"""Same-origin speech UI, streaming Kokoro proxy, and bounded native ASR bridge.
+
+Run on the GPU host through guarded-hostrun. The ASR process inherits the
+guard's device, affinity, priority and process group. No model imports here.
+"""
+import argparse
+import http.client
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import socket
+import ssl
+import voice_chat
+import subprocess
+import tempfile
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
+import wave
+
+MAX_BYTES = 20 * 1024 * 1024
+MAX_SECONDS = 120
+TIMEOUT = 270
+
+
+class RequestError(Exception):
+    def __init__(self, status, message):
+        self.status, self.message = status, message
+
+
+def transcript_text(raw):
+    """Remove native speaker headers and silence markers from speakable text."""
+    text = raw.replace('[Silence]', '')
+    return re.sub(r'(^|\n)[ \t]*Speaker[ \t]+\d+[ \t]*:[ \t]*', r'\1', text).strip()
+
+
+def stop_process(process):
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            # Bounded escalation applies only to this exact, owned child.
+            process.kill()
+            process.wait()
+
+
+def execute(command, directory, timeout, disconnected):
+    """File-backed output avoids pipe deadlocks; preserve the guard's PGID."""
+    with tempfile.TemporaryFile(dir=directory) as stdout, tempfile.TemporaryFile(dir=directory) as stderr:
+        process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr)
+        try:
+            deadline = time.monotonic() + timeout
+            while process.poll() is None:
+                if disconnected():
+                    raise RequestError(499, "Request cancelled.")
+                if time.monotonic() > deadline:
+                    raise RequestError(504, "Transcription timed out. Try a shorter recording.")
+                if stdout.tell() > 8 * 1024 * 1024 or stderr.tell() > 8 * 1024 * 1024:
+                    raise RequestError(502, "Speech process exceeded its output limit.")
+                time.sleep(.05)
+            stdout.seek(0)
+            output = stdout.read(8 * 1024 * 1024)
+            if process.returncode:
+                # Keep native paths/logs out of the browser response.
+                stderr.seek(0)
+                print(stderr.read(4096).decode("utf-8", "replace"), flush=True)
+                raise RequestError(502, "Speech processing failed. Check the server log.")
+            return output
+        finally:
+            stop_process(process)
+
+
+def transcribe_remote(config, wav_bytes, frames, disconnected):
+    """Hand the decoded WAV to the resident qasr server; keep the local contract.
+
+    WHY THE BRIDGE STILL OWNS FFMPEG AND THE CAPS
+        The browser-facing contract (text, raw_text, audio_seconds, chunks) and
+        the byte/second ceilings do not belong to a model, so they stay here and
+        vvasr keeps working unchanged.  What the swap removes is the per-request
+        model load: qasr_serve holds the checkpoint resident, so a request costs
+        the engine's own ~40-100 ms instead of a process spawn plus a load.
+
+    `wav_bytes` is ffmpeg's output (24 kHz mono s16), not the browser's upload:
+    the pinned librosa resampler is what the oracle used, so the certified path
+    is decode-to-24 kHz then resample, and the bridge keeps owning that.
+
+    The engine has one arena and this handler already holds asr_lock, so exactly
+    one request is in flight either way.  A dead or wedged server is a 503/502
+    with a name, never a silent empty transcript.
+    """
+    target = urlsplit(config.asr_url)
+    if disconnected():
+        raise RequestError(499, "Request cancelled.")
+    connection = http.client.HTTPConnection(target.hostname, target.port or 80, timeout=TIMEOUT)
+    try:
+        connection.request("POST", "/stt", wav_bytes, {"Content-Type": "audio/wav"})
+        response = connection.getresponse()
+        payload = response.read(4 * 1024 * 1024)
+        status = response.status
+    except (OSError, http.client.HTTPException) as error:
+        raise RequestError(503, "The speech-to-text engine is unavailable.") from error
+    finally:
+        connection.close()
+    if disconnected():
+        raise RequestError(499, "Request cancelled.")
+    # Status first, body second.  Reading the body before the status turned a
+    # dead engine (503, empty body) into "The ASR engine returned unreadable
+    # output" -- still a 5xx, but it blames the engine's grammar for an outage,
+    # which is the wrong thing to put in front of an operator at 3am.
+    detail = ""
+    if payload:
+        try:
+            parsed = json.loads(payload.decode("utf-8"))
+            if isinstance(parsed, dict):
+                detail = str(parsed.get("error") or "")
+        except (UnicodeDecodeError, ValueError):
+            parsed = None
+    else:
+        parsed = None
+    if status != 200:
+        if status >= 500:
+            raise RequestError(503, detail or "The speech-to-text engine is unavailable.")
+        raise RequestError(status, detail or "The ASR engine refused this audio.")
+    result = parsed
+    if not isinstance(result, dict):
+        raise RequestError(502, "The ASR engine returned unreadable output.")
+    text, raw = result.get("text"), result.get("raw_text")
+    if not isinstance(text, str) or not isinstance(raw, str):
+        raise RequestError(502, "The ASR engine returned incomplete output.")
+    reply = {"text": transcript_text(text), "raw_text": raw,
+             "audio_seconds": frames / 24000, "chunks": int(result.get("chunks", 1))}
+    for key in ("engine", "frontend_ms", "frames"):     # diagnostics, not contract
+        if key in result:
+            reply[key] = result[key]
+    return reply
+
+
+def transcribe(config, audio, directory, disconnected):
+    source, wav = Path(directory) / "upload", Path(directory) / "audio.wav"
+    source.write_bytes(audio)
+    # Whitelist media demuxers; uploaded playlists must not read local files or
+    # remote URLs. Decode a bounded prefix plus one second to reject long audio.
+    command = [config.ffmpeg, "-nostdin", "-v", "error", "-threads", "1",
+               "-protocol_whitelist", "file,pipe", "-format_whitelist",
+               "wav,mp3,flac,ogg,mov,matroska,webm,aac", "-i", str(source),
+               "-map", "0:a:0", "-vn", "-t", str(MAX_SECONDS + 1),
+               "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le",
+               "-threads", "1", "-y", str(wav)]
+    try:
+        execute(command, directory, 30, disconnected)
+    except RequestError as error:
+        if error.status == 502:
+            raise RequestError(400, "Cannot decode this audio. Upload WAV, MP3, M4A, Ogg, WebM or FLAC.") from error
+        raise
+    with wave.open(str(wav), "rb") as reader:
+        frames = reader.getnframes()
+        if not frames or frames > MAX_SECONDS * 24000:
+            raise RequestError(400, "Audio must contain between 0 and 120 seconds of samples.")
+    if getattr(config, "asr_url", None):
+        # Decode first, then hand the server the same 24 kHz mono s16 WAV the
+        # native path was given: the browser uploads webm/opus, which no ASR
+        # frontend reads directly, and the certified path is ffmpeg-to-24 kHz
+        # followed by the pinned librosa resample.
+        return transcribe_remote(config, wav.read_bytes(), frames, disconnected)
+    output = execute([str(config.asr_bin), "--device", "cuda", "--model", str(config.model),
+                      "--tokenizer", str(config.tokenizer), "--wav", str(wav),
+                      "--seed", "1729", "--max-tokens", "256"], directory, TIMEOUT, disconnected)
+    try:
+        chunks = [json.loads(line) for line in output.decode("utf-8").splitlines() if line.strip()]
+        expected = (frames + 70400 - 1) // 70400
+        if len(chunks) != expected:
+            raise ValueError("missing or extra chunks")
+        for index, chunk in enumerate(chunks):
+            if (chunk.get("chunk") != index or chunk.get("name") != str(wav)
+                    or not isinstance(chunk.get("text"), str)
+                    or len(chunk.get("tokens", [])) >= 256):
+                raise ValueError("invalid chunk or truncated output")
+        raw = "".join(chunk["text"] for chunk in chunks)
+        return {"text": transcript_text(raw), "raw_text": raw,
+                "audio_seconds": frames / 24000, "chunks": len(chunks)}
+    except (ValueError, TypeError, AttributeError) as error:
+        raise RequestError(502, "The ASR engine returned incomplete or invalid output.") from error
+
+
+class SpeechServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def __init__(self, address, config, *, tls=None, asr_lock=None, chat_lock=None):
+        self.config = config
+        self.tls = tls
+        self.chat_lock = chat_lock if chat_lock is not None else threading.Lock()
+        self.asr_lock = asr_lock if asr_lock is not None else threading.Lock()
+        super().__init__(address, Handler)
+
+    def finish_request(self, request, client_address):
+        if self.tls is None:
+            return super().finish_request(request, client_address)
+        # Handshake in the request thread, so a stalled TLS client cannot block
+        # other clients from connecting to the listener.
+        request.settimeout(10)
+        try:
+            with self.tls.wrap_socket(request, server_side=True) as secured:
+                super().finish_request(secured, client_address)
+        except (ssl.SSLError, OSError):
+            request.close()
+
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(30)
+        self.response_started = False
+        self.body_consumed = False
+
+    def send_response(self, code, message=None):
+        self.response_started = True
+        super().send_response(code, message)
+
+    def reply(self, status, body, content_type="application/json"):
+        if not isinstance(body, bytes):
+            body = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def body(self, limit):
+        if self.headers.get("Transfer-Encoding"):
+            raise RequestError(400, "Chunked uploads are not supported.")
+        value = self.headers.get("Content-Length", "")
+        if not value.isascii() or not value.isdigit():
+            raise RequestError(411, "A Content-Length is required.")
+        count = int(value)
+        if not count or count > limit:
+            raise RequestError(413, "Upload is empty or exceeds the size limit.")
+        result = self.rfile.read(count)
+        if len(result) != count:
+            raise RequestError(400, "Incomplete upload.")
+        self.body_consumed = True
+        return result
+
+    def disconnected(self):
+        try:
+            # The entire request body has been consumed and responses close the
+            # connection. SSL sockets reject MSG_PEEK/MSG_DONTWAIT flags.
+            return self.connection.recv(1) == b""
+        except (BlockingIOError, TimeoutError, ssl.SSLWantReadError, ssl.SSLWantWriteError):
+            return False
+        except OSError:
+            return True
+
+    def proxy(self, body=None):
+        target = urlsplit(self.server.config.tts_url)
+        connection = http.client.HTTPConnection(target.hostname, target.port or 80, timeout=120)
+        try:
+            headers = {"Content-Type": self.headers.get("Content-Type", "text/plain")}
+            connection.request(self.command, self.path, body=body, headers=headers)
+            response = connection.getresponse()
+            self.send_response(response.status)
+            chunked = response.getheader("Content-Length") is None
+            for key, value in response.getheaders():
+                if key.lower() in {"content-type", "content-length"} or key.lower().startswith("x-kokoro-"):
+                    self.send_header(key, value)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            if chunked:
+                self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            while data := response.read1(65536):
+                self.wfile.write(f"{len(data):x}\r\n".encode() + data + b"\r\n" if chunked else data)
+                self.wfile.flush()
+            if chunked:
+                self.wfile.write(b"0\r\n\r\n")
+        finally:
+            connection.close()
+
+    def handle_request(self):
+        path = urlsplit(self.path).path
+        config = self.server.config
+        if not self.path.startswith("/") or self.path.startswith("//"):
+            raise RequestError(400, "Invalid request path.")
+        if self.command == "GET" and path == "/":
+            return self.reply(200, config.page.read_bytes(), "text/html; charset=utf-8")
+        if self.command == "GET" and path in {"/chat", "/chat/", "/chat.js"}:
+            asset = config.page.parent / ("chat.js" if path == "/chat.js" else "chat.html")
+            return self.reply(200, asset.read_bytes(), "text/javascript; charset=utf-8" if path == "/chat.js" else "text/html; charset=utf-8")
+        if self.command == "GET" and path == "/chat/health":
+            return self.reply(200, {"available": bool(getattr(config, "llm_url", None)),
+                                    "https_port": getattr(config, "https_port", None)})
+        if self.command == "GET" and path == "/stt/health":
+            return self.reply(200, {"available": True, "busy": self.server.asr_lock.locked(),
+                                    "https_port": getattr(config, "https_port", None),
+                                    "backend": "qasr" if getattr(config, "asr_url", None) else "vvasr",
+                                    "max_bytes": MAX_BYTES, "max_seconds": MAX_SECONDS})
+        if self.command == "GET" and path in {"/languages", "/voices", "/stats", "/health"}:
+            return self.proxy()
+        if self.command != "POST" or path not in {"/tts", "/stt", "/chat/completions"}:
+            raise RequestError(404, "Not found.")
+        origin = self.headers.get("Origin")
+        if origin and urlsplit(origin).netloc != self.headers.get("Host"):
+            raise RequestError(403, "Use the speech UI on this server to submit audio or text.")
+        if path == "/chat/completions":
+            if not getattr(config, "llm_url", None):
+                raise RequestError(503, "The conversation model is unavailable.")
+            if not self.server.chat_lock.acquire(blocking=False):
+                raise RequestError(503, "Another reply is in progress. Please try again shortly.")
+            try:
+                body = self.body(voice_chat.MAX_BODY)
+                self.connection.setblocking(False)
+                try:
+                    result = voice_chat.complete(config.llm_url, body, self.disconnected)
+                except voice_chat.ChatError as error:
+                    raise RequestError(error.status, error.message) from error
+                self.connection.settimeout(30)
+                return self.reply(200, result)
+            finally:
+                self.server.chat_lock.release()
+        if path == "/tts":
+            return self.proxy(self.body(1024 * 1024))
+        if not self.server.asr_lock.acquire(blocking=False):
+            raise RequestError(503, "Transcription is busy. Please try again shortly.")
+        try:
+            audio = self.body(MAX_BYTES)
+            # Disconnect polling must be nonblocking after the timed upload.
+            self.connection.setblocking(False)
+            with tempfile.TemporaryDirectory(prefix="speech-ui-") as directory:
+                result = transcribe(config, audio, directory, self.disconnected)
+            self.connection.settimeout(30)
+            self.reply(200, result)
+        finally:
+            self.server.asr_lock.release()
+
+    def do_GET(self):
+        self.dispatch()
+
+    def do_POST(self):
+        self.dispatch()
+
+    def dispatch(self):
+        try:
+            self.handle_request()
+        except RequestError as error:
+            if error.status != 499 and not self.response_started:
+                try:
+                    self.connection.settimeout(30)
+                    # Busy/origin rejection happens before reading a valid
+                    # upload. Drain its bounded body before closing TLS, or
+                    # unread incoming records can reset the error response.
+                    count = self.headers.get('Content-Length', '')
+                    if not self.body_consumed and error.status in (403, 503) and count.isascii() and count.isdigit() and int(count) <= MAX_BYTES:
+                        remaining = int(count)
+                        while remaining:
+                            data = self.rfile.read(min(remaining, 65536))
+                            if not data:
+                                break
+                            remaining -= len(data)
+                    self.reply(error.status, {"error": error.message})
+                except OSError:
+                    pass
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except (OSError, http.client.HTTPException) as error:
+            self.log_error("speech service error: %s", error)
+            if not self.response_started:
+                try:
+                    self.reply(502, {"error": "Speech service unavailable. Check the server log."})
+                except OSError:
+                    pass
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8091)
+    parser.add_argument("--https-port", type=int)
+    parser.add_argument("--tls-cert", type=Path)
+    parser.add_argument("--tls-key", type=Path)
+    parser.add_argument("--llm-url", help="local Qwen HTTP origin for voice conversations")
+    parser.add_argument("--tts-url", default="http://127.0.0.1:8090")
+    parser.add_argument("--page", type=Path, default=Path(__file__).resolve().parents[1] / "web/index.html")
+    parser.add_argument("--asr-bin", type=Path)
+    parser.add_argument("--model", type=Path)
+    parser.add_argument("--tokenizer", type=Path)
+    parser.add_argument("--asr-url",
+                        help="resident qasr_serve origin, e.g. http://127.0.0.1:8095. "
+                             "When set it replaces the per-request --asr-bin spawn; "
+                             "leave it unset to keep native vvasr as the fallback.")
+    parser.add_argument("--ffmpeg", default="ffmpeg")
+    config = parser.parse_args()
+    native = (config.asr_bin, config.model, config.tokenizer)
+    if config.asr_url and any(value is not None for value in native):
+        parser.error("--asr-url replaces the native path; do not pass --asr-bin/--model/--tokenizer with it")
+    if not config.asr_url and not all(value is not None for value in native):
+        parser.error("ASR needs either --asr-url or the native --asr-bin/--model/--tokenizer trio")
+    if config.asr_url:
+        target = urlsplit(config.asr_url)
+        if target.scheme != "http" or not target.hostname or target.path not in {"", "/"} \
+                or target.query or target.fragment or target.username:
+            parser.error("asr-url must be an HTTP origin")
+    tls = None
+    if any(value is not None for value in (config.https_port, config.tls_cert, config.tls_key)):
+        if not all(value is not None for value in (config.https_port, config.tls_cert, config.tls_key)):
+            parser.error("HTTPS requires --https-port, --tls-cert and --tls-key together")
+        if not 1 <= config.https_port <= 65535 or config.https_port == config.port:
+            parser.error("HTTPS requires a valid port distinct from the HTTP port")
+        tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        tls.minimum_version = ssl.TLSVersion.TLSv1_2
+        tls.load_cert_chain(config.tls_cert, config.tls_key)
+    if config.llm_url:
+        target = urlsplit(config.llm_url)
+        if target.scheme != "http" or not target.hostname or target.path not in {"", "/"} or target.query or target.fragment or target.username:
+            parser.error("llm-url must be an HTTP origin")
+    # Native vvasr currently requires physical GPU 2. Do not silently remap it.
+    if os.environ.get("CUDA_VISIBLE_DEVICES") != "2":
+        parser.error("native ASR requires authorized CUDA_VISIBLE_DEVICES=2; launch through the GPU guard")
+    keys = ["page"] if config.asr_url else ["page", "asr_bin", "model", "tokenizer"]
+    for key in keys:
+        value = getattr(config, key).resolve()
+        if not value.exists():
+            parser.error(f"missing {key}: {value}")
+        setattr(config, key, value)
+    if not config.asr_url and not os.access(config.asr_bin, os.X_OK):
+        parser.error("an executable native ASR binary and ffmpeg are required")
+    if not shutil.which(config.ffmpeg):
+        parser.error("ffmpeg is required: the bridge decodes uploads for either ASR backend")
+    target = urlsplit(config.tts_url)
+    if target.scheme != "http" or not target.hostname or target.path not in {"", "/"} or target.query:
+        parser.error("tts-url must be an HTTP origin")
+    with SpeechServer((config.host, config.port), config) as server:
+        secure_server = None
+        if tls is not None:
+            secure_server = SpeechServer((config.host, config.https_port), config,
+                                         tls=tls, asr_lock=server.asr_lock, chat_lock=server.chat_lock)
+            threading.Thread(target=secure_server.serve_forever, daemon=True).start()
+            print(f"Secure recording on https://{config.host}:{config.https_port}", flush=True)
+        print(f"Speech UI listening on http://{config.host}:{config.port}", flush=True)
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            if secure_server is not None:
+                secure_server.shutdown()
+                secure_server.server_close()
+
+
+if __name__ == "__main__":
+    main()

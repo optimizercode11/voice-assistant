@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Speech studio — STT + TTS</title>
+<style>
+  :root {
+    --bg:#0d1117; --panel:#161b22; --line:#30363d; --ink:#e6edf3;
+    --dim:#8b949e; --acc:#3fb950; --acc2:#58a6ff; --warn:#d29922; --hot:#f85149;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; padding:28px 20px 60px; background:var(--bg); color:var(--ink);
+    font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    display:flex; justify-content:center;
+  }
+  .wrap { width:100%; max-width:820px; }
+  h1 { font-size:17px; margin:0 0 2px; letter-spacing:.2px; }
+  .sub { color:var(--dim); font-size:12.5px; margin-bottom:18px; }
+  textarea {
+    width:100%; min-height:132px; resize:vertical; background:var(--panel); color:var(--ink);
+    border:1px solid var(--line); border-radius:8px; padding:12px 13px; font:14px/1.55 inherit;
+  }
+  textarea:focus { outline:none; border-color:var(--acc2); }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px; }
+  button, select, input[type=range] { font:inherit; }
+  button {
+    background:#21262d; color:var(--ink); border:1px solid var(--line); border-radius:7px;
+    padding:8px 15px; cursor:pointer;
+  }
+  button:hover:not(:disabled) { border-color:var(--acc2); }
+  button:disabled { opacity:.45; cursor:default; }
+  button.go { background:#238636; border-color:#2ea043; font-weight:600; }
+  select { background:#21262d; color:var(--ink); border:1px solid var(--line); border-radius:7px; padding:7px 9px; }
+  label.ctl { color:var(--dim); font-size:12.5px; display:flex; align-items:center; gap:7px; }
+  canvas { width:100%; height:56px; display:block; margin-top:14px; background:var(--panel);
+           border:1px solid var(--line); border-radius:8px; }
+  .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:14px; }
+  .stat { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:9px 11px; }
+  .stat b { display:block; font-size:19px; font-weight:650; letter-spacing:-.3px; }
+  .stat span { color:var(--dim); font-size:11.5px; text-transform:uppercase; letter-spacing:.5px; }
+  .log { margin-top:14px; font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--dim);
+         background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px;
+         min-height:44px; white-space:pre-wrap; }
+  .log .ok { color:var(--acc); } .log .bad { color:var(--hot); } .log .mid { color:var(--acc2); }
+  .srv { margin-top:10px; color:var(--dim); font-size:12px; font-family:ui-monospace,monospace; }
+  .hint { color:var(--dim); font-size:12px; margin-top:8px; }
+  .hint b { color:var(--ink); font-weight:600; }
+  audio { display:block; width:100%; margin-top:8px; }
+  .speech-panel { border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:20px; }
+  h2 { font-size:15px; margin:0 0 8px; }
+  input[type=file] { max-width:100%; color:var(--dim); }
+  #stt-status { min-height:1.5em; }
+</style>
+</head>
+<body>
+<div style="padding:12px;text-align:right"><a href="/chat" style="color:inherit">Open voice conversation →</a></div>
+<div class="wrap">
+  <h1>Speech studio</h1>
+  <div class="sub">Transcribe with VibeVoice &middot; speak with Kokoro</div>
+
+  <section class="speech-panel" aria-labelledby="stt-heading">
+    <h2 id="stt-heading">Speech to text</h2>
+    <div class="row">
+      <button id="stt-record">Record microphone</button>
+      <button id="stt-finish" disabled>Stop &amp; transcribe</button>
+      <button id="stt-cancel" disabled>Cancel</button>
+    </div>
+    <div class="row">
+      <label class="ctl" for="stt-file">Audio file</label>
+      <input id="stt-file" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.webm,.flac">
+      <button id="stt-upload" disabled>Transcribe file</button>
+    </div>
+    <p class="hint" id="stt-hint">Record or upload up to 2 minutes of audio (20 MiB maximum). Audio is sent to this server for transcription.</p>
+    <p class="hint" id="stt-status" role="status" aria-live="polite">Checking transcription service…</p>
+    <label for="stt-text" class="hint">Transcript</label>
+    <textarea id="stt-text" placeholder="Your transcript will appear here. You can edit it before sending it to TTS." spellcheck="true"></textarea>
+    <div class="row"><button id="stt-use" disabled>Use transcript in TTS</button></div>
+  </section>
+
+  <h2>Text to speech</h2>
+
+  <textarea id="text" aria-label="Text to speak" spellcheck="false">The quick brown fox jumps over the lazy dog. This sentence is being synthesized on the graphics card while you read it, one batch at a time.</textarea>
+
+  <div class="row">
+    <button class="go" id="speak">&#9654; Speak</button>
+    <button id="stop" disabled>&#9632; Stop</button>
+    <button id="dl">Download WAV</button>
+    <label class="ctl">playback <select id="playback"><option value="stream">Streaming</option><option value="native">Native WAV</option></select></label>
+    <label class="ctl">language <select id="language"><option value="a">English (US)</option></select></label>
+    <label class="ctl">voice <select id="voice"><option value="default">default</option></select></label>
+    <label class="ctl">speed <input id="speed" type="range" min="0.5" max="2" step="0.05" value="1" style="width:110px"> <span id="spv">1.00&times;</span></label>
+  </div>
+  <div class="row">
+    <button id="burst" title="Fire N requests at once and watch the server batch them together">&#128293; 8 concurrent requests</button>
+    <span class="hint">continuous batching: they join one step, and <b>max batch</b> in the server strip below should climb.</span>
+  </div>
+
+  <canvas id="meter" width="820" height="56"></canvas>
+  <div id="recording-panel" hidden>
+    <div class="hint">No sound, or want to listen again? Play the received audio here.</div>
+    <audio id="recording" controls preload="metadata" aria-label="Received audio"></audio>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><b id="m-ttfa">&mdash;</b><span>first audio</span></div>
+    <div class="stat"><b id="m-dur">&mdash;</b><span>audio length</span></div>
+    <div class="stat"><b id="m-rt">&mdash;</b><span>&times; real time</span></div>
+    <div class="stat"><b id="m-chunks">&mdash;</b><span>stream chunks</span></div>
+  </div>
+
+  <div class="srv" id="srv">server: connecting&hellip;</div>
+  <div class="log" id="log"></div>
+  <div class="row"><button id="playback-report">Show playback report</button></div>
+  <div id="report-panel" hidden>
+    <p class="hint">Copy this report to share the playback state. It contains no speech text or audio.</p>
+    <textarea id="report" readonly aria-label="Playback report" spellcheck="false"></textarea>
+  </div>
+</div>
+
+<script>
+"use strict";
+const playbackInfo = {version:"safari-native-3", samples:0, peak:0, squares:0, meterPeak:0, events:[]};
+function audioEvent(kind, detail) {
+  playbackInfo.events.push({at:Math.round(performance.now()), kind, detail});
+  if (playbackInfo.events.length > 12) playbackInfo.events.shift();
+}
+const SR = 24000;                       // the engine's native rate
+const $ = id => document.getElementById(id);
+const log = (m, cls) => {
+  const d = document.createElement("div");
+  if (cls) d.className = cls;
+  d.textContent = m;
+  $("log").prepend(d);
+  if (cls === "bad") audioEvent("error", m);
+  while ($("log").children.length > 40) $("log").lastChild.remove();
+};
+const ms = x => x < 1000 ? Math.round(x) + " ms" : (x / 1000).toFixed(2) + " s";
+
+// ---------------------------------------------------------------- audio ----
+// Create/resume during the Speak gesture. Use the device's output rate;
+// AudioBuffers declare the engine's 24 kHz rate and WebAudio resamples them.
+let ac = null;
+let nextT = 0, sources = [], analyser = null, meterRAF = 0;
+let recordingURL = null;
+function retireAudio() {
+  const old = ac;
+  ac = null; analyser = null; nextT = 0;
+  if (old && old.state !== "closed") old.close().catch(() => {});
+}
+async function startAudio() {
+  // A reused WebKit context can report running while its output is stalled.
+  // Rebuild synchronously inside the click, before awaiting anything.
+  retireAudio();
+  if (!ac || ac.state === "closed") {
+    const Context = window.AudioContext || window.webkitAudioContext;
+    const fresh = new Context();
+    audioEvent("context-created", fresh.state);
+    fresh.onstatechange = () => audioEvent("context-state", fresh.state);
+    try {
+      const meterNode = fresh.createAnalyser();
+      meterNode.fftSize = 512;
+      meterNode.connect(fresh.destination);
+      ac = fresh; analyser = meterNode;
+    } catch (e) { fresh.close().catch(() => {}); throw e; }
+  }
+  let timer;
+  try {
+    await Promise.race([ac.resume(), new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("Streaming playback did not start")), 1500);
+    })]);
+    if (ac.state !== "running") throw new Error("Streaming playback is unavailable");
+  } catch (e) { retireAudio(); throw e; }
+  finally { clearTimeout(timer); }
+}
+
+function play(int16) {
+  if (!ac || ac.state !== "running") throw new Error("Streaming playback was interrupted");
+  let f = new Float32Array(int16.length);
+  for (let i = 0; i < int16.length; ++i) f[i] = int16[i] / 32768;
+  const buf = ac.createBuffer(1, f.length, SR);
+  buf.copyToChannel(f, 0);
+  const src = ac.createBufferSource();
+  src.buffer = buf; src.connect(analyser);
+  const t = Math.max(nextT, ac.currentTime + 0.02);
+  src.start(t);
+  nextT = t + buf.duration;
+  sources.push(src);
+  src.onended = () => {
+    sources = sources.filter(s => s !== src);
+    if (!ctrl && !sources.length) $("stop").disabled = true;
+  };
+  return buf.duration;
+}
+
+function stopAll() {
+  for (const s of sources) { try { s.stop(); } catch (e) {} }
+  sources = [];
+  nextT = 0;
+}
+
+function wavBlob(parts, bytes) {
+  const header = new ArrayBuffer(44), v = new DataView(header);
+  const tag = (at, s) => { for (let i=0; i<s.length; i++) v.setUint8(at+i,s.charCodeAt(i)); };
+  tag(0,"RIFF"); v.setUint32(4,36+bytes,true); tag(8,"WAVE"); tag(12,"fmt ");
+  v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
+  v.setUint32(24,SR,true); v.setUint32(28,SR*2,true); v.setUint16(32,2,true);
+  v.setUint16(34,16,true); tag(36,"data"); v.setUint32(40,bytes,true);
+  return new Blob([header, ...parts], {type:"audio/wav"});
+}
+function attachRecording(blob) {
+  const url = URL.createObjectURL(blob);
+  $("recording").src = url;
+  if (recordingURL) URL.revokeObjectURL(recordingURL);
+  recordingURL = url;
+}
+function saveRecording(parts, bytes) {
+  if (!bytes) return;
+  attachRecording(wavBlob(parts, bytes));
+  $("recording-panel").hidden = false;
+}
+
+// ----------------------------------------------------------------- meter ---
+const cv = $("meter"), cx = cv.getContext("2d");
+function meter() {
+  meterRAF = requestAnimationFrame(meter);
+  const w = cv.width, h = cv.height;
+  cx.clearRect(0, 0, w, h);
+  if (!analyser) return;
+  const d = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteTimeDomainData(d);
+  for (const sample of d) playbackInfo.meterPeak = Math.max(playbackInfo.meterPeak, Math.abs(sample - 128) / 128);
+  cx.strokeStyle = "#3fb950"; cx.lineWidth = 1.5; cx.beginPath();
+  for (let i = 0; i < d.length; ++i) {
+    const x = i / (d.length - 1) * w, y = h / 2 + (d[i] - 128) / 128 * (h / 2 - 3);
+    i ? cx.lineTo(x, y) : cx.moveTo(x, y);
+  }
+  cx.stroke();
+}
+meter();
+
+// --------------------------------------------------------------- request ---
+let ctrl = null;
+
+async function speak() {
+  const text = $("text").value.trim();
+  if (!text) { log("nothing to say", "bad"); return; }
+  if (ctrl) return;
+  $("speak").disabled = true; $("stop").disabled = false;
+  stopAll();
+  $("recording").pause();
+  $("recording-panel").hidden = true;
+
+  const q = new URLSearchParams({ stream: "1", language: $("language").value, voice: $("voice").value, speed: $("speed").value });
+  const t0 = performance.now();
+  let first = 0, bytes = 0, chunks = 0, audio = 0;
+  const received = [];
+  Object.assign(playbackInfo, {samples:0, peak:0, squares:0, meterPeak:0});
+  audioEvent("speak", "started");
+  const native = $("playback").value === "native";
+  let streaming = !native;
+  ctrl = new AbortController();
+  log("POST /tts?stream=1  (" + text.length + " chars)", "mid");
+
+  try {
+    if (native) {
+      // Authorize this same media element in the Speak gesture, before fetch.
+      // A short silent WAV primes native playback without creating WebAudio.
+      retireAudio();
+      attachRecording(wavBlob([new Uint8Array(4800)], 4800));
+      $("recording").play().catch(e => audioEvent("native-prime", e.name));
+    } else try { await startAudio(); }
+    catch (e) {
+      streaming = false;
+      log(e.message + ". The audio will be available in the player below.", "mid");
+    }
+    if (ctrl.signal.aborted) throw new DOMException("Stopped", "AbortError");
+    const res = await fetch("/tts?" + q, { method: "POST", body: text, signal: ctrl.signal });
+    if (!res.ok) throw new Error("HTTP " + res.status + " " + (await res.text()).slice(0, 120));
+    const segs = +(res.headers.get("X-Kokoro-Segments") || 1);
+    log("response head: " + segs + " segment" + (segs > 1 ? "s" : "") + ", streaming", "mid");
+
+    const rd = res.body.getReader();
+    let carry = new Uint8Array(0);
+    while (true) {
+      const { value, done } = await rd.read();
+      if (done) break;
+      if (!value || !value.length) continue;
+      // A chunk boundary can land between the two bytes of a sample.
+      let b = value;
+      if (carry.length) {
+        b = new Uint8Array(carry.length + value.length);
+        b.set(carry, 0); b.set(value, carry.length);
+      }
+      const n = Math.floor(b.length / 2);
+      carry = b.slice(n * 2);
+      if (!n) continue;
+      const view = new DataView(b.buffer, b.byteOffset, n * 2);
+      const pcm = new Int16Array(n);
+      for (let i = 0; i < n; ++i) {
+        pcm[i] = view.getInt16(i * 2, true);
+        const level = pcm[i] / 32768;
+        playbackInfo.peak = Math.max(playbackInfo.peak, Math.abs(level));
+        playbackInfo.squares += level * level;
+      }
+      playbackInfo.samples += n;
+      // Preserve wire bytes independently of the WebAudio graph. No second
+      // synthesis request, resampling or float conversion in native replay.
+      received.push(b.slice(0, n * 2));
+      if (!first) { first = performance.now() - t0; log("first audio byte in " + ms(first), "ok"); }
+      if (streaming) {
+        try { play(pcm); }
+        catch (e) {
+          streaming = false; stopAll(); retireAudio();
+          log(e.message + ". Use the player below when the audio is ready.", "mid");
+        }
+      }
+      audio += n / SR;
+      bytes += n * 2; chunks++;
+      $("m-ttfa").textContent = ms(first);
+      $("m-dur").textContent = audio.toFixed(2) + " s";
+      $("m-chunks").textContent = chunks;
+    }
+    if (carry.length) throw new Error("Incomplete audio sample received");
+    saveRecording(received, bytes);
+    if (native && bytes) {
+      // Safari grants playback per element; reuse the gesture-authorized player.
+      $("recording").play().catch(e => {
+        audioEvent("native-start", e.name);
+        log("Playback needs a click. Press Play in the audio player.", "mid");
+      });
+    }
+    const wall = performance.now() - t0;
+    $("m-rt").textContent = (audio / (wall / 1000)).toFixed(2) + "\u00d7";
+    log("done: " + audio.toFixed(2) + " s of audio (" + (bytes / 1024).toFixed(0) + " KB) in " +
+        ms(wall) + "  \u2192  " + (audio / (wall / 1000)).toFixed(2) + "\u00d7 real time", "ok");
+  } catch (e) {
+    if (e.name === "AbortError") log("stopped by user", "bad");
+    else log("error: " + e.message, "bad");
+  } finally {
+    ctrl = null;
+    $("speak").disabled = false; $("stop").disabled = !sources.length && $("recording").paused;
+  }
+}
+
+async function burst() {
+  const text = $("text").value.trim();
+  if (!text || ctrl) return;
+  const N = 8, q = new URLSearchParams({ stream: "1", language: $("language").value, voice: $("voice").value, speed: $("speed").value });
+  log("firing " + N + " concurrent requests", "mid");
+  const t0 = performance.now();
+  const jobs = [];
+  for (let i = 0; i < N; ++i) {
+    jobs.push((async () => {
+      const res = await fetch("/tts?" + q, { method: "POST", body: text });   // buffered: 8 tabs of audio at once would be noise
+      const buf = await res.arrayBuffer();
+      return buf.byteLength / 2 / SR;
+    })());
+  }
+  const durs = await Promise.all(jobs);
+  const wall = (performance.now() - t0) / 1000;
+  const tot = durs.reduce((a, b) => a + b, 0);
+  log(N + " requests: " + tot.toFixed(1) + " s of audio in " + wall.toFixed(2) + " s wall \u2192 " +
+      (tot / wall).toFixed(1) + "\u00d7 real time aggregate", "ok");
+  pollStats(true);
+}
+
+async function download() {
+  const text = $("text").value.trim();
+  if (!text) return;
+  const q = new URLSearchParams({ format: "wav", language: $("language").value, voice: $("voice").value, speed: $("speed").value });
+  log("buffering a WAV (no streaming on this path)", "mid");
+  const res = await fetch("/tts?" + q, { method: "POST", body: text });
+  if (!res.ok) { log("error: HTTP " + res.status, "bad"); return; }
+  const blob = await res.blob();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = "kokoro.wav"; a.click();
+  log("saved kokoro.wav (" + (blob.size / 1024).toFixed(0) + " KB)", "ok");
+}
+
+// ----------------------------------------------------------------- stats ---
+async function pollStats(loud) {
+  try {
+    const s = await (await fetch("/stats")).json();
+    $("srv").textContent = "server: steps " + s.steps + "  ·  segments " + s.segments +
+      "  ·  max batch " + s.max_batch_seen + "  ·  step " + s.step_ms_mean.toFixed(0) + " ms avg / " +
+      s.step_ms_max.toFixed(0) + " ms max  ·  queued " + s.queued + "  ·  in flight " + s.inflight;
+    if (loud) log("server stats: max_batch_seen=" + s.max_batch_seen + ", steps=" + s.steps);
+  } catch (e) { $("srv").textContent = "server: unreachable"; }
+}
+
+// Explicitly requested report; no telemetry upload and no device permission.
+function playbackSnapshot() {
+  const a = $("recording");
+  return {
+    context: ac ? {state:ac.state, time:ac.currentTime, sampleRate:ac.sampleRate,
+      channels:ac.destination.channelCount, maxChannels:ac.destination.maxChannelCount,
+      scheduled:sources.length, queuedSeconds:Math.max(0,nextT-ac.currentTime)} : null,
+    media: {attached:!!a.currentSrc, time:a.currentTime, duration:Number.isFinite(a.duration)?a.duration:null,
+      paused:a.paused, ended:a.ended, muted:a.muted, volume:a.volume,
+      readyState:a.readyState, networkState:a.networkState,
+      error:a.error ? {code:a.error.code, message:a.error.message} : null},
+    visibility:document.visibilityState
+  };
+}
+async function showPlaybackReport() {
+  $("playback-report").disabled = true;
+  try {
+    const before = playbackSnapshot();
+    await new Promise(resolve => setTimeout(resolve, 500));
+    const after = playbackSnapshot();
+    const {version, samples, peak, squares, meterPeak, events} = playbackInfo;
+    $("report").value = JSON.stringify({version, language:$("language").value, playback:$("playback").value, browser:navigator.userAgent,
+      secureContext:window.isSecureContext,
+      received:{samples, seconds:samples/SR, peak, rms:samples?Math.sqrt(squares/samples):0},
+      meterPeak, before, after, events}, null, 2);
+    $("report-panel").hidden = false;
+    $("report").focus(); $("report").select();
+  } finally { $("playback-report").disabled = false; }
+}
+
+let availableVoices = ["default"], defaultLanguage = "a";
+let availableLanguages = [{code:"a", name:"English (US)", default_voice:"default"}];
+function filterVoices() {
+  const language = $("language").value, previous = $("voice").value;
+  const names = availableVoices.filter(n => n === "default" ? language === defaultLanguage : n.startsWith(language));
+  $("voice").innerHTML = names.map(n => `<option value="${n}">${n}</option>`).join("");
+  const preferred = availableLanguages.find(l => l.code === language)?.default_voice;
+  $("voice").value = names.includes(previous) ? previous : names.includes(preferred) ? preferred : names[0] || "";
+}
+
+// ------------------------------------------------------------------ wire ---
+$("language").onchange = filterVoices;
+$("playback-report").onclick = showPlaybackReport;
+for (const event of ["playing", "pause", "ended", "waiting", "stalled", "error", "volumechange"]) {
+  $("recording")["on"+event] = () => audioEvent("media-"+event, playbackSnapshot().media);
+}
+$("speak").onclick = speak;
+$("burst").onclick = burst;
+$("dl").onclick = download;
+$("stop").onclick = () => {
+  if (ctrl) ctrl.abort(); stopAll(); $("recording").pause(); $("stop").disabled = true;
+};
+$("recording").onplay = () => { stopAll(); $("stop").disabled = false; };
+$("recording").onended = () => {
+  audioEvent("media-ended", playbackSnapshot().media);
+  if (!ctrl && !sources.length) $("stop").disabled = true;
+};
+// Use the output path confirmed audible on Safari; keep streaming selectable.
+$("playback").value = /Safari\//.test(navigator.userAgent || "") &&
+  !/Chrome|Chromium|CriOS|Edg|OPR|Android/.test(navigator.userAgent || "") ? "native" : "stream";
+$("speed").oninput = e => $("spv").textContent = (+e.target.value).toFixed(2) + "\u00d7";
+document.addEventListener("keydown", e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); if (!ctrl) speak(); }
+});
+(async () => {
+  try {
+    const results = await Promise.allSettled([
+      fetch("/voices").then(r => r.json()), fetch("/languages").then(r => r.json())
+    ]);
+    if (results[0].status === "fulfilled") availableVoices = results[0].value.voices;
+    if (results[1].status === "fulfilled" && results[1].value.languages?.length) {
+      const catalog = results[1].value;
+      availableLanguages = catalog.languages;
+      defaultLanguage = catalog.default;
+      $("language").innerHTML = availableLanguages.map(l => `<option value="${l.code}">${l.name}</option>`).join("");
+      $("language").value = defaultLanguage;
+    }
+    filterVoices();
+  } catch (e) {}
+  pollStats();
+})();
+setInterval(pollStats, 1500);
+
+// STT has its own lifecycle; cancelling it never overwrites existing text.
+const STT_MAX_BYTES = 20 * 1024 * 1024;
+const sttCanRecord = !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
+let sttReady = false, sttSession = null, sttSecureURL = null;
+function sttStatus(message) { $("stt-status").textContent = message; }
+function sttControls() {
+  const busy = !!sttSession;
+  $("stt-record").disabled = busy || !sttReady || (!sttCanRecord && !sttSecureURL);
+  $("stt-record").textContent = sttSecureURL ? "Open secure recording" : "Record microphone";
+  $("stt-finish").disabled = !sttSession?.recorder || sttSession.recorder.state !== "recording";
+  $("stt-cancel").disabled = !busy;
+  $("stt-file").disabled = busy;
+  $("stt-upload").disabled = busy || !sttReady || !$("stt-file").files?.length;
+  $("stt-use").disabled = !$("stt-text").value.trim();
+}
+function sttRelease(session) {
+  clearTimeout(session.timer);
+  for (const track of session.stream?.getTracks() || []) track.stop();
+}
+function sttCancel(message = "Transcription cancelled.") {
+  const session = sttSession;
+  sttSession = null;
+  if (session) {
+    session.controller?.abort();
+    if (session.recorder?.state === "recording") session.recorder.stop();
+    sttRelease(session);
+  }
+  sttStatus(message); sttControls();
+}
+async function sttTranscribe(blob, session) {
+  if (sttSession !== session) return;
+  try {
+    if (!blob.size) throw new Error("The recording or file is empty.");
+    if (blob.size > STT_MAX_BYTES) throw new Error("Audio must be smaller than 20 MiB.");
+    session.controller = new AbortController();
+    session.timer = setTimeout(() => {
+      if (sttSession === session) sttCancel("Transcription timed out. Please try a shorter recording.");
+    }, 300000);
+    sttStatus("Transcribing…"); sttControls();
+    const response = await fetch("/stt", {
+      method:"POST", headers:{"Content-Type":blob.type || "application/octet-stream"},
+      body:blob, signal:session.controller.signal
+    });
+    const result = await response.json().catch(() => { throw new Error("The transcription service returned an invalid response."); });
+    if (!response.ok) throw new Error(result.error || `Transcription failed (${response.status}).`);
+    if (typeof result.text !== "string") throw new Error("The transcription service returned no transcript.");
+    if (sttSession !== session) return;
+    $("stt-text").value = result.text;
+    sttStatus(result.text.trim() ? "Transcript ready. Review it, then use it in TTS." : "No speech detected. Try another recording.");
+  } catch (error) {
+    if (sttSession === session) sttStatus(error.message);
+  } finally {
+    sttRelease(session);
+    if (sttSession === session) { sttSession = null; sttControls(); }
+  }
+}
+$("stt-record").onclick = async () => {
+  if (sttSecureURL && !sttSession) { window.location.assign(sttSecureURL); return; }
+  if (sttSession || !sttReady || !sttCanRecord) return;
+  const session = {chunks:[], bytes:0}; sttSession = session;
+  // Avoid recording speech that this page is already playing.
+  if ($("stop").onclick) $("stop").onclick();
+  sttStatus("Waiting for microphone permission…"); sttControls();
+  try {
+    session.stream = await navigator.mediaDevices.getUserMedia({audio:true});
+    if (sttSession !== session) { sttRelease(session); return; }
+    session.recorder = new MediaRecorder(session.stream);
+    session.recorder.ondataavailable = event => {
+      if (sttSession !== session || !event.data.size) return;
+      session.bytes += event.data.size;
+      if (session.bytes > STT_MAX_BYTES) { sttCancel("Recording exceeded 20 MiB. Please try a shorter recording."); return; }
+      session.chunks.push(event.data);
+    };
+    session.recorder.onerror = () => { if (sttSession === session) sttCancel("Microphone recording failed. Try uploading an audio file."); };
+    session.recorder.onstop = () => {
+      sttRelease(session);
+      if (sttSession === session) sttTranscribe(new Blob(session.chunks, {type:session.recorder.mimeType}), session);
+    };
+    session.recorder.start(1000);
+    session.timer = setTimeout(() => { if (sttSession === session && session.recorder.state === "recording") session.recorder.stop(); }, 120000);
+    sttStatus("Recording… Stop when finished (automatically stops after 2 minutes)."); sttControls();
+  } catch (error) {
+    sttRelease(session);
+    if (sttSession === session) sttCancel(error.name === "NotAllowedError" ? "Microphone permission denied. Allow access or upload an audio file." : `Microphone unavailable: ${error.message}`);
+  }
+};
+$("stt-finish").onclick = () => {
+  if (sttSession?.recorder?.state === "recording") {
+    sttSession.recorder.stop(); sttStatus("Preparing recording…"); sttControls();
+  }
+};
+$("stt-cancel").onclick = () => sttCancel();
+$("stt-file").onchange = sttControls;
+$("stt-text").oninput = sttControls;
+$("stt-upload").onclick = () => {
+  const file = $("stt-file").files?.[0];
+  if (!file || sttSession || !sttReady) return;
+  const session = {}; sttSession = session; sttTranscribe(file, session);
+};
+$("stt-use").onclick = () => {
+  if (!$("stt-text").value.trim()) return;
+  $("text").value = $("stt-text").value;
+  $("text").focus();
+};
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && sttSession?.recorder?.state === "recording") sttCancel("Recording cancelled because the page was hidden.");
+});
+window.addEventListener?.("pagehide", () => { if (sttSession) sttCancel(); });
+if (!sttCanRecord) $("stt-hint").textContent += " Microphone recording requires HTTPS or localhost and a supported browser. Audio-file upload is still available.";
+sttControls();
+(async () => {
+  try {
+    const response = await fetch("/stt/health");
+    if (!response.ok) throw new Error("unavailable");
+    const service = await response.json();
+    if (!service.available) throw new Error("unavailable");
+    sttReady = true; sttStatus("Ready to record or upload audio.");
+    if (!sttCanRecord && window.location?.protocol === "http:" &&
+        Number.isInteger(service.https_port) && service.https_port > 0 && service.https_port < 65536) {
+      const secure = new URL(window.location.href);
+      secure.protocol = "https:"; secure.port = String(service.https_port);
+      sttSecureURL = secure.href;
+      sttStatus("Microphone access is blocked on this HTTP address. Choose Open secure recording, accept this server's local certificate if prompted, then allow microphone access.");
+    }
+  } catch (_) { sttStatus("Transcription service unavailable. Start the speech UI server to enable STT."); }
+  sttControls();
+})();
+</script>
+</body>
+</html>

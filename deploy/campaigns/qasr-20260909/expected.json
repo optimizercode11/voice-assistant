@@ -1,0 +1,11 @@
+{
+  "campaign": "qasr-serve-20260909",
+  "qasr_release": "/home/ambudsharma/qwen36/qasr-serve-release-20260909/qasr-serve-deploy-20260909",
+  "source_fingerprint": "1c85c8925f7f5d2baf20dfa055cf720d16cf45da4b292615374b2621e1e11be1",
+  "git_head": "7d42901cc0eaffca4b91e9ee7266287035b5e07b",
+  "note": "the two hashes below are the files deploy.py installs into the live stack; the release hashes live in RELEASE.json beside the binary itself",
+  "install": {
+    "/home/ambudsharma/qwen36/voice-stack/voice-restore-20260908/tools/speech_ui.py": "751e7efbf5441da678dfb989727d38d99dc321d58b7a84f86852622ac7a287be",
+    "/home/ambudsharma/qwen36/voice-stack/voice-restore-20260908/deploy/voice_stack.py": "da08accb5187bb7579301e4caaebde5a642248ebb856e5d0d13cbfb193e4bc61"
+  }
+}

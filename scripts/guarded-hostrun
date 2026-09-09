@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# Sync one isolated engine worktree and execute through guarded-run on vllm.
+# Never targets a canonical production directory by default.
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'EOF'
+usage: guarded-hostrun ENGINE --campaign ID --label LABEL (--gpu N[,N...]|--cpu) [options] -- command [args...]
+options: --dest DIR --file PATH (repeat) --cpus LIST --nice N
+         --expect-exit N --input PATH (repeat)
+EOF
+  exit 2
+}
+
+ENGINE="${1:-}"; [ -n "$ENGINE" ] || usage; shift
+CAMPAIGN=""; LABEL=""; MODE=""; MODE_COUNT=0; GPU=""; DEST=""; CPUS=""; NICE=10; EXPECT=0
+FILES=(); INPUTS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --campaign) CAMPAIGN="${2:?}"; shift 2 ;;
+    --label) LABEL="${2:?}"; shift 2 ;;
+    --gpu) MODE=gpu; MODE_COUNT=$((MODE_COUNT + 1)); GPU="${2:?}"; shift 2 ;;
+    --cpu) MODE=cpu; MODE_COUNT=$((MODE_COUNT + 1)); shift ;;
+    --dest) DEST="${2:?}"; shift 2 ;;
+    --file) FILES+=("${2:?}"); shift 2 ;;
+    --cpus) CPUS="${2:?}"; shift 2 ;;
+    --nice) NICE="${2:?}"; shift 2 ;;
+    --expect-exit) EXPECT="${2:?}"; shift 2 ;;
+    --input) INPUTS+=("${2:?}"); shift 2 ;;
+    --) shift; break ;;
+    *) usage ;;
+  esac
+done
+[ $# -gt 0 ] || usage
+[ -d "$ENGINE" ] || { echo "guarded-hostrun: no engine directory: $ENGINE" >&2; exit 2; }
+[[ "$CAMPAIGN" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || { echo "guarded-hostrun: invalid campaign '$CAMPAIGN'" >&2; exit 2; }
+[ "$MODE_COUNT" -eq 1 ] || { echo "guarded-hostrun: choose exactly one of --gpu or --cpu" >&2; exit 2; }
+
+ROOT="$(git -C "$ENGINE" rev-parse --show-toplevel)"
+ENGINE_ABS="$(realpath "$ENGINE")"
+NAME="$(basename "$ENGINE_ABS")"
+BRANCH="$(git -C "$ENGINE_ABS" branch --show-current)"
+[ -n "$BRANCH" ] || BRANCH="$(git -C "$ENGINE_ABS" rev-parse --short HEAD)"
+SAFE_BRANCH="$(printf '%s' "$BRANCH" | tr -cs 'A-Za-z0-9._-' '-')"
+DEST="${DEST:-qwen36/${NAME}-${SAFE_BRANCH}/${CAMPAIGN}}"
+case "$DEST" in
+  ""|/*|*..*|*[!A-Za-z0-9._/-]*) echo "guarded-hostrun: unsafe destination '$DEST'" >&2; exit 2 ;;
+esac
+case "$DEST" in
+  */"$CAMPAIGN") ;;
+  *) echo "guarded-hostrun: destination must end in the campaign directory '/$CAMPAIGN'" >&2; exit 2 ;;
+esac
+HOST="${GUARDED_HOST:-vllm}"
+HEAD="$(git -C "$ENGINE_ABS" rev-parse HEAD)"
+FP="$("$ROOT/scripts/worktree-fingerprint" "$ENGINE_ABS")"
+RUN_ID="$CAMPAIGN-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+REMOTE_RUN=".guarded-launch-$RUN_ID.sh"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+ssh "$HOST" "mkdir -p ~/$DEST"
+if [ "${#FILES[@]}" -gt 0 ]; then
+  for file in "${FILES[@]}"; do
+    case "$file" in ""|/*|..|../*|*/../*|*/..) echo "guarded-hostrun: unsafe --file '$file'" >&2; exit 2;; esac
+    [ -e "$ENGINE_ABS/$file" ] || { echo "guarded-hostrun: missing --file $file" >&2; exit 2; }
+    rsync -aR "$ENGINE_ABS/./$file" "$HOST:~/$DEST/"
+  done
+else
+  rsync -a --exclude '.git' --exclude 'evidence/' --exclude '*.o' \
+    --exclude 'node_modules/' "$ENGINE_ABS/" "$HOST:~/$DEST/"
+fi
+rsync -a "$ROOT/scripts/guarded-run" "$HOST:~/$DEST/.guarded-run"
+
+LAUNCH="$TMP/$REMOTE_RUN"
+{
+  echo '#!/usr/bin/env bash'
+  echo 'set -euo pipefail'
+  printf 'cd "$HOME/%s"\n' "$DEST"
+  printf 'export PATH=/usr/local/cuda/bin:$PATH\n'
+  printf 'export GUARD_GIT_HEAD=%q GUARD_SOURCE_FP=%q GUARD_RUN_ID=%q GUARD_INPUT_SCOPE=recorded_remote\n' "$HEAD" "$FP" "$RUN_ID"
+  printf 'chmod 700 .guarded-run\n'
+  printf 'exec ./.guarded-run --campaign %q --label %q ' "$CAMPAIGN" "$LABEL"
+  if [ "$MODE" = gpu ]; then printf '%s ' "--gpu" "$GPU"; else printf '%s ' '--cpu'; fi
+  [ -z "$CPUS" ] || printf '%s ' '--cpus' "$CPUS"
+  printf '%s ' '--nice' "$NICE" '--expect-exit' "$EXPECT"
+  for input in "${INPUTS[@]}"; do printf '%s ' '--input' "$input"; done
+  printf '%s ' '--'
+  printf ' %q' "$@"
+  printf '\n'
+} > "$LAUNCH"
+chmod 700 "$LAUNCH"
+rsync -a "$LAUNCH" "$HOST:~/$DEST/$REMOTE_RUN"
+
+set +e
+ssh "$HOST" "bash ~/$DEST/$REMOTE_RUN"
+RC=$?
+set -e
+mkdir -p "$ENGINE_ABS/evidence"
+rsync -a "$HOST:~/$DEST/evidence/guarded-$RUN_ID.json" "$ENGINE_ABS/evidence/" 2>/dev/null || true
+rsync -a "$HOST:~/$DEST/evidence/guarded-$RUN_ID.log" "$ENGINE_ABS/evidence/" 2>/dev/null || true
+ssh "$HOST" "rm -f ~/$DEST/$REMOTE_RUN" || true
+echo "guarded-hostrun: remote=$HOST:~/$DEST evidence=$ENGINE_ABS/evidence run=$RUN_ID rc=$RC"
+exit "$RC"

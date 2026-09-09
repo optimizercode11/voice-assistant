@@ -1,0 +1,387 @@
+#!/usr/bin/env bash
+# Execute one command with device/CPU containment and write structured evidence.
+#
+# Usage:
+#   guarded-run --campaign ID --label LABEL (--gpu N[,N...]|--cpu) [options] -- command [args...]
+# Options: --cpus LIST --nice N --expect-exit N --input PATH --evidence-dir DIR
+set -uo pipefail
+
+usage() {
+  cat >&2 <<'EOF'
+usage: guarded-run --campaign ID --label LABEL (--gpu N[,N...]|--cpu) [--cpus LIST] [--nice N]
+                   [--expect-exit N] [--input PATH]... [--evidence-dir DIR]
+                   -- command [args...]
+EOF
+  exit 2
+}
+
+CAMPAIGN=""; LABEL=""; MODE=""; MODE_COUNT=0; GPU=""; CPUS="${GUARD_CPUS:-}"; NICE="${GUARD_NICE:-0}"
+SAMPLE_INTERVAL="${GUARD_SAMPLE_INTERVAL:-0.1}"
+PGID_INTERVAL="${GUARD_PGID_INTERVAL:-0.05}"
+EXPECT=0; EVIDENCE_DIR=""; INPUTS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --campaign) CAMPAIGN="${2:?--campaign needs a value}"; shift 2 ;;
+    --label) LABEL="${2:?--label needs a value}"; shift 2 ;;
+    --gpu) MODE=gpu; MODE_COUNT=$((MODE_COUNT + 1)); GPU="${2:?--gpu needs an index}"; shift 2 ;;
+    --cpu) MODE=cpu; MODE_COUNT=$((MODE_COUNT + 1)); shift ;;
+    --cpus) CPUS="${2:?--cpus needs a list}"; shift 2 ;;
+    --nice) NICE="${2:?--nice needs a value}"; shift 2 ;;
+    --expect-exit) EXPECT="${2:?--expect-exit needs an integer}"; shift 2 ;;
+    --input) INPUTS+=("${2:?--input needs a path}"); shift 2 ;;
+    --evidence-dir) EVIDENCE_DIR="${2:?--evidence-dir needs a path}"; shift 2 ;;
+    --) shift; break ;;
+    *) usage ;;
+  esac
+done
+[ $# -gt 0 ] || usage
+[[ "$CAMPAIGN" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || { echo "guarded-run: invalid campaign '$CAMPAIGN'" >&2; exit 2; }
+[[ "$LABEL" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || { echo "guarded-run: invalid label '$LABEL'" >&2; exit 2; }
+[ "$MODE_COUNT" -eq 1 ] || { echo "guarded-run: choose exactly one of --gpu or --cpu" >&2; exit 2; }
+[[ "$EXPECT" =~ ^[0-9]+$ ]] || { echo "guarded-run: invalid expected exit '$EXPECT'" >&2; exit 2; }
+[[ "$NICE" =~ ^-?[0-9]+$ ]] || { echo "guarded-run: invalid nice value '$NICE'" >&2; exit 2; }
+for interval_pair in "sample=$SAMPLE_INTERVAL" "pgid-map=$PGID_INTERVAL"; do
+  interval_name="${interval_pair%%=*}"
+  interval_value="${interval_pair#*=}"
+  [[ "$interval_value" =~ ^[0-9]+(\.[0-9]+)?$ ]] || {
+    echo "guarded-run: invalid $interval_name interval '$interval_value'" >&2; exit 2;
+  }
+done
+if [ "$MODE" = gpu ]; then
+  [[ "$GPU" =~ ^[0-9]+(,[0-9]+)*$ ]] || {
+    echo "guarded-run: invalid GPU index set '$GPU'" >&2; exit 2;
+  }
+  command -v nvidia-smi >/dev/null || { echo "guarded-run: nvidia-smi is required for --gpu" >&2; exit 2; }
+fi
+
+CMD=("$@")
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+HEAD="${GUARD_GIT_HEAD:-$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)}"
+SOURCE_FP="${GUARD_SOURCE_FP:-$("$SCRIPT_DIR/worktree-fingerprint" "$PWD" 2>/dev/null || echo unknown)}"
+EVIDENCE_DIR="${EVIDENCE_DIR:-$PWD/evidence}"
+mkdir -p "$EVIDENCE_DIR"
+RUN_ID="${GUARD_RUN_ID:-$CAMPAIGN-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+LOG="$EVIDENCE_DIR/guarded-$RUN_ID.log"
+MANIFEST="$EVIDENCE_DIR/guarded-$RUN_ID.json"
+TMP="$(mktemp -d)"
+STARTED="$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)"
+CMD_RC=125; CONTAINMENT="not_applicable"; AUTH_UUID=""; SIGNALLED=0
+CPID=""; SPID=""; RPID=""; EXPECTED_PGID=""
+INPUTS_VALID=1
+for input in "${INPUTS[@]}"; do
+  if [[ "$input" = /* ]]; then input_path="$input"; else input_path="$PWD/$input"; fi
+  if [ ! -f "$input_path" ]; then
+    echo "guarded-run: required input is missing or not a file: $input" >&2
+    INPUTS_VALID=0
+  fi
+done
+
+q() {
+  nvidia-smi --query-compute-apps=pid,gpu_uuid,used_memory \
+    --format=csv,noheader 2>/dev/null | sed 's/, /,/g' | sort
+}
+keys() { awk -F, 'NF >= 2 {print $1","$2}' "$1" | sort -u; }
+
+stop_watchers() {
+  [ -n "$SPID$RPID" ] || return 0
+  rm -f "$TMP/owner"
+  wait "$SPID" 2>/dev/null || true
+  wait "$RPID" 2>/dev/null || true
+  SPID=""; RPID=""
+}
+on_signal() {
+  SIGNALLED=1
+  [ -z "$CPID" ] || kill -TERM -- "-$CPID" 2>/dev/null || true
+}
+cleanup() {
+  stop_watchers
+  rm -rf "$TMP"
+}
+trap on_signal INT TERM
+trap cleanup EXIT
+
+if [ "$MODE" = gpu ]; then
+  : > "$TMP/auth.uuids"
+  IFS=, read -r -a REQUESTED_GPUS <<< "$GPU"
+  declare -A SEEN_GPUS=()
+  for gpu_index in "${REQUESTED_GPUS[@]}"; do
+    [ -z "${SEEN_GPUS[$gpu_index]:-}" ] || {
+      echo "guarded-run: duplicate GPU index $gpu_index" >&2; exit 2;
+    }
+    SEEN_GPUS[$gpu_index]=1
+    gpu_uuid="$(nvidia-smi --query-gpu=index,uuid --format=csv,noheader 2>/dev/null \
+      | awk -F', ' -v g="$gpu_index" '$1 == g {print $2}')"
+    [ -n "$gpu_uuid" ] || {
+      echo "guarded-run: GPU index $gpu_index does not exist" >&2; exit 2;
+    }
+    printf '%s\n' "$gpu_uuid" >> "$TMP/auth.uuids"
+  done
+  AUTH_UUID="$(paste -sd, "$TMP/auth.uuids")"
+  q > "$TMP/baseline.csv" || { echo "guarded-run: cannot capture GPU baseline" >&2; exit 2; }
+  keys "$TMP/baseline.csv" > "$TMP/base.keys"
+  : > "$TMP/samples.csv"
+  : > "$TMP/pids.map"
+  touch "$TMP/owner"
+  # Two watchers, both our children, both joined before any attribution is
+  # computed:
+  #   sampler  -- nvidia-smi compute-apps snapshots (tens of ms per query)
+  #   recorder -- cumulative (pid, pgid) pairs at a fixed interval
+  # Attribution is deliberately NOT done inside the sampler tick. A guarded
+  # child that exits while nvidia-smi is in flight has no resolvable pgid by
+  # the time the tick asks ps for it, and the tick used to report that as a
+  # foreign process on our own device. The cumulative map makes a process that
+  # lived at least one recorder interval attributable after it exits.
+  (
+    while [ -e "$TMP/owner" ]; do
+      tick="$TMP/tick.$BASHPID"
+      if q > "$tick"; then
+        if [ -e "$TMP/owner" ]; then
+          cat "$tick" >> "$TMP/samples.csv"
+        fi
+      else
+        : > "$TMP/sampler-error"
+      fi
+      rm -f "$tick"
+      sleep "$SAMPLE_INTERVAL"
+    done
+  ) &
+  SPID=$!
+  (
+    while [ -e "$TMP/owner" ]; do
+      if ps -eo pid=,pgid= 2>/dev/null | awk 'NF == 2 {print $1" "$2}' \
+          > "$TMP/pids.now"; then
+        cat "$TMP/pids.map" "$TMP/pids.now" | sort -u > "$TMP/pids.next" \
+          && mv "$TMP/pids.next" "$TMP/pids.map"
+      else
+        : > "$TMP/recorder-error"
+      fi
+      sleep "$PGID_INTERVAL"
+    done
+  ) &
+  RPID=$!
+fi
+
+RUNNER=(nice -n "$NICE")
+[ -z "$CPUS" ] || RUNNER=(taskset -c "$CPUS" "${RUNNER[@]}")
+if [ "$MODE" = gpu ]; then
+  ENVV=(env CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES="$GPU")
+else
+  ENVV=(env CUDA_VISIBLE_DEVICES="")
+fi
+
+printf 'guarded-run: campaign=%s label=%s mode=%s' "$CAMPAIGN" "$LABEL" "$MODE" | tee "$LOG"
+[ "$MODE" != gpu ] || printf ' gpu=%s uuid=%s' "$GPU" "$AUTH_UUID" | tee -a "$LOG"
+[ -z "$CPUS" ] || printf ' cpus=%s' "$CPUS" | tee -a "$LOG"
+printf '\ncommand:' | tee -a "$LOG"
+printf ' %q' "${CMD[@]}" | tee -a "$LOG"
+printf '\n' | tee -a "$LOG"
+
+if [ "$INPUTS_VALID" -eq 1 ]; then
+  set +e
+  setsid "${ENVV[@]}" "${RUNNER[@]}" "${CMD[@]}" > >(tee -a "$LOG") 2>&1 &
+  CPID=$!
+  EXPECTED_PGID="$CPID"
+  wait "$CPID"
+  CMD_RC=$?
+  CPID=""
+  set -e
+else
+  echo "guarded-run: refusing to execute with missing required inputs" | tee -a "$LOG"
+fi
+stop_watchers
+
+if [ "$MODE" = gpu ]; then
+  CONTAINMENT=clean
+  [ ! -e "$TMP/sampler-error" ] || CONTAINMENT=sampler_error
+  # A failed recorder means the map stopped updating, so attribution would be
+  # guessing; that is the same "a watcher could not complete" state as a failed
+  # sampler and is reported the same way.
+  [ ! -e "$TMP/recorder-error" ] || CONTAINMENT=sampler_error
+  sort -u "$TMP/samples.csv" > "$TMP/snapshot.csv"
+  keys "$TMP/snapshot.csv" > "$TMP/sample.keys"
+  comm -13 "$TMP/base.keys" "$TMP/sample.keys" > "$TMP/new.keys"
+  awk -F, 'NR==FNR {auth[$1]=1; next} !($2 in auth)' \
+    "$TMP/auth.uuids" "$TMP/new.keys" > "$TMP/bad.keys"
+  # Attribute every new process on an authorized GPU and record the evidence
+  # for each disposition, so a cleared process is cleared for a stated reason
+  # rather than silently dropped. A live pgid that is not ours always wins over
+  # the map: PID reuse must not be excused by a stale observation.
+  : > "$TMP/dispositions.tsv"
+  while IFS=, read -r pid uuid _memory; do
+    [ -n "$pid" ] || continue
+    grep -Fqx "$uuid" "$TMP/auth.uuids" || continue
+    live="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+    mapped="$(awk -v p="$pid" '$1 == p {print $2; exit}' "$TMP/pids.map" 2>/dev/null || true)"
+    if [ -z "$EXPECTED_PGID" ]; then
+      disposition=unattributed_no_expected; attribution=none
+    elif [ -n "$live" ] && [ "$live" = "$EXPECTED_PGID" ]; then
+      disposition=owned; attribution=live_ps
+    elif [ -n "$live" ]; then
+      disposition=foreign_group; attribution=live_ps
+    elif [ "$mapped" = "$EXPECTED_PGID" ]; then
+      disposition=owned; attribution=pgid_map
+    elif [ -n "$mapped" ]; then
+      disposition=foreign_group; attribution=pgid_map
+    else
+      disposition=unresolvable; attribution=none
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$pid" "$uuid" "$disposition" \
+      "${live:-none}" "${mapped:-none}" "$EXPECTED_PGID" "$attribution" \
+      >> "$TMP/dispositions.tsv"
+  done < "$TMP/new.keys"
+  if [ -s "$TMP/bad.keys" ]; then
+    CONTAINMENT=violation
+    echo "GPU CONTAINMENT: VIOLATION -- new process on an unauthorized GPU:" | tee -a "$LOG"
+    sed 's/^/  /' "$TMP/bad.keys" | tee -a "$LOG"
+  fi
+  BAD_AWK='$3 == "foreign_group" || $3 == "unresolvable"'
+  if awk -F'\t' "$BAD_AWK" "$TMP/dispositions.tsv" | grep -q .; then
+    CONTAINMENT=violation
+    echo "GPU CONTAINMENT: VIOLATION -- new process on the authorized GPU was not in the guarded process group:" | tee -a "$LOG"
+    awk -F'\t' "$BAD_AWK"' {printf "  pid=%s uuid=%s %s live_pgid=%s mapped_pgid=%s expected=%s via=%s\n", $1, $2, $3, $4, $5, $6, $7}' \
+      "$TMP/dispositions.tsv" | tee -a "$LOG"
+  fi
+  if [ "$CONTAINMENT" = clean ]; then
+    owned_count="$(awk -F'\t' '$3 == "owned"' "$TMP/dispositions.tsv" | wc -l)"
+    map_lines="$(wc -l < "$TMP/pids.map")"
+    echo "GPU CONTAINMENT: CLEAN -- new process identities were confined to $AUTH_UUID" | tee -a "$LOG"
+    awk -F'\t' '{printf "  attributed pid=%s uuid=%s via=%s (pgid=%s)\n", $1, $2, $7, ($4 != "none" ? $4 : $5)}' \
+      "$TMP/dispositions.tsv" | tee -a "$LOG"
+    echo "  0 unattributed; $owned_count owned process(es) attributed; $map_lines (pid,pgid) observations" \
+      | tee -a "$LOG"
+  fi
+fi
+
+FINISHED="$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)"
+STATUS=PASS
+[ "$CMD_RC" -eq "$EXPECT" ] || STATUS=FAIL
+[ "$INPUTS_VALID" -eq 1 ] || STATUS=FAIL
+[ "$CONTAINMENT" != violation ] && [ "$CONTAINMENT" != sampler_error ] || STATUS=FAIL
+[ "$SIGNALLED" -eq 0 ] || STATUS=FAIL
+printf '%s\0' "${CMD[@]}" > "$TMP/command.args"
+printf '%s\0' "${INPUTS[@]}" > "$TMP/input.args"
+
+export GR_MANIFEST="$MANIFEST" GR_CAMPAIGN="$CAMPAIGN" GR_LABEL="$LABEL" GR_RUN_ID="$RUN_ID"
+export GR_STARTED="$STARTED" GR_FINISHED="$FINISHED" GR_STATUS="$STATUS"
+export GR_MODE="$MODE" GR_GPU="$GPU" GR_UUID="$AUTH_UUID" GR_CPUS="$CPUS" GR_NICE="$NICE"
+export GR_EXPECT="$EXPECT" GR_CMD_RC="$CMD_RC" GR_CONTAINMENT="$CONTAINMENT"
+export GR_HEAD="$HEAD" GR_SOURCE_FP="$SOURCE_FP" GR_LOG="$LOG"
+export GR_CMD_FILE="$TMP/command.args" GR_INPUT_FILE="$TMP/input.args"
+export GR_INPUT_SCOPE="${GUARD_INPUT_SCOPE:-current_local}"
+export GR_SAMPLE_INTERVAL="$SAMPLE_INTERVAL" GR_PGID_INTERVAL="$PGID_INTERVAL"
+export GR_PIDS_MAP="$TMP/pids.map" GR_DISPOSITIONS="$TMP/dispositions.tsv"
+python3 - <<'PY'
+import hashlib, json, os
+from pathlib import Path
+
+def nul(path):
+    data = Path(path).read_bytes().split(b"\0")
+    return [x.decode("utf-8", "surrogateescape") for x in data if x]
+
+inputs = []
+for raw in nul(os.environ["GR_INPUT_FILE"]):
+    p = Path(raw)
+    was_absolute = p.is_absolute()
+    if not p.is_absolute():
+        p = Path.cwd() / p
+    entry = {"path": raw, "exists": p.is_file()}
+    entry["verification"] = (
+        "recorded_remote"
+        if os.environ["GR_INPUT_SCOPE"] == "recorded_remote" and was_absolute
+        else "current_local"
+    )
+    if p.is_file():
+        h = hashlib.sha256()
+        with p.open("rb") as f:
+            for block in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(block)
+        entry["sha256"] = h.hexdigest()
+        entry["bytes"] = p.stat().st_size
+    inputs.append(entry)
+
+doc = {
+    "schema_version": 2,
+    "run_id": os.environ["GR_RUN_ID"],
+    "campaign": os.environ["GR_CAMPAIGN"],
+    "label": os.environ["GR_LABEL"],
+    "status": os.environ["GR_STATUS"],
+    "started_utc": os.environ["GR_STARTED"],
+    "finished_utc": os.environ["GR_FINISHED"],
+    "cwd": str(Path.cwd()),
+    "git_head": os.environ["GR_HEAD"],
+    "source_fingerprint": os.environ["GR_SOURCE_FP"],
+    "command": nul(os.environ["GR_CMD_FILE"]),
+    "expected_exit_code": int(os.environ["GR_EXPECT"]),
+    "command_exit_code": int(os.environ["GR_CMD_RC"]),
+    "containment": {
+        "mode": os.environ["GR_MODE"],
+        "gpu_index": os.environ["GR_GPU"] or None,
+        "gpu_uuid": os.environ["GR_UUID"] or None,
+        "gpu_indices": [
+            int(value) for value in os.environ["GR_GPU"].split(",") if value
+        ],
+        "gpu_uuids": [
+            value for value in os.environ["GR_UUID"].split(",") if value
+        ],
+        "cpus": os.environ["GR_CPUS"] or None,
+        "nice": int(os.environ["GR_NICE"]),
+        "verdict": os.environ["GR_CONTAINMENT"],
+    },
+    "inputs": inputs,
+    "log": os.environ["GR_LOG"],
+}
+
+# GPU attribution evidence: every process identity that appeared during the
+# run, with the reason it was cleared or condemned.
+if os.environ["GR_MODE"] == "gpu":
+    map_observations = []
+    map_path = Path(os.environ["GR_PIDS_MAP"])
+    if map_path.is_file():
+        for raw in map_path.read_text().splitlines():
+            fields = raw.split()
+            if len(fields) == 2 and fields[0].isdigit() and fields[1].isdigit():
+                map_observations.append(
+                    {"pid": int(fields[0]), "pgid": int(fields[1])}
+                )
+    dispositions = []
+    disp_path = Path(os.environ["GR_DISPOSITIONS"])
+    if disp_path.is_file():
+        for raw in disp_path.read_text().splitlines():
+            fields = raw.split("\t")
+            if len(fields) != 7:
+                continue
+            pid, uuid, disposition, live, mapped, expected, attribution = fields
+
+            def as_int(value):
+                return int(value) if value.isdigit() else None
+
+            dispositions.append(
+                {
+                    "pid": as_int(pid),
+                    "gpu_uuid": uuid,
+                    "disposition": disposition,
+                    "live_pgid": as_int(live),
+                    "mapped_pgid": as_int(mapped),
+                    "expected_pgid": as_int(expected),
+                    "attribution": attribution,
+                }
+            )
+    MAP_CAP = 20000
+    doc["containment"]["new_processes"] = dispositions
+    doc["containment"]["pgid_map_observations"] = len(map_observations)
+    doc["containment"]["pgid_map_truncated"] = len(map_observations) > MAP_CAP
+    doc["containment"]["pgid_map"] = map_observations[:MAP_CAP]
+    doc["containment"]["intervals"] = {
+        "sample_s": float(os.environ["GR_SAMPLE_INTERVAL"]),
+        "pgid_map_s": float(os.environ["GR_PGID_INTERVAL"]),
+    }
+target = Path(os.environ["GR_MANIFEST"])
+tmp = target.with_suffix(target.suffix + ".tmp")
+tmp.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n")
+tmp.replace(target)
+PY
+
+echo "GUARDED_RUN label=$LABEL status=$STATUS command_rc=$CMD_RC expected_rc=$EXPECT containment=$CONTAINMENT"
+echo "guarded-run: evidence $MANIFEST"
+[ "$STATUS" = PASS ]

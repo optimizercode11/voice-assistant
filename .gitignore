@@ -4,11 +4,10 @@ run/
 rollback/
 .guarded-run
 
-# Guard manifests and browser screenshots stay on disk but out of history:
-# they describe a machine and a moment, and worktree-fingerprint excludes
-# evidence/ anyway.
-evidence/*
-!evidence/.gitkeep
+# Guard manifests ARE history: a claim without the manifest that records it
+# is a claim.  Browser screenshots are machine-and-moment artifacts, and
+# worktree-fingerprint excludes evidence/ either way.
+evidence/browser/
 
 __pycache__/
 *.pyc

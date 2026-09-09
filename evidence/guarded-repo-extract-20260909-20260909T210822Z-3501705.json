@@ -1,0 +1,32 @@
+{
+  "campaign": "repo-extract-20260909",
+  "command": [
+    "python3",
+    "deploy/check_site.py",
+    "--compare-live",
+    "--require-assets"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "24-27",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-assistant-main/repo-extract-20260909",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-09T21:08:25.299700776Z",
+  "git_head": "c9ab58a9c8140f6b7b045619c362add1f2ee433a",
+  "inputs": [],
+  "label": "positive",
+  "log": "/home/ambudsharma/qwen36/voice-assistant-main/repo-extract-20260909/evidence/guarded-repo-extract-20260909-20260909T210822Z-3501705.log",
+  "run_id": "repo-extract-20260909-20260909T210822Z-3501705",
+  "schema_version": 2,
+  "source_fingerprint": "e6badf941851e4e941b260c05f2d72f391c7449a937a06ecc2e9eef218ac88bb",
+  "started_utc": "2026-09-09T21:08:25.219597263Z",
+  "status": "PASS"
+}

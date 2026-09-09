@@ -45,9 +45,15 @@ matching the live tree exactly is worth more than a prettier layout.
   pass on chromium **and** webkit.
 * Paired sabotages fail for the intended reason: `voice_controls_browser.mjs
   --sabotage` (keyboard handler) and `speech_ui_test.py --speaker-sabotage`.
-* `python3 deploy/check_site.py` — 19/19.
-* `deploy/voice_stack.py inputs` and the four campaign scripts import against
-  the new profile and stop at their own guard assertions.
+* `python3 deploy/check_site.py` — 19/19 offline.
+* On the host, through the guard (`repo-extract-20260909`, `--cpu --cpus 24-27
+  --nice 10`): `check_site.py --compare-live --require-assets` — **PASS, 21
+  checks**, all 98 bound inputs present, and the refactored supervisor binds
+  **the same 86 external assets as the live one, +0 −0**.  That is the parity
+  gate for the `site_config.py` extraction: same assets, no new assumption.
+  Manifest: `evidence/guarded-repo-extract-20260909-*.json`.
+* The four campaign scripts import against the new profile and stop at their
+  own guard assertions.
 
 Not re-run from this repo: the GPU labels of any campaign.  They need the
 authorized device, and the closed campaign's evidence stays in the engine repo.

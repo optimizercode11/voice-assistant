@@ -76,7 +76,7 @@ LLM_BINARY = HOST_ROOT / ("kokoro-codex-voice-chat-20260908/voice-chat-20260908/
                           "runtime/qwen/q38-27-nvfp4/q38_27_server")
 TTS_BINARY = HOST_ROOT / "kokoro-codex-kokoro-cb-20260907/kokoro-cb-20260907/kserver"
 ASR_BINARY = PRIOR / "runtime/asr/vibevoice-asr/vvasr"          # legacy per-request path
-QASR_RELEASE = HOST_ROOT / "qasr-serve-release-20260909/qasr-serve-deploy-20260909"
+QASR_RELEASE = HOST_ROOT / "qasr-fix-deploy/qasr-fix-deploy-20260910"
 QASR_WORKER = QASR_RELEASE / "qasr_worker"
 QASR_SERVE = QASR_RELEASE / "tools/qasr_serve.py"
 QASR_FRONTEND = QASR_RELEASE / "reference/upstream"

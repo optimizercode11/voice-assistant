@@ -64,7 +64,8 @@ TTS_REF_S = TTS_MODEL_DIR / "campaigns/kokoro-cb-20260907/oracle/row_00/ref_s.np
 TTS_VOICES = TTS_MODEL_DIR / "voices_npy"
 ASR_MODEL = Path("/mnt/vibevoice-asr-4262d23d8a539a6530cf64fbd0b1751ef9a30853")
 ASR_TOKENIZER = Path("/mnt/vvasr-native-oracle/tokenizer.bin")
-QASR_MODEL = Path("/mnt/qwen3-asr-0.6b-5eb144179a02acc5e5ba31e748d22b0cf3e303b0")
+QASR_MODEL = HOST_ROOT / "qasr-1p7b/qasr-1p7b-20260910/model"
+QASR_WEIGHTS = "fp8"
 
 # --------------------------------------------------------------------------
 # Accepted binaries and releases.  Qwen/TTS/vvasr are pinned by hash: a stale
@@ -76,7 +77,7 @@ LLM_BINARY = HOST_ROOT / ("kokoro-codex-voice-chat-20260908/voice-chat-20260908/
                           "runtime/qwen/q38-27-nvfp4/q38_27_server")
 TTS_BINARY = HOST_ROOT / "kokoro-codex-kokoro-cb-20260907/kokoro-cb-20260907/kserver"
 ASR_BINARY = PRIOR / "runtime/asr/vibevoice-asr/vvasr"          # legacy per-request path
-QASR_RELEASE = HOST_ROOT / "qasr-fix-deploy/qasr-fix-deploy-20260910"
+QASR_RELEASE = HOST_ROOT / "qasr-fp8/qasr-fp8-20260910"
 QASR_WORKER = QASR_RELEASE / "qasr_worker"
 QASR_SERVE = QASR_RELEASE / "tools/qasr_serve.py"
 QASR_FRONTEND = QASR_RELEASE / "reference/upstream"

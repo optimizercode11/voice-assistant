@@ -1,0 +1,30 @@
+{
+  "campaign": "qasr-fp8-20260910",
+  "command": [
+    "python3",
+    "deploy/check_site.py"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "0-3",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/voice-qasr-fp8-20260910",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-10T04:54:28.647037616Z",
+  "git_head": "975a596c50ea1714fee3fe591c04b117b169b70e",
+  "inputs": [],
+  "label": "site-config",
+  "log": "/home/ambudsharma/voice-qasr-fp8-20260910/evidence/guarded-qasr-fp8-20260910-20260910T045428Z-444501.log",
+  "run_id": "qasr-fp8-20260910-20260910T045428Z-444501",
+  "schema_version": 2,
+  "source_fingerprint": "b64af2e4760407eaf8cd4ce5566c275ea26c56e180763e6879672e38e6433f6e",
+  "started_utc": "2026-09-10T04:54:28.596297843Z",
+  "status": "PASS"
+}

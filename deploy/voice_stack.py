@@ -63,7 +63,9 @@ def inputs():
         *sorted((ROOT/'deploy').glob('*.service')),
         site.QASR_WORKER, QASR/'RELEASE.json', site.QASR_SERVE,
         QASR/'tools/canonical.py', site.QASR_FRONTEND/'qwen_asr/__init__.py',
-        QASR_MODEL/'model.safetensors', QASR_MODEL/'config.json',
+        QASR_MODEL/'model.safetensors.index.json',
+        QASR_MODEL/'model-00001-of-00002.safetensors',
+        QASR_MODEL/'model-00002-of-00002.safetensors', QASR_MODEL/'config.json',
         QASR_MODEL/'tokenizer_config.json', QASR_MODEL/'vocab.json', QASR_MODEL/'merges.txt',
         QASR_MODEL/'chat_template.json', QASR_MODEL/'preprocessor_config.json',
         QASR_ENV/'transformers/__init__.py',
@@ -216,7 +218,7 @@ def supervise():
         # bridge: the certified path decodes to 24 kHz and resamples with the
         # pinned librosa, exactly as the oracle did.
         launch('stt', [site.QASR_PYTHON, '-u', str(site.QASR_SERVE),
-            '--model', QASR_MODEL, '--worker', str(QASR/'qasr_worker'), '--ctx', '2048',
+            '--model', QASR_MODEL, '--weights', site.QASR_WEIGHTS, '--worker', str(QASR/'qasr_worker'), '--ctx', '2048',
             '--host', '127.0.0.1', '--port', str(QASR_PORT), '--max-tokens', '256'],
             dict(env, PYTHONPATH=f'{QASR_ENV}:{site.QASR_FRONTEND}'))
 
@@ -225,7 +227,9 @@ def supervise():
                 body = json.loads(request('/health', port=QASR_PORT))
             except (OSError, AssertionError, ValueError):
                 return False
-            return bool(body.get('available')) and not body.get('sabotage')
+            return (bool(body.get('available')) and not body.get('sabotage')
+                    and body.get('weights') == site.QASR_WEIGHTS
+                    and body.get('model') == 'Qwen3-ASR-1.7B')
 
         wait_for(stt_ready, seconds=300)
         bridge = ['python3', '-u', 'tools/speech_ui.py', '--host', '0.0.0.0',

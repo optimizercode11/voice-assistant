@@ -271,3 +271,29 @@ serving `https://192.168.228.113:8094/chat`.
 this page is that echo does not interrupt and a person does, measured offline;
 whether a real room with a real speaker agrees is unmeasured, and the
 `BARGE.echoGain = 0.5` threshold is the knob that check will adjudicate.
+
+## ASR upgrade — `qasr-fp8-20260910`
+
+The live GPU2 ASR at8095 now uses Qwen3-ASR-1.7B with `--weights fp8`.
+Release: `~/qwen36/qasr-fp8/qasr-fp8-20260910`; official checkpoint:
+`~/qwen36/qasr-1p7b/qasr-1p7b-20260910/model`. Decoder matrix weights use E4M3;
+audio, activations and norms stay BF16. This site profile selects the release,
+passes precision explicitly, binds both checkpoint shards and their index, and
+requires the expected model/precision in worker readiness.
+
+Engine build commit19df0ff; source fingerprint
+`f7c031287f21ffe10c127f09a3dcdaa48eb6405872d01dad059eb7b0a4278c76`;
+worker SHA256 `3fa883b1b67c26d5c3e5810c69020cbcfbf39145026a3d99d7878d6bdbdd9980`.
+Engine perf guardrail GREEN. Seven native and live HTTP transcript cases exact,
+including the production256-token cap; boundary checks and compute-sanitizer
+PASS. Resident worker3912MiB versus5760MiB for BF16. Best-of-six engine latency
+is5.1-43.6% higher; this deployment trades latency for memory.
+
+The engine campaign applied the matching ASR changes to the existing legacy
+supervisor and restarted `voice-stack-gpu2.service` through its GPU2 guard.
+Stack startup and live speech round trip passed; ASR server770710/worker771157,
+PGID761361. The tools bridge MainPID714008 and MCP children714036/714038 stayed
+running. Its interruption build and browser assets were not redeployed here.
+The0.6B release remains available for rollback. Full deployment/rollback records
+are in `/mnt/inference-engine/qwen3-asr-1.7b/evidence/fp8-deploy/`.
+`deploy/check_site.py`:19/19 offline checks pass for this profile.

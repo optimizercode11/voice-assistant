@@ -1,0 +1,23 @@
+guarded-run: campaign=qasr-fp8-20260910 label=site-config mode=cpu cpus=0-3
+command: python3 deploy/check_site.py
+== site profile: /home/ambudsharma/qwen36/voice-stack/voice-restore-20260908 unit=voice-stack-gpu2.service gpu=2 ==
+  ok   ports are unique: (8080, 8090, 8091, 8092, 8095)
+  ok   HTTP and HTTPS listeners use different ports
+  ok   campaign id is guard-safe: voice-restore-20260908
+  ok   3 binaries are pinned by full sha256
+  ok   certificate and key are a pair in one directory
+  ok   unit WorkingDirectory=['%h/qwen36/voice-stack/voice-restore-20260908'] points inside %h/qwen36/voice-stack/voice-restore-20260908
+  ok   unit PIDFile=['%h/qwen36/voice-stack/voice-restore-20260908/run/stack.pid'] points inside %h/qwen36/voice-stack/voice-restore-20260908
+  ok   unit ExecStart=['/bin/bash %h/qwen36/voice-stack/voice-restore-20260908/deploy/start-voice-stack.sh'] points inside %h/qwen36/voice-stack/voice-restore-20260908
+  ok   unit ExecStart is the guarded start wrapper
+  ok   start wrapper takes campaign/device/inputs from site_config, not literals
+  ok   guard binds 50 inputs (checkpoints, binaries, source)
+  ok   inputs include checkpoint/config assets
+  ok   inputs include executables
+  ok   inputs include files from this checkout
+  ok   inputs bind tools/speech_ui.py
+  ok   inputs bind web/chat.html
+  ok   inputs bind web/chat.js
+  ok   inputs bind deploy/site_config.py
+  ok   inputs bind deploy/voice_stack.py
+== PASS: 19 checks, 0 failures ==

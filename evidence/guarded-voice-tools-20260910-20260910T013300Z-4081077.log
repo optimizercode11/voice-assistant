@@ -1,0 +1,235 @@
+guarded-run: campaign=voice-tools-20260910 label=regression mode=cpu cpus=24-27
+command: sh -c mkdir\ -p\ bin\ \&\&\ ln\ -sf\ ~/qwen36/kokoro-codex-stt-tts-ui-20260908/stt-tts-ui-20260908/runtime/ffmpeg/imageio_ffmpeg/binaries/ffmpeg-linux-x86_64-v7.0.2\ bin/ffmpeg\ \&\&\ PATH=\"\$PWD/bin:\$PATH\"\ make\ check
+CUDA_VISIBLE_DEVICES="" python3 -u tests/speech_ui_test.py
+test_browser_recording_formats (__main__.BridgeTests.test_browser_recording_formats) ... 127.0.0.1 - - [10/Sep/2026 01:33:01] "POST /stt HTTP/1.1" 200 -
+127.0.0.1 - - [10/Sep/2026 01:33:02] "POST /stt HTTP/1.1" 200 -
+ok
+test_busy_and_lock_recovery (__main__.BridgeTests.test_busy_and_lock_recovery) ... 127.0.0.1 - - [10/Sep/2026 01:33:02] "POST /stt HTTP/1.1" 503 -
+127.0.0.1 - - [10/Sep/2026 01:33:02] "POST /stt HTTP/1.1" 200 -
+ok
+test_degenerate_asr_tail_is_folded_not_spoken (__main__.BridgeTests.test_degenerate_asr_tail_is_folded_not_spoken)
+The engine sometimes decodes past the end of the utterance. ... ok
+test_disconnect_terminates_owned_asr_and_releases_slot (__main__.BridgeTests.test_disconnect_terminates_owned_asr_and_releases_slot) ... ok
+test_incomplete_truncated_and_failed_children (__main__.BridgeTests.test_incomplete_truncated_and_failed_children) ... 127.0.0.1 - - [10/Sep/2026 01:33:02] "POST /stt HTTP/1.1" 200 -
+127.0.0.1 - - [10/Sep/2026 01:33:02] "POST /stt HTTP/1.1" 502 -
+127.0.0.1 - - [10/Sep/2026 01:33:02] "POST /stt HTTP/1.1" 502 -
+
+127.0.0.1 - - [10/Sep/2026 01:33:02] "POST /stt HTTP/1.1" 502 -
+ok
+test_invalid_audio_and_limits (__main__.BridgeTests.test_invalid_audio_and_limits) ... [in#0 @ 0x9535e80] Error opening input: Invalid data found when processing input
+Error opening input file /tmp/speech-ui-av91qtyx/upload.
+Error opening input files: Invalid data found when processing input
+
+127.0.0.1 - - [10/Sep/2026 01:33:02] "POST /stt HTTP/1.1" 400 -
+127.0.0.1 - - [10/Sep/2026 01:33:02] "POST /stt HTTP/1.1" 400 -
+127.0.0.1 - - [10/Sep/2026 01:33:02] "POST /stt HTTP/1.1" 413 -
+127.0.0.1 - - [10/Sep/2026 01:33:02] "POST /stt HTTP/1.1" 413 -
+127.0.0.1 - - [10/Sep/2026 01:33:02] "POST /stt HTTP/1.1" 403 -
+[in#0 @ 0x3db4be80] Error opening input: Invalid data found when processing input
+Error opening input file /tmp/speech-ui-a1qd_81b/upload.
+Error opening input files: Invalid data found when processing input
+
+127.0.0.1 - - [10/Sep/2026 01:33:02] "POST /stt HTTP/1.1" 400 -
+ok
+test_native_speaker_and_silence_markers (__main__.BridgeTests.test_native_speaker_and_silence_markers) ... ok
+test_page_health_proxy (__main__.BridgeTests.test_page_health_proxy) ... 127.0.0.1 - - [10/Sep/2026 01:33:02] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [10/Sep/2026 01:33:02] "GET /stt/health HTTP/1.1" 200 -
+127.0.0.1 - - [10/Sep/2026 01:33:02] "POST /tts?language=f&voice=ff_siwis&speed=1&stream=1 HTTP/1.1" 200 -
+ok
+test_resampling_and_complete_unicode_output (__main__.BridgeTests.test_resampling_and_complete_unicode_output) ... 127.0.0.1 - - [10/Sep/2026 01:33:02] "POST /stt HTTP/1.1" 200 -
+ok
+test_tls_disconnect_releases_asr (__main__.BridgeTests.test_tls_disconnect_releases_asr) ... ok
+test_tls_upload_and_shared_busy_limit (__main__.BridgeTests.test_tls_upload_and_shared_busy_limit) ... 127.0.0.1 - - [10/Sep/2026 01:33:03] "GET /stt/health HTTP/1.1" 200 -
+127.0.0.1 - - [10/Sep/2026 01:33:03] "POST /stt HTTP/1.1" 200 -
+127.0.0.1 - - [10/Sep/2026 01:33:03] "POST /stt HTTP/1.1" 503 -
+127.0.0.1 - - [10/Sep/2026 01:33:03] "POST /tts?stream=1 HTTP/1.1" 200 -
+ok
+test_truncated_tts_stream_is_a_transport_failure (__main__.BridgeTests.test_truncated_tts_stream_is_a_transport_failure) ... 127.0.0.1 - - [10/Sep/2026 01:33:03] "POST /tts?stream=1&broken=1 HTTP/1.1" 200 -
+127.0.0.1 - - [10/Sep/2026 01:33:03] speech service error: IncompleteRead(0 bytes read)
+ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 2.476s
+
+OK
+CUDA_VISIBLE_DEVICES="" python3 -u tests/voice_chat_test.py
+test_busy_is_shared_across_http_tls (__main__.ChatTests.test_busy_is_shared_across_http_tls) ... 127.0.0.1 - - [10/Sep/2026 01:33:04] "POST /chat/completions HTTP/1.1" 503 -
+ok
+test_disconnect_closes_qwen_socket_and_releases_slot (__main__.ChatTests.test_disconnect_closes_qwen_socket_and_releases_slot) ... ok
+test_invalid_role_and_cross_origin_rejected (__main__.ChatTests.test_invalid_role_and_cross_origin_rejected) ... 127.0.0.1 - - [10/Sep/2026 01:33:04] "POST /chat/completions HTTP/1.1" 400 -
+127.0.0.1 - - [10/Sep/2026 01:33:04] "POST /chat/completions HTTP/1.1" 400 -
+127.0.0.1 - - [10/Sep/2026 01:33:04] "POST /chat/completions HTTP/1.1" 400 -
+127.0.0.1 - - [10/Sep/2026 01:33:04] "POST /chat/completions HTTP/1.1" 400 -
+127.0.0.1 - - [10/Sep/2026 01:33:04] "POST /chat/completions HTTP/1.1" 403 -
+ok
+test_overflow_reasoning_and_truncation_fail_closed (__main__.ChatTests.test_overflow_reasoning_and_truncation_fail_closed) ... 127.0.0.1 - - [10/Sep/2026 01:33:04] "POST /chat/completions HTTP/1.1" 400 -
+127.0.0.1 - - [10/Sep/2026 01:33:04] "POST /chat/completions HTTP/1.1" 502 -
+127.0.0.1 - - [10/Sep/2026 01:33:04] "POST /chat/completions HTTP/1.1" 502 -
+ok
+test_page_and_private_history_contract (__main__.ChatTests.test_page_and_private_history_contract) ... 127.0.0.1 - - [10/Sep/2026 01:33:04] "GET /chat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Sep/2026 01:33:04] "GET /chat.js HTTP/1.1" 200 -
+127.0.0.1 - - [10/Sep/2026 01:33:04] "POST /chat/completions HTTP/1.1" 200 -
+127.0.0.1 - - [10/Sep/2026 01:33:04] "POST /chat/completions HTTP/1.1" 200 -
+ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 1.333s
+
+OK
+CUDA_VISIBLE_DEVICES="" python3 -u tests/retrieval_test.py
+test_a_miss_is_a_miss (__main__.RetrievalTests.test_a_miss_is_a_miss) ... ok
+test_a_missing_corpus_path_is_an_error (__main__.RetrievalTests.test_a_missing_corpus_path_is_an_error) ... ok
+test_a_missing_index_is_refused_not_ignored (__main__.RetrievalTests.test_a_missing_index_is_refused_not_ignored) ... ok
+test_bm25_finds_the_right_paragraph (__main__.RetrievalTests.test_bm25_finds_the_right_paragraph) ... ok
+test_chunks_overlap_and_stay_bounded (__main__.RetrievalTests.test_chunks_overlap_and_stay_bounded) ... ok
+test_only_supported_files_are_ingested (__main__.RetrievalTests.test_only_supported_files_are_ingested) ... ok
+test_query_grammar_cannot_throw (__main__.RetrievalTests.test_query_grammar_cannot_throw) ... ok
+test_rebuild_is_idempotent (__main__.RetrievalTests.test_rebuild_is_idempotent) ... ok
+test_results_are_bounded_by_character_budget (__main__.RetrievalTests.test_results_are_bounded_by_character_budget) ... ok
+test_status_reports_staleness_not_silence (__main__.RetrievalTests.test_status_reports_staleness_not_silence) ... ok
+test_structured_files_are_searchable_as_text (__main__.RetrievalTests.test_structured_files_are_searchable_as_text) ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 0.082s
+
+OK
+CUDA_VISIBLE_DEVICES="" python3 -u tests/agent_tools_test.py
+test_a_named_file_that_is_missing_is_fatal (__main__.ConfigTests.test_a_named_file_that_is_missing_is_fatal) ... ok
+test_an_unknown_key_is_fatal_rather_than_typo_tolerated (__main__.ConfigTests.test_an_unknown_key_is_fatal_rather_than_typo_tolerated) ... ok
+test_fetch_without_an_allow_list_refuses_to_start (__main__.ConfigTests.test_fetch_without_an_allow_list_refuses_to_start) ... ok
+test_limits_are_clamped_not_trusted (__main__.ConfigTests.test_limits_are_clamped_not_trusted) ... ok
+test_mcp_servers_are_named_checked_and_deduplicated (__main__.ConfigTests.test_mcp_servers_are_named_checked_and_deduplicated) ... ok
+test_no_file_named_means_the_conservative_defaults (__main__.ConfigTests.test_no_file_named_means_the_conservative_defaults) ... ok
+test_the_environment_selects_the_file_and_a_broken_one_still_fails (__main__.ConfigTests.test_the_environment_selects_the_file_and_a_broken_one_still_fails) ... ok
+test_too_many_tools_is_refused_before_the_engine_sees_them (__main__.ConfigTests.test_too_many_tools_is_refused_before_the_engine_sees_them) ... ok
+test_a_disabled_builtin_is_absent_from_the_spec_list (__main__.RegistryTests.test_a_disabled_builtin_is_absent_from_the_spec_list) ... ok
+test_a_handler_that_raises_is_a_tool_error_not_a_crash (__main__.RegistryTests.test_a_handler_that_raises_is_a_tool_error_not_a_crash) ... ok
+test_a_hanging_handler_is_abandoned_within_its_budget (__main__.RegistryTests.test_a_hanging_handler_is_abandoned_within_its_budget) ... ok
+test_defaults_offer_only_now (__main__.RegistryTests.test_defaults_offer_only_now) ... ok
+test_fetch_url_is_off_unless_a_host_is_named (__main__.RegistryTests.test_fetch_url_is_off_unless_a_host_is_named) ... ok
+test_malformed_arguments_are_the_models_to_fix (__main__.RegistryTests.test_malformed_arguments_are_the_models_to_fix) ... ok
+test_results_are_clipped_to_the_context_budget (__main__.RegistryTests.test_results_are_clipped_to_the_context_budget) ... ok
+test_search_notes_reports_a_missing_index_instead_of_inventing (__main__.RegistryTests.test_search_notes_reports_a_missing_index_instead_of_inventing) ... ok
+test_unknown_tool_names_what_does_exist (__main__.RegistryTests.test_unknown_tool_names_what_does_exist) ... ok
+test_a_tool_with_no_declared_schema_accepts_an_object (__main__.ValidatorTests.test_a_tool_with_no_declared_schema_accepts_an_object) ... ok
+test_types_enums_and_bounds (__main__.ValidatorTests.test_types_enums_and_bounds) ... ok
+test_unknown_keywords_are_ignored_but_known_ones_are_not (__main__.ValidatorTests.test_unknown_keywords_are_ignored_but_known_ones_are_not) ... ok
+
+----------------------------------------------------------------------
+Ran 20 tests in 0.308s
+
+OK
+CUDA_VISIBLE_DEVICES="" python3 -W error::ResourceWarning -u tests/mcp_test.py
+test_a_command_that_does_not_exist_is_a_clean_failure (__main__.MCPTests.test_a_command_that_does_not_exist_is_a_clean_failure) ... ok
+test_a_dead_mcp_server_degrades_the_assistant_instead_of_killing_it (__main__.MCPTests.test_a_dead_mcp_server_degrades_the_assistant_instead_of_killing_it) ... ok
+test_a_hanging_server_costs_its_timeout_not_the_turn (__main__.MCPTests.test_a_hanging_server_costs_its_timeout_not_the_turn) ... ok
+test_a_jsonrpc_error_surfaces_its_message (__main__.MCPTests.test_a_jsonrpc_error_surfaces_its_message) ... ok
+test_a_server_that_dies_mid_call_is_reported_not_swallowed (__main__.MCPTests.test_a_server_that_dies_mid_call_is_reported_not_swallowed) ... ok
+test_allow_and_deny_are_applied_before_the_model_sees_anything (__main__.MCPTests.test_allow_and_deny_are_applied_before_the_model_sees_anything) ... ok
+test_initialize_then_list_then_call (__main__.MCPTests.test_initialize_then_list_then_call) ... ok
+test_restart_is_bounded (__main__.MCPTests.test_restart_is_bounded) ... ok
+test_starting_twice_reuses_the_same_child (__main__.MCPTests.test_starting_twice_reuses_the_same_child) ... ok
+test_the_child_gets_a_small_environment (__main__.MCPTests.test_the_child_gets_a_small_environment) ... ok
+test_the_registry_turns_mcp_tools_into_ordinary_tools (__main__.MCPTests.test_the_registry_turns_mcp_tools_into_ordinary_tools) ... ok
+test_the_tool_list_is_captured_once (__main__.MCPTests.test_the_tool_list_is_captured_once) ... ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 1.159s
+
+OK
+CUDA_VISIBLE_DEVICES="" python3 -W error::ResourceWarning -u tests/mcp_files_test.py
+/home/ambudsharma/qwen36/voice-stack/voice-tools-20260910/tests/mcp_files_test.py:179: SyntaxWarning: invalid escape sequence '\s'
+  'anchors and \s must be regex, not literals: one line has exactly two words')
+test_arguments_must_be_an_object (__main__.FileMCPProcessTests.test_arguments_must_be_an_object) ... ok
+test_doctor_names_every_exposed_directory (__main__.FileMCPProcessTests.test_doctor_names_every_exposed_directory) ... ok
+test_garbage_on_stdin_does_not_kill_the_server (__main__.FileMCPProcessTests.test_garbage_on_stdin_does_not_kill_the_server) ... ok
+test_missing_root_directory_refuses (__main__.FileMCPProcessTests.test_missing_root_directory_refuses) ... ok
+test_no_roots_refuses_to_start (__main__.FileMCPProcessTests.test_no_roots_refuses_to_start) ... ok
+test_several_roots_must_be_named_by_the_caller (__main__.FileMCPProcessTests.test_several_roots_must_be_named_by_the_caller) ... ok
+test_a_huge_result_is_trimmed_not_sliced (__main__.FileMCPTests.test_a_huge_result_is_trimmed_not_sliced)
+The output cap must never hand back JSON that does not parse. ... ok
+test_absolute_and_home_refused (__main__.FileMCPTests.test_absolute_and_home_refused) ... ok
+test_binary_refused_without_content (__main__.FileMCPTests.test_binary_refused_without_content) ... ok
+test_directory_says_use_list_dir (__main__.FileMCPTests.test_directory_says_use_list_dir) ... ok
+test_dot_git_is_not_walkable (__main__.FileMCPTests.test_dot_git_is_not_walkable) ... ok
+test_dotdot_refused (__main__.FileMCPTests.test_dotdot_refused) ... ok
+test_find_by_glob (__main__.FileMCPTests.test_find_by_glob) ... ok
+test_grep_ignore_case_and_glob (__main__.FileMCPTests.test_grep_ignore_case_and_glob) ... ok
+test_grep_match_cap (__main__.FileMCPTests.test_grep_match_cap) ... ok
+test_grep_regex_metacharacters_are_regex (__main__.FileMCPTests.test_grep_regex_metacharacters_are_regex) ... ok
+test_grep_reports_file_and_line_number (__main__.FileMCPTests.test_grep_reports_file_and_line_number) ... ok
+test_grep_skips_binary_and_keeps_going (__main__.FileMCPTests.test_grep_skips_binary_and_keeps_going) ... ok
+test_invalid_regex_is_an_error_not_a_crash (__main__.FileMCPTests.test_invalid_regex_is_an_error_not_a_crash) ... ok
+test_list_dir_hides_dotfiles_by_default (__main__.FileMCPTests.test_list_dir_hides_dotfiles_by_default) ... ok
+test_read_byte_cap_is_reported_not_silent (__main__.FileMCPTests.test_read_byte_cap_is_reported_not_silent) ... ok
+test_read_file_pages_with_offset (__main__.FileMCPTests.test_read_file_pages_with_offset) ... ok
+test_read_file_returns_numbered_lines (__main__.FileMCPTests.test_read_file_returns_numbered_lines) ... ok
+test_roots_reports_what_is_exposed (__main__.FileMCPTests.test_roots_reports_what_is_exposed) ... ok
+test_symlink_to_directory_cannot_escape (__main__.FileMCPTests.test_symlink_to_directory_cannot_escape) ... ok
+test_symlink_to_file_cannot_escape (__main__.FileMCPTests.test_symlink_to_file_cannot_escape) ... ok
+test_tools_listed_are_read_only (__main__.FileMCPTests.test_tools_listed_are_read_only) ... ok
+test_unknown_tool_is_an_error_not_a_crash (__main__.FileMCPTests.test_unknown_tool_is_an_error_not_a_crash) ... ok
+test_walk_never_follows_links_out (__main__.FileMCPTests.test_walk_never_follows_links_out)
+grep over the whole root must not read through `escape` into /etc/passwd. ... ok
+
+----------------------------------------------------------------------
+Ran 29 tests in 0.162s
+
+OK
+CUDA_VISIBLE_DEVICES="" python3 -u tests/tool_loop_test.py
+test_a_broken_capability_config_refuses_to_start (__main__.BridgeStartTests.test_a_broken_capability_config_refuses_to_start) ... /usr/lib/python3.12/unittest/case.py:589: ResourceWarning: unclosed file <_io.TextIOWrapper name=4 encoding='UTF-8'>
+  if method() is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_a_real_start_offers_mcp_and_rag_tools_over_http (__main__.BridgeStartTests.test_a_real_start_offers_mcp_and_rag_tools_over_http) ... ok
+test_a_truncated_final_answer_still_fails_closed (__main__.ToolLoopTests.test_a_truncated_final_answer_still_fails_closed) ... 127.0.0.1 - - [10/Sep/2026 01:33:09] "POST /chat/completions HTTP/1.1" 502 -
+ok
+test_busy_turn_still_shares_the_lock (__main__.ToolLoopTests.test_busy_turn_still_shares_the_lock) ... 127.0.0.1 - - [10/Sep/2026 01:33:09] "POST /chat/completions HTTP/1.1" 503 -
+ok
+test_client_cannot_inject_a_tool_message (__main__.ToolLoopTests.test_client_cannot_inject_a_tool_message) ... 127.0.0.1 - - [10/Sep/2026 01:33:09] "POST /chat/completions HTTP/1.1" 400 -
+127.0.0.1 - - [10/Sep/2026 01:33:09] "POST /chat/completions HTTP/1.1" 400 -
+ok
+test_health_and_tools_advertise_provenance (__main__.ToolLoopTests.test_health_and_tools_advertise_provenance) ... 127.0.0.1 - - [10/Sep/2026 01:33:09] "GET /chat/health HTTP/1.1" 200 -
+127.0.0.1 - - [10/Sep/2026 01:33:09] "GET /tools HTTP/1.1" 200 -
+127.0.0.1 - - [10/Sep/2026 01:33:09] "GET /chat/health HTTP/1.1" 200 -
+127.0.0.1 - - [10/Sep/2026 01:33:09] "GET /tools HTTP/1.1" 200 -
+ok
+test_malformed_tool_call_fails_closed (__main__.ToolLoopTests.test_malformed_tool_call_fails_closed) ... 127.0.0.1 - - [10/Sep/2026 01:33:09] "POST /chat/completions HTTP/1.1" 502 -
+ok
+test_no_tools_means_the_old_single_shot_contract (__main__.ToolLoopTests.test_no_tools_means_the_old_single_shot_contract) ... 127.0.0.1 - - [10/Sep/2026 01:33:09] "POST /chat/completions HTTP/1.1" 200 -
+ok
+test_rounds_are_bounded_and_the_last_round_has_no_tools (__main__.ToolLoopTests.test_rounds_are_bounded_and_the_last_round_has_no_tools) ... 127.0.0.1 - - [10/Sep/2026 01:33:09] "POST /chat/completions HTTP/1.1" 502 -
+ok
+test_streaming_is_opt_in (__main__.ToolLoopTests.test_streaming_is_opt_in) ... 127.0.0.1 - - [10/Sep/2026 01:33:09] "POST /chat/completions HTTP/1.1" 200 -
+ok
+test_tool_round_trip_is_server_owned_and_cited (__main__.ToolLoopTests.test_tool_round_trip_is_server_owned_and_cited) ... 127.0.0.1 - - [10/Sep/2026 01:33:09] "POST /chat/completions HTTP/1.1" 200 -
+ok
+test_unknown_tool_and_bad_arguments_come_back_as_tool_errors (__main__.ToolLoopTests.test_unknown_tool_and_bad_arguments_come_back_as_tool_errors) ... 127.0.0.1 - - [10/Sep/2026 01:33:09] "POST /chat/completions HTTP/1.1" 200 -
+ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 2.663s
+
+OK
+CUDA_VISIBLE_DEVICES="" python3 -u deploy/check_site.py
+== site profile: /home/ambudsharma/qwen36/voice-stack/voice-restore-20260908 unit=voice-stack-gpu2.service gpu=2 ==
+  ok   ports are unique: (8080, 8090, 8091, 8092, 8095)
+  ok   HTTP and HTTPS listeners use different ports
+  ok   campaign id is guard-safe: voice-restore-20260908
+  ok   3 binaries are pinned by full sha256
+  ok   certificate and key are a pair in one directory
+  ok   unit WorkingDirectory=['%h/qwen36/voice-stack/voice-restore-20260908'] points inside %h/qwen36/voice-stack/voice-restore-20260908
+  ok   unit PIDFile=['%h/qwen36/voice-stack/voice-restore-20260908/run/stack.pid'] points inside %h/qwen36/voice-stack/voice-restore-20260908
+  ok   unit ExecStart=['/bin/bash %h/qwen36/voice-stack/voice-restore-20260908/deploy/start-voice-stack.sh'] points inside %h/qwen36/voice-stack/voice-restore-20260908
+  ok   unit ExecStart is the guarded start wrapper
+  ok   start wrapper takes campaign/device/inputs from site_config, not literals
+  ok   guard binds 105 inputs (checkpoints, binaries, source)
+  ok   inputs include checkpoint/config assets
+  ok   inputs include executables
+  ok   inputs include files from this checkout
+  ok   inputs bind tools/speech_ui.py
+  ok   inputs bind web/chat.html
+  ok   inputs bind web/chat.js
+  ok   inputs bind deploy/site_config.py
+  ok   inputs bind deploy/voice_stack.py
+== PASS: 19 checks, 0 failures ==

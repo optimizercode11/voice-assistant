@@ -70,5 +70,60 @@ class ItCanOnlyAddPatience(unittest.TestCase):
             judge(text)
 
 
+class HoldTests(unittest.TestCase):
+    """`hold` is the field the page actually obeys.
+
+    THE BUG THIS ENCODES.  The page used to gate its own hold on
+    `audio_seconds` -- the length of the *recording* -- but the browser is not
+    allowed to stop until it has logged a full second of silence, so every clip
+    it uploads carries that silence plus whatever lead-in there was.  A one-word
+    clip therefore measured ~1.5-1.8 s, the gate never opened, and "I" went to
+    the model as a finished turn.  `hold` is decided from the voiced duration
+    the browser measured instead, which is the thing the decision was always
+    about.
+    """
+
+    def test_a_short_utterance_holds_at_any_clip_length(self):
+        for speech_ms in (300, 900, 1500, 1600, 2400):
+            verdict = turn_control.completeness('I.', speech_ms)
+            self.assertTrue(verdict['hold'], f'"I." dispatched after only {speech_ms} ms of speech')
+
+    def test_a_finished_turn_never_holds_however_short(self):
+        for text in ('I want to go to the museum.', 'Yes.', 'Hello.'):
+            self.assertFalse(turn_control.completeness(text, 300)['hold'], f'{text!r} was held')
+
+    def test_an_open_clause_holds_whatever_the_duration_says(self):
+        # Ending on "the" is evidence about the sentence, not about the pause.
+        for speech_ms in (600, 2500, 9000):
+            verdict = turn_control.completeness('How do I restart the', speech_ms)
+            self.assertTrue(verdict['open'])
+            self.assertTrue(verdict['hold'], f'open clause dispatched after {speech_ms} ms')
+
+    def test_the_measurement_is_echoed_back_for_the_transcript_log(self):
+        self.assertEqual(turn_control.completeness('I.', 430)['speech_ms'], 430)
+        self.assertIsNone(turn_control.completeness('I.', None)['speech_ms'])
+
+    def test_without_a_measurement_it_falls_back_to_the_words(self):
+        self.assertTrue(turn_control.completeness('I.', None)['hold'])
+        self.assertTrue(turn_control.completeness('Want to', None)['hold'])
+        # 'I want to go to the' ends on 'the', which is semantic evidence and
+        # holds with or without a measurement.  The fallback only governs the
+        # weak verdicts, and it must not stall on a long one.
+        self.assertFalse(turn_control.completeness('um uh hmm', None)['hold'],
+                         'a long run of fillers with no measurement must not stall forever')
+
+    def test_patience_is_bounded_by_a_duration_not_a_word_count(self):
+        # Nine seconds of audible speech that transcribed to one word is an ASR
+        # failure rather than a half sentence, and holding it would ask the user
+        # to repeat themselves.  Dispatching is the lesser evil once the page has
+        # already carried the fragment forward.
+        self.assertFalse(turn_control.completeness('I.', 9000)['hold'])
+
+    def test_the_verdict_shape_is_stable_for_the_page(self):
+        verdict = turn_control.completeness('I.', 300)
+        for key in ('complete', 'reason', 'extra_silence_ms', 'words', 'hold', 'open', 'speech_ms'):
+            self.assertIn(key, verdict)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

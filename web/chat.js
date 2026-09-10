@@ -14,7 +14,7 @@ setTheme(document.documentElement.dataset.theme==='light'?'light':'dark');
 let active = false, busy = false, ready = false, epoch = 0, abort = null;
 let stream = null, context = null, source = null, analyser = null, recorder = null, raf = 0;
 let history = [], voiceList = [], audioURL = null, secureURL = null, phase = 'idle', streaming = false;
-let fragmentHolds = 0;
+let fragmentHolds = 0, heldText = '';
 const canRecord = !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
 function setState(value, message) {
   phase = value; $('orb').dataset.state = value;
@@ -134,6 +134,7 @@ function primeAudio() {
   replaceAudio(new Blob([wav],{type:'audio/wav'})); player.play().catch(()=>{});
 }
 function stopSession(note = 'Conversation ended. Start again whenever you like.') {
+  heldText = ''; fragmentHolds = 0;
   active = false; epoch++; abort?.abort(); abort = null; busy = false;
   clearCapture(); player.pause(); stopPlaybackGlow(); setGlow(0);
   if (stream) {stream.getTracks().forEach(track=>track.stop()); stream = null;}
@@ -143,8 +144,9 @@ function stopSession(note = 'Conversation ended. Start again whenever you like.'
   // so closing the context here would silently give up on it for good.
   setState('idle', note);
 }
-async function responseJSON(url, body, signal) {
-  const response = await fetch(url,{method:'POST',body,signal,...(typeof body==='string'?{headers:{'Content-Type':'application/json'}}:{})});
+async function responseJSON(url, body, signal, headers) {
+  const response = await fetch(url,{method:'POST',body,signal,
+    headers:{...(typeof body==='string'?{'Content-Type':'application/json'}:{}),...(headers||{})}});
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || 'The request failed. Please try again.');
   return result;
@@ -189,7 +191,7 @@ function listen() {
     if (!active || thisEpoch !== epoch) return;
     recorder = null; cancelAnimationFrame(raf); stream.getTracks().forEach(track=>{track.enabled=false;});
     if (!chunks.length || (voiced < 120 && !rec.sendNow)) {listen(); return;}
-    runTurn(new Blob(chunks,{type:rec.mimeType || 'audio/webm'}), rec.sendNow === true);
+    runTurn(new Blob(chunks,{type:rec.mimeType || 'audio/webm'}), rec.sendNow === true, voiced);
   };
   rec.start(250); busy = false; setState('listening','I’m listening. A short pause sends your message.');
   const samples = new Float32Array(analyser.fftSize);
@@ -205,7 +207,13 @@ function listen() {
 // a 19.5 s upload keeps 96% of its words and a 29.3 s upload keeps 19% -- the
 // engine returns its first sentence and then degenerates.  Stopping earlier
 // loses the end of a long sentence; stopping here loses almost all of it.
-if ((voiced >= 180 && now-lastVoice > 1000) || now-started > 20000) {rec.stop();return;}
+    // The window stays a flat 1000 ms deliberately. Lengthening it for short
+    // utterances looks like the fix for "I" -- one word followed by a pause is
+    // more often a comma than a period -- but it charges that delay to every
+    // short reply, including a real "Yes.", and it is not needed: the cut is no
+    // longer the bug. What was broken is what happened *after* the cut, so see
+    // the carry-below and turn_control._should_hold.
+    if ((voiced >= 180 && now-lastVoice > 1000) || now-started > 20000) {rec.stop();return;}
     raf = requestAnimationFrame(tick);
   }
   raf = requestAnimationFrame(tick);
@@ -239,7 +247,8 @@ async function playReply(blob, signal) {
     attempt();
   });
 }
-async function runTurn(input, forced = false) {
+async function runTurn(input, forced = false, voicedMs = null) {
+  if (!(input instanceof Blob)) { heldText = ''; fragmentHolds = 0; }
   clearCapture(); player.pause(); busy = true;
   const id = ++epoch, controller = new AbortController(); abort = controller;
   const check = () => {if(id !== epoch || controller.signal.aborted) throw new DOMException('Stopped','AbortError');};
@@ -248,24 +257,40 @@ async function runTurn(input, forced = false) {
     let text = input, original = null;
     if (input instanceof Blob) {
       setState('transcribing','Turning your speech into text…');
-      const heard = await responseJSON('/stt',input,controller.signal);
+      // Tell the bridge how long we actually heard a voice.  It cannot recover
+      // that from the clip: the clip also carries the silence the endpointer
+      // waits for before it is allowed to stop.
+      const heard = await responseJSON('/stt', input, controller.signal,
+        Number.isFinite(voicedMs) ? {'X-Voiced-Ms': String(Math.round(voicedMs))} : undefined);
       text = String(heard.text || '').trim(); check();
-      if (!text) {fragmentHolds=0;busy=false;if(active)listen();else setState('idle','No speech was detected. Please try again.');return;}
+      // A breath between two halves of a sentence must not throw away the first half, so heldText deliberately survives this path.
+      if (!text) {busy=false;if(active)listen();else setState('idle','No speech was detected. Please try again.');return;}
       const corrected=correctSpeech(text);if(corrected!==text){original=text;text=corrected;}
       // A one-word clip is not a question.  qasr punctuates fragments -- a 0.6 s
       // clip of one syllable comes back as "I." -- so the transcript cannot be
       // trusted to say when a turn is finished, and answering "I." produced a
       // confident reply to a question nobody asked.  Hold it, stay open, and
       // bound the holds: this may add patience, it may never wedge a turn.
-      const judged = heard.turn;
-      if (!forced && judged && judged.complete === false && judged.words <= 1
-          && (Number(heard.audio_seconds) || 0) < 1.5 && fragmentHolds < 2) {
-        fragmentHolds++; busy = false;
-        if (active) { listen(); setState('listening', `I only caught “${text}”. Keep talking, or press Send now.`); }
-        else setState('idle', `Only “${text}” was heard. Send a longer message.`);
+      // Half a sentence is not a question. The server decides this -- it has the
+      // words and the voiced duration this page measured -- and the page only
+      // obeys, bounds the patience, and critically KEEPS the words. Dropping a
+      // held fragment was its own bug: "I" then "want to go to the museum" used to
+      // dispatch the second clip on its own, so the reply was about wanting.
+      const judged = heard.turn, carried = heldText;
+      if (!forced && judged?.hold && fragmentHolds < 3) {
+        fragmentHolds++;
+        heldText = (carried ? carried + ' ' : '') + text;
+        busy = false;
+        if (active) { listen(); setState('listening', `I heard “${heldText}”. Keep talking, or press Send now.`); }
+        else setState('idle', `Only “${heldText}” so far. Say more, or press Send.`);
         return;
       }
-      fragmentHolds = 0;
+      // The fragment was judged unfinished, so the full stop qasr put on it is not
+      // real.  "I. want to go to the museum." reads as two sentences and makes the
+      // voice stop in the middle of a clause, so only the carried half loses its
+      // punctuation; whatever closed the last clip is the transcript's own.
+      if (carried) text = `${carried.replace(/[.!?\u2026]+\s*$/, '')} ${text}`.trim();
+      fragmentHolds = 0; heldText = '';
     }
     message('user',text,original); setState('thinking','Qwen is preparing a reply…');
     const pending = [...before,{role:'user',content:text}];

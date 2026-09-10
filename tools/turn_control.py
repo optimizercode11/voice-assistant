@@ -60,6 +60,12 @@ here there hello hi goodbye morning evening who what why how when where
 WORD = re.compile(r"[A-Za-z][A-Za-z'’-]*")
 TERMINAL = (".", "!", "?", "…")
 
+# Under this much *actually audible* speech, a pause is much more likely a comma,
+# a breath or someone reaching for the next word than it is the end of a turn.
+# It is deliberately compared against the voiced duration and never against the
+# length of the recording -- see _should_hold.
+HOLD_SPEECH_MS = 2500
+
 # How much more time to grant, by how strongly the transcript says "not yet".
 # These are added to the browser's own window, not substituted for it.
 EXTRA_HARD_MS = 1200     # ends on a conjunction/preposition: a clause is open
@@ -68,8 +74,8 @@ EXTRA_FILLER_MS = 900    # nothing but "um"
 MAX_EXTRA_MS = 2000
 
 
-def completeness(text: str) -> dict:
-    """Judge a transcript.  Returns {complete, reason, extra_silence_ms, words}."""
+def _judge(text: str) -> dict:
+    """The words-only verdict.  Use completeness(); this is the half that needs no audio."""
     stripped = (text or "").strip()
     if not stripped:
         return {"complete": False, "reason": "empty", "extra_silence_ms": EXTRA_FILLER_MS, "words": 0}
@@ -86,13 +92,13 @@ def completeness(text: str) -> dict:
 
     last = content[-1]
     if last in DANGLING:
-        return {"complete": False, "reason": f"ends on the open word {last!r}",
+        return {"complete": False, "reason": f"ends on the open word {last!r}", "open": True,
                 "extra_silence_ms": EXTRA_HARD_MS, "words": len(words)}
 
     # A trailing comma is the transcript saying the same thing a conjunction does.
     if stripped.endswith(",") or stripped.endswith(":"):
-        return {"complete": False, "reason": "ends on a comma", "extra_silence_ms": EXTRA_HARD_MS,
-                "words": len(words)}
+        return {"complete": False, "reason": "ends on a comma", "open": True,
+                "extra_silence_ms": EXTRA_HARD_MS, "words": len(words)}
 
     # A single content word is judged on what it *is*, never on whether the ASR
     # happened to put a stop after it.  qasr punctuates fragments: measured on
@@ -119,17 +125,63 @@ def completeness(text: str) -> dict:
             "extra_silence_ms": min(EXTRA_SOFT_MS // 2, MAX_EXTRA_MS), "words": len(words)}
 
 
+def _should_hold(verdict: dict, speech_ms) -> bool:
+    """Wait for more speech instead of answering what is almost certainly half a sentence.
+
+    WHY THIS MEASURES SPEECH AND NOT THE RECORDING
+        The tempting version compares `audio_seconds` to a threshold, and on the
+        deployed stack that is precisely the bug that made the assistant answer
+        "I" as though it were a question.  The browser is only allowed to stop
+        after a full second of silence, so *every* clip it uploads carries
+        >=1000 ms of trailing silence plus whatever lead-in there was.  A clip of
+        one syllable therefore reports an `audio_seconds` of roughly 1.5-1.8 s --
+        over the threshold -- and the hold never fired for the one case it was
+        written for.  The clip length is not a measurement of how much a person
+        said; it is a measurement of how long the endpointer waits.
+
+    So this takes the browser's voiced-ms figure.  When that is missing it falls
+    back to counting words, which is weaker but never worse than what was here
+    before.  A wrong answer here only ever costs a little more patience.
+    """
+    if verdict.get("complete"):
+        return False
+    if verdict.get("open"):
+        # Nobody ends a turn on "the" or "because".  That is evidence about the
+        # sentence, not about the pause, so it outranks the duration rule: a
+        # speaker who has been audible for four seconds and stopped on "the" is
+        # still not finished.
+        return True
+    if isinstance(speech_ms, (int, float)) and speech_ms > 0:
+        return speech_ms < HOLD_SPEECH_MS
+    return int(verdict.get("words") or 0) <= 2
+
+
+def completeness(text: str, speech_ms=None) -> dict:
+    """Judge a transcript.  Returns {complete, reason, extra_silence_ms, words, hold, speech_ms}.
+
+    `speech_ms` is optional so the words-only callers (the CLI, the tests, any
+    future transcript review) keep working unchanged.
+    """
+    verdict = _judge(text)
+    verdict["speech_ms"] = int(speech_ms) if isinstance(speech_ms, (int, float)) else None
+    verdict["open"] = bool(verdict.get("open"))
+    verdict["hold"] = _should_hold(verdict, speech_ms)
+    return verdict
+
+
 def main(argv) -> int:
     import argparse
     parser = argparse.ArgumentParser(description="Judge whether a transcript is a finished turn.")
+    parser.add_argument("--speech-ms", type=int, default=None,
+                        help="how long the speaker was actually audible, from the browser")
     parser.add_argument("text", nargs="?", help="omit to read lines from stdin")
     args = parser.parse_args(argv[1:])
     if args.text is not None:
-        print(json.dumps(completeness(args.text)))
+        print(json.dumps(completeness(args.text, args.speech_ms)))
         return 0
     for line in sys.stdin:
         if line.strip():
-            print(json.dumps({**completeness(line), "text": line.strip()}))
+            print(json.dumps({**completeness(line, args.speech_ms), "text": line.strip()}))
     return 0
 
 

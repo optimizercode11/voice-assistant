@@ -35,6 +35,8 @@ matching the live tree exactly is worth more than a prettier layout.
 | `tests/browser/*.mjs` | `kokoro/tools/*_browser.mjs`, `page_harness.mjs` | Playwright resolved through `$PLAYWRIGHT`; fixtures from `tests/fixtures/`; screenshots to `evidence/browser/`. |
 | `tests/fixtures/microphone.wav` | `kokoro/evidence/recording/microphone.wav` (3.25 s) | Upload body for the STT stubs. |
 | `tests/fixtures/capture.wav` | `kokoro/evidence/voicechat/microphone.wav` (13.25 s) | Chromium's fake microphone device. These are two different recordings; collapsing them makes the pause detector never close a turn. |
+| `tests/fixtures/capture-two-part.wav` | generated from `tests/fixtures/capture.wav` by `tests/fixtures/make_two_part_capture.py` | Two real speech bursts lifted out of that recording, 1.8 s apart, so the endpointer cuts one sentence in half. Kept as a generator because the *timing structure* is the fixture and a blob of samples cannot be reviewed for it. |
+| `tests/browser/voice_carry_browser.mjs` | — | New: reproduces the reported "it only sends `I`" failure end to end, and its `--sabotage` arm is that failure. |
 | `scripts/{guarded-run,guarded-hostrun,guardrail-check,worktree-fingerprint}` | `inference-engine/scripts/` | Vendored so evidence binds *this* tree; see `scripts/VENDORED.md`. |
 
 ## Verification actually performed during the extraction

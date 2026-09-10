@@ -74,6 +74,7 @@ as the failure it is.
 export NODE=/path/to/node20+                       # Playwright needs Node >= 20
 export PLAYWRIGHT=/path/to/node_modules/playwright/index.mjs
 CUDA_VISIBLE_DEVICES="" $NODE tests/browser/voice_chat_browser.mjs
+CUDA_VISIBLE_DEVICES="" $NODE tests/browser/voice_carry_browser.mjs
 CUDA_VISIBLE_DEVICES="" $NODE tests/browser/voice_controls_browser.mjs
 CUDA_VISIBLE_DEVICES="" $NODE tests/browser/voice_language_browser.mjs
 CUDA_VISIBLE_DEVICES="" $NODE tests/browser/stt_browser.mjs
@@ -86,9 +87,19 @@ a fake microphone device; webkit has no MediaRecorder in the Linux test build,
 so those runs cover typed input and **make no physical-Safari-microphone
 claim**.  Screenshots land in `evidence/browser/`.
 
-`--sabotage` variants exist for the chat and controls suites: they disable one
-handler (the Space key, or automatic language choice) and must fail exactly
-there.  `--live` points the same assertions at the deployed page.
+`voice_carry_browser.mjs` is the suite that reproduces a *reported* failure end
+to end.  Chromium's fake microphone is fed
+`tests/fixtures/capture-two-part.wav` -- real speech, a 1.8 s pause, real speech
+-- so the page's own endpointer really does cut one sentence into two clips.
+The `/stt` stub answers the first clip with `"I."` and builds the turn verdict by
+shelling out to the real `tools/turn_control.py`, so this suite cannot pass while
+the server's judgement is broken; a JavaScript copy of those rules would have
+kept passing through the bug it is testing for.  The assertion is the one the
+user asked for: the model receives `"I want to go to the museum."` as one turn.
+
+`--sabotage` variants exist for the chat, controls, tools and carry suites: they
+disable one handler (the Space key, automatic language choice, tool progress, or
+the carry-forward) and must fail exactly there.  `--live` points the same assertions at the deployed page.
 
 `page_harness.mjs` is different again: it runs the studio page's script against
 a live `kserver` with a fake WebAudio that records what the page actually

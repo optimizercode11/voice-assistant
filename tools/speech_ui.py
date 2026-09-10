@@ -138,7 +138,28 @@ def execute(command, directory, timeout, disconnected):
             stop_process(process)
 
 
-def transcribe_remote(config, wav_bytes, frames, disconnected):
+def speech_ms(headers):
+    """How long the browser actually heard a voice, in milliseconds, or None.
+
+    The browser owns the microphone and knows this exactly; the bridge cannot
+    recover it from the clip, because the clip also contains the silence the
+    endpointer insists on before it stops.  It is a hint and not a claim: it
+    only ever makes the assistant wait longer, never cut a turn short, and a
+    missing or absurd value falls back to judging the words alone.
+
+    A header rather than a query parameter, so /stt stays one URL.  The browser
+    suites route on that URL, and a glob like `**/stt` does not match a URL that
+    grew a query string -- a diagnostic that quietly breaks the tests is a
+    diagnostic that gets deleted later.
+    """
+    try:
+        value = int(str(headers.get("X-Voiced-Ms", "")).strip())
+    except (TypeError, ValueError):
+        return None
+    return value if 0 <= value <= MAX_SECONDS * 1000 else None
+
+
+def transcribe_remote(config, wav_bytes, frames, disconnected, speech_ms_value=None):
     """Hand the decoded WAV to the resident qasr server; keep the local contract.
 
     WHY THE BRIDGE STILL OWNS FFMPEG AND THE CAPS
@@ -199,15 +220,16 @@ def transcribe_remote(config, wav_bytes, frames, disconnected):
     reply = {"text": cleaned, "raw_text": raw,
              "audio_seconds": frames / 24000, "chunks": int(result.get("chunks", 1)),
              # Is this actually a finished turn?  The browser owns the microphone
-             # and cannot tell "I" from a sentence, so the transcript says so.
-             "turn": turn_control.completeness(cleaned)}
+             # and cannot tell "I" from "I want...", so the transcript plus the
+             # voiced duration the browser measured say so.
+             "turn": turn_control.completeness(cleaned, speech_ms_value)}
     for key in ("engine", "frontend_ms", "frames"):     # diagnostics, not contract
         if key in result:
             reply[key] = result[key]
     return reply
 
 
-def transcribe(config, audio, directory, disconnected):
+def transcribe(config, audio, directory, disconnected, speech_ms_value=None):
     source, wav = Path(directory) / "upload", Path(directory) / "audio.wav"
     source.write_bytes(audio)
     # Whitelist media demuxers; uploaded playlists must not read local files or
@@ -233,7 +255,7 @@ def transcribe(config, audio, directory, disconnected):
         # native path was given: the browser uploads webm/opus, which no ASR
         # frontend reads directly, and the certified path is ffmpeg-to-24 kHz
         # followed by the pinned librosa resample.
-        return transcribe_remote(config, wav.read_bytes(), frames, disconnected)
+        return transcribe_remote(config, wav.read_bytes(), frames, disconnected, speech_ms_value)
     output = execute([str(config.asr_bin), "--device", "cuda", "--model", str(config.model),
                       "--tokenizer", str(config.tokenizer), "--wav", str(wav),
                       "--seed", "1729", "--max-tokens", "256"], directory, TIMEOUT, disconnected)
@@ -251,7 +273,7 @@ def transcribe(config, audio, directory, disconnected):
         cleaned = transcript_text(raw)
         return {"text": cleaned, "raw_text": raw,
                 "audio_seconds": frames / 24000, "chunks": len(chunks),
-                "turn": turn_control.completeness(cleaned)}
+                "turn": turn_control.completeness(cleaned, speech_ms_value)}
     except (ValueError, TypeError, AttributeError) as error:
         raise RequestError(502, "The ASR engine returned incomplete or invalid output.") from error
 
@@ -521,7 +543,8 @@ class Handler(BaseHTTPRequestHandler):
             # Disconnect polling must be nonblocking after the timed upload.
             self.connection.setblocking(False)
             with tempfile.TemporaryDirectory(prefix="speech-ui-") as directory:
-                result = transcribe(config, audio, directory, self.disconnected)
+                result = transcribe(config, audio, directory, self.disconnected,
+                                    speech_ms(self.headers))
             self.connection.settimeout(30)
             self.reply(200, result)
         finally:

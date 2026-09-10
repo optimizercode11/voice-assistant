@@ -62,7 +62,7 @@ doctor:
 	$(CPU) $(PYTHON) -u tools/voicectl.py --config config/assistant.toml doctor
 
 test-browser:
-	@for suite in voice_chat_browser voice_controls_browser voice_language_browser stt_browser voice_tools_browser; do \
+	@for suite in voice_chat_browser voice_carry_browser voice_controls_browser voice_language_browser stt_browser voice_tools_browser; do \
 	  echo "== $$suite =="; \
 	  $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/$$suite.mjs || exit 1; \
 	done
@@ -78,9 +78,10 @@ sabotage:
 	  else echo "ok  correctly refused: speech_ui_test.py $$arm"; fi; \
 	done; \
 	# Each of these is a load-bearing claim: the browser cannot write a tool
-	# result, a server cannot rename a tool mid-turn, and a file server's
+	# result, a server cannot rename a tool mid-turn, a file server's
 	# containment cannot be reduced to a plain join (that is the arm that
-	# leaks /etc/passwd through a symlink).
+	# leaks /etc/passwd through a symlink) -- and the page cannot drop the half of
+	# a sentence it already heard.
 	for suite in tool_loop_test mcp_test mcp_files_test turn_control_test approvals_test; do \
 	  if $(CPU) $(PYTHON) -u tests/$$suite.py --sabotage >/dev/null 2>&1; then \
 	    echo "SABOTAGE PASSED (this is the failure): $$suite.py --sabotage"; failures=$$((failures+1)); \
@@ -89,6 +90,9 @@ sabotage:
 	if $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/voice_tools_browser.mjs --sabotage >/dev/null 2>&1; then \
 	  echo "SABOTAGE PASSED (this is the failure): the page ignores tool progress"; failures=$$((failures+1)); \
 	else echo "ok  correctly refused: voice_tools_browser.mjs --sabotage"; fi; \
+	if $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/voice_carry_browser.mjs --sabotage >/dev/null 2>&1; then \
+	  echo "SABOTAGE PASSED (this is the failure): the page drops a held fragment"; failures=$$((failures+1)); \
+	else echo "ok  correctly refused: voice_carry_browser.mjs --sabotage"; fi; \
 	if $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/voice_controls_browser.mjs --sabotage >/dev/null 2>&1; then \
 	  echo "SABOTAGE PASSED (this is the failure): keyboard handler"; failures=$$((failures+1)); \
 	else echo "ok  correctly refused: voice_controls_browser.mjs --sabotage"; fi; \

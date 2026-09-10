@@ -130,7 +130,7 @@ reload picks up where you left off and **re-speaks nothing**.
 - **A refused reply leaves no trace.** An empty or failed turn is never written
   down, so a reload cannot resurrect a question the model never answered.
 - **The counter tells the truth.** A long conversation stays readable on screen,
-  but only the last 40 turns are sent — the bridge refuses more than 100
+  but only the last 40 turns are sent — the bridge refuses more than 101
   messages — and the header says *"Qwen is holding the last 40"*.
 - **Two tabs do not overwrite each other.** A tab writes only into the
   conversation it owns, so **New chat** in one tab is never resurrected by a

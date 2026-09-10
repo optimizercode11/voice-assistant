@@ -194,9 +194,10 @@ server-side session: the bridge has no identity to hang one on, and inventing a
 session id to re-learn what the browser already holds would add a state store,
 a lifetime, and a privacy surface to buy nothing.
 
-The other consequence is a ceiling.  `parse_messages` refuses more than 100
-messages and more than 8000 characters in one, so an unbounded saved transcript
-eventually turns every request into a 400.  The page therefore separates *shown*
+The other consequence is a ceiling, measured against the deployed bridge rather
+than read off the source: 101 messages is a 200 and 102 is a 400, one message of
+8000 characters is a 200 and one of 8001 is a 400.  An unbounded saved
+transcript therefore eventually turns every request into a 400.  The page therefore separates *shown*
 from *sent*: up to 200 turns are kept and rendered, the last 40 are replayed, and
 the header states which of the two the model is holding.  Storage is bounded by
 bytes rather than turn count because one reply may legitimately be 8000

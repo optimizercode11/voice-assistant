@@ -79,7 +79,8 @@ function shortPath(path) { const parts = String(path).split('/').filter(Boolean)
 //
 // Three limits are load-bearing rather than defensive:
 //   * tools/voice_chat.py parse_messages refuses a request carrying more than
-//     100 messages, so the transcript that is *sent* is capped at SEND_TURNS.
+//     101 messages -- measured against the deployed bridge, 101 is a 200 and 102
+//     is a 400 -- so the transcript that is *sent* is capped at SEND_TURNS.
 //     An older part of the conversation stays readable on screen, it just stops
 //     being replayed, and the counter says which of the two Qwen is holding.
 //   * localStorage is a few MB per origin and one reply may be 8000 characters,
@@ -92,10 +93,10 @@ function shortPath(path) { const parts = String(path).split('/').filter(Boolean)
 // Storage failing may never cost a turn: the conversation carries on in memory
 // and the counter admits out loud that it is not being saved.
 const CHAT_KEY = 'voice-chat';
-const SEND_TURNS = 40;      // 80 messages, under the bridge's 100-message ceiling
+const SEND_TURNS = 40;      // 81 messages at the cap, inside the bridge's 101
 const STORE_TURNS = 200;
 const STORE_BYTES = 1200000;
-const MAX_MESSAGE = 8000;   // the ceiling parse_messages puts on a single message
+const MAX_MESSAGE = 8000;   // measured: 8000 chars is a 200, 8001 is a 400
 let transcript = [];        // every turn this browser still holds, oldest first
 let conversationId = '';
 let saving = true;          // false once storage is unavailable or another tab owns the key

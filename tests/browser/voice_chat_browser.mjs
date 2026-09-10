@@ -38,6 +38,11 @@ for(const [name,type] of (sabotage?[['chromium',chromium]]:[['chromium',chromium
  await page.route('**/tts?*',route=>route.fulfill({contentType:'audio/wav',body:wav}));
  await page.goto(`http://127.0.0.1:${server.address().port}/chat`);
  await page.waitForFunction(()=>!document.querySelector('#send').disabled);
+ // This suite guards the OLD guarantee: with barge-in switched off the
+ // microphone is physically muted for the whole reply, so the assistant
+ // cannot hear itself no matter what the room does. voice_barge_browser.mjs
+ // covers the opposite mode.
+ await page.uncheck('#barge-in');
  const send=async text=>{await page.locator('#text').fill(text);await page.locator('#send').click();};
  await send('Remember <b>orchid</b>.');
  await page.waitForFunction(()=>document.querySelector('#player').currentTime>.15&&!document.querySelector('#player').paused);

@@ -8,7 +8,7 @@ CPU = CUDA_VISIBLE_DEVICES=""
 NODE   ?= /tmp/kokoro-playback-browser/node_modules/.bin/node
 PLAYWRIGHT ?= /tmp/kokoro-playback-browser/node_modules/playwright/index.mjs
 
-.PHONY: help test test-bridge test-chat test-tools test-retrieval test-mcp test-files test-approvals test-loop test-browser \
+.PHONY: help test test-bridge test-chat test-tools test-retrieval test-mcp test-files test-approvals test-barge test-loop test-browser \
         sabotage check check-site doctor fingerprint inputs
 
 help:
@@ -20,7 +20,7 @@ help:
 	                '  check         everything that runs offline' \
 	                '  inputs        the asset list a guarded start binds with --input'
 
-test: test-bridge test-chat test-retrieval test-tools test-mcp test-files test-approvals test-loop test-turn
+test: test-bridge test-chat test-retrieval test-tools test-mcp test-files test-approvals test-barge test-loop test-turn
 
 test-bridge:
 	@test -z "$${CUDA_VISIBLE_DEVICES-}" || { echo "rerun with CUDA_VISIBLE_DEVICES=''"; exit 2; }
@@ -55,6 +55,12 @@ test-turn:
 test-approvals:
 	$(CPU) $(PYTHON) -W error::ResourceWarning -u tests/approvals_test.py
 
+# The barge-in gate decides whether the assistant hears the user or hears
+# itself, and a headless browser has no acoustic echo path to test that in, so
+# it is tested numerically against the real source instead.
+test-barge:
+	$(CPU) $(NODE) tests/barge_gate_test.mjs
+
 test-loop:
 	$(CPU) $(PYTHON) -u tests/tool_loop_test.py
 
@@ -62,7 +68,7 @@ doctor:
 	$(CPU) $(PYTHON) -u tools/voicectl.py --config config/assistant.toml doctor
 
 test-browser:
-	@for suite in voice_chat_browser voice_carry_browser voice_controls_browser voice_language_browser stt_browser voice_tools_browser; do \
+	@for suite in voice_chat_browser voice_carry_browser voice_barge_browser voice_controls_browser voice_language_browser stt_browser voice_tools_browser; do \
 	  echo "== $$suite =="; \
 	  $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/$$suite.mjs || exit 1; \
 	done
@@ -90,6 +96,12 @@ sabotage:
 	if $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/voice_tools_browser.mjs --sabotage >/dev/null 2>&1; then \
 	  echo "SABOTAGE PASSED (this is the failure): the page ignores tool progress"; failures=$$((failures+1)); \
 	else echo "ok  correctly refused: voice_tools_browser.mjs --sabotage"; fi; \
+	if $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/voice_barge_browser.mjs --sabotage >/dev/null 2>&1; then \
+	  echo "SABOTAGE PASSED (this is the failure): barge-in arms with no echo reference"; failures=$$((failures+1)); \
+	else echo "ok  correctly refused: voice_barge_browser.mjs --sabotage"; fi; \
+	if $(CPU) $(NODE) tests/barge_gate_test.mjs --sabotage >/dev/null 2>&1; then \
+	  echo "SABOTAGE PASSED (this is the failure): the echo floor is decorative"; failures=$$((failures+1)); \
+	else echo "ok  correctly refused: barge_gate_test.mjs --sabotage"; fi; \
 	if $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/voice_carry_browser.mjs --sabotage >/dev/null 2>&1; then \
 	  echo "SABOTAGE PASSED (this is the failure): the page drops a held fragment"; failures=$$((failures+1)); \
 	else echo "ok  correctly refused: voice_carry_browser.mjs --sabotage"; fi; \

@@ -15,7 +15,47 @@ let active = false, busy = false, ready = false, epoch = 0, abort = null;
 let stream = null, context = null, source = null, analyser = null, recorder = null, raf = 0;
 let history = [], voiceList = [], audioURL = null, secureURL = null, phase = 'idle', streaming = false;
 let fragmentHolds = 0, heldText = '';
+let bargeRaf = 0, bargeVoiced = 0, bargeLast = 0, playbackStartedAt = 0, playbackEndedAt = 0;
 const canRecord = !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
+// ------------------------------------------------------------ barge-in (AEC3)
+// The browser's own echo canceller -- libwebrtc AEC3 -- is ALREADY requested:
+// getUserMedia below passes echoCancellation:true.  What stopped you interrupting
+// was never the echo.  This page mutes the microphone for the whole reply
+// (clearCapture sets track.enabled=false), so AEC3 has nothing to cancel and
+// nobody is listening.  Opening the mic is the easy half; the hard half is not
+// mistaking the reply for your voice.
+//
+// Two facts make that safe enough to try.  The reply is already tapped for the
+// orb glow (playbackAnalyser), so the page knows how loud it is being right now
+// -- echo is a scaled copy of that, and a person talking over it is energy ABOVE
+// it.  And getSettings().echoCancellation reports whether the canceller is
+// actually engaged: if the browser says false -- Bluetooth, some Linux capture
+// paths -- barge-in is refused outright rather than left to guess.
+//
+// The bias is deliberate.  A missed interruption costs one more try; a false one
+// makes the assistant talk over you and then act on words nobody said.
+// BARGE-GATE-BEGIN: extracted verbatim by tests/barge_gate_test.mjs.
+const BARGE = {
+  settleMs: 350,   // AEC3 re-converges when playback starts AND when it stops
+  floor: 0.020,    // never trust mic energy below this, echo or no echo
+  echoGain: 0.5,   // assume ~6 dB of return loss, not AEC3's best case
+  holdMs: 220,     // sustained near-end speech before the reply is cut
+};
+function nearEndSpeech(mic, playback, sincePlayback) {
+  // Fail closed on every input.  A playback level we cannot measure is an echo
+  // we cannot cancel, and the safe answer to "was that me or them?" is then
+  // "probably me -- do not act on it".  The first version of this coerced a
+  // missing playback level to zero, which silently degraded the gate to "any
+  // loud microphone interrupts", i.e. the assistant interrupting itself.
+  if (typeof mic !== 'number' || !Number.isFinite(mic) || mic <= 0) return false;
+  if (typeof playback !== 'number' || !Number.isFinite(playback) || playback < 0) return false;
+  if (typeof sincePlayback !== 'number' || !Number.isFinite(sincePlayback) || sincePlayback < 0) return false;
+  if (sincePlayback < BARGE.settleMs) return false;           // still converging
+  // playback === 0 is not junk, it is a gap between words: there is no echo to
+  // cancel right now, so the absolute floor alone decides.
+  return mic > Math.max(BARGE.floor, playback * BARGE.echoGain);
+}
+// BARGE-GATE-END
 function setState(value, message) {
   phase = value; $('orb').dataset.state = value;
   $('state').textContent = ({idle:'Ready',listening:'Listening',transcribing:'Hearing you',thinking:'Thinking',synthesizing:'Finding its voice',speaking:'Speaking',paused:'Paused',error:'Something went wrong'})[value] || value;
@@ -53,6 +93,7 @@ function message(role, text, original = null, evidence = null) {
 }
 function clearCapture() {
   cancelAnimationFrame(raf); raf = 0;
+  stopBargeWatch();
   if (recorder) { recorder.onstop = null; recorder.ondataavailable = null; if (recorder.state !== 'inactive') recorder.stop(); recorder = null; }
   if (stream) stream.getTracks().forEach(track => {track.enabled = false;});
   $('level').style.width = '0%';
@@ -134,6 +175,7 @@ function primeAudio() {
   replaceAudio(new Blob([wav],{type:'audio/wav'})); player.play().catch(()=>{});
 }
 function stopSession(note = 'Conversation ended. Start again whenever you like.') {
+  stopBargeWatch();
   heldText = ''; fragmentHolds = 0;
   active = false; epoch++; abort?.abort(); abort = null; busy = false;
   clearCapture(); player.pause(); stopPlaybackGlow(); setGlow(0);
@@ -194,6 +236,11 @@ function listen() {
     runTurn(new Blob(chunks,{type:rec.mimeType || 'audio/webm'}), rec.sendNow === true, voiced);
   };
   rec.start(250); busy = false; setState('listening','I’m listening. A short pause sends your message.');
+  // AEC3 is still re-converging right after a reply, and the tail of that reply
+  // is the likeliest thing to be mistaken for your voice -- it is the assistant
+  // answering itself.  Charge one settle window to the first clip after playback,
+  // and only to that one, so an ordinary pause between two sentences is untouched.
+  let settleUntil = performance.now() + (playbackEndedAt ? BARGE.settleMs : 0);
   const samples = new Float32Array(analyser.fftSize);
   function tick() {
     if (recorder !== rec || rec.state !== 'recording') return;
@@ -201,6 +248,7 @@ function listen() {
     const rms = Math.sqrt(samples.reduce((sum,x)=>sum+x*x,0)/samples.length), now=performance.now();
     $('level').style.width = `${Math.min(100,rms*1000)}%`;
     setGlow(rms * 7);                       // same measurement, one shared meter
+    if (now < settleUntil) {raf = requestAnimationFrame(tick); return;}
     if (rms > .015) {voiced += Math.min(100,now-lastTick);lastVoice=now;}
     lastTick=now;
     // 20 s, not the engine's 30 s ceiling: measured against known ground truth,
@@ -218,13 +266,72 @@ function listen() {
   }
   raf = requestAnimationFrame(tick);
 }
+function bargeWanted() {
+  const box = $('barge-in');
+  return !(box && box.checked === false);              // on unless switched off
+}
+function bargeAvailable() {
+  // Chromium reports whether the canceller is actually engaged.  A Bluetooth
+  // output or a raw Linux capture path answers false, and on those devices the
+  // assistant really would hear itself -- so refuse instead of guessing.
+  const settings = stream?.getAudioTracks?.()[0]?.getSettings?.();
+  return settings ? settings.echoCancellation === true : false;
+}
+function stopBargeWatch() {
+  if (bargeRaf) cancelAnimationFrame(bargeRaf);
+  bargeRaf = 0; bargeVoiced = 0;
+}
+function startBargeWatch() {
+  stopBargeWatch();
+  if (!active || !analyser || !bargeWanted()) return false;
+  if (!playbackAnalyser) {
+    // Without the glow's WebAudio tap there is no reference signal, and a gate
+    // with no reference is a loudness trigger wearing a security costume.
+    const note = $('barge-note');
+    if (note) note.textContent = 'Unavailable: the reply is not routed through WebAudio.';
+    return false;
+  }
+  if (!bargeAvailable()) {
+    // Say it out loud rather than failing quietly: "it would not let me
+    // interrupt" is a far worse mystery than a device that says it cannot
+    // cancel its own echo.
+    const note = $('barge-note');
+    if (note) note.textContent = 'Unavailable on this audio device: no echo cancellation.';
+    return false;
+  }
+  // The whole point: capture stays open while the reply plays.
+  stream.getTracks().forEach(track => { track.enabled = true; });
+  const samples = new Float32Array(analyser.fftSize);
+  const bytes = playbackAnalyser ? new Uint8Array(playbackAnalyser.fftSize) : null;
+  bargeLast = performance.now();
+  const step = () => {
+    if (!active || phase !== 'speaking') { stopBargeWatch(); return; }
+    const now = performance.now();
+    analyser.getFloatTimeDomainData(samples);
+    const mic = Math.sqrt(samples.reduce((sum, x) => sum + x * x, 0) / samples.length);
+    let playback = 0;
+    if (bytes && !player.paused && !player.ended) {
+      playbackAnalyser.getByteTimeDomainData(bytes);
+      playback = rmsOf(Array.from(bytes, value => (value - 128) / 128), 1);
+    }
+    // Whichever happened last: AEC3 re-converges on a stop as well as a start.
+    const since = now - Math.max(playbackStartedAt, playbackEndedAt);
+    if (nearEndSpeech(mic, playback, since)) bargeVoiced += Math.min(100, now - bargeLast);
+    else bargeVoiced = 0;
+    bargeLast = now;
+    if (bargeVoiced >= BARGE.holdMs) { stopBargeWatch(); interruptReply(); return; }
+    bargeRaf = requestAnimationFrame(step);
+  };
+  bargeRaf = requestAnimationFrame(step);
+  return true;
+}
 async function playReply(blob, signal) {
   replaceAudio(blob);
   await new Promise((resolve,reject)=>{
     let settled = false;
     const cleanup = () => {
       settled = true;
-      stopPlaybackGlow(); setGlow(0);
+      stopPlaybackGlow(); stopBargeWatch(); setGlow(0);
       player.removeEventListener('ended',ended);player.removeEventListener('error',failed);signal.removeEventListener('abort',cancelled);
       if(resumePlayback===attempt)resumePlayback=null;
       $('resume').hidden=true;
@@ -235,7 +342,7 @@ async function playReply(blob, signal) {
     const attempt = () => {
       if(settled || signal.aborted)return;
       $('resume').hidden=true;
-      player.play().then(()=>{if(!settled && !player.paused)startPlaybackGlow();},error=>{
+      player.play().then(()=>{if(!settled && !player.paused){startPlaybackGlow();startBargeWatch();}},error=>{
         if(settled || signal.aborted)return;
         if(error.name!=='NotAllowedError'){failed();return;}
         resumePlayback=attempt;$('resume').hidden=false;
@@ -332,7 +439,7 @@ $('start').onclick = async () => {
   if(active || busy) return;
   active=true;const id=++epoch;primeAudio();setState('listening','Allow microphone access to begin.');$('finish').hidden=true;
   try {
-    const acquired=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+    const acquired=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:!bargeWanted()}});
     if(id!==epoch){acquired.getTracks().forEach(track=>track.stop());return;}
     stream=acquired;
     armGlow();
@@ -345,17 +452,21 @@ $('start').onclick = async () => {
   } catch(error){if(id===epoch)stopSession(error.name==='NotAllowedError'?'Microphone permission was denied. Allow access in your browser, or type below.':error.message);}
 };
 player.addEventListener('play',()=>{
+  playbackStartedAt = performance.now();
   // Replaying an older reply through the native controls must also mute capture.
   if(active && stream && phase==='listening'){
     clearCapture();busy=true;setState('speaking','Playing your reply. Interrupt to speak again.');
     player.addEventListener('ended',()=>{if(active && phase==='speaking'){busy=false;listen();}},{once:true});
   }
 });
+player.addEventListener('pause',()=>{playbackEndedAt = performance.now();});
+player.addEventListener('ended',()=>{playbackEndedAt = performance.now();});
 $('end').onclick=()=>stopSession();
 $('finish').onclick=()=>{if(recorder?.state==='recording'){recorder.sendNow=true;recorder.stop();}};
 function interruptReply() {
   if(!busy)return;
   epoch++;abort?.abort();abort=null;busy=false;clearCapture();player.pause();
+  playbackEndedAt = performance.now();
   if(active)listen();else setState('idle','Reply interrupted. Send another message when ready.');
 }
 $('interrupt').onclick=interruptReply;
@@ -382,6 +493,7 @@ function saveSpeech(){
   speechPreferences.language=$('language').value;
   speechPreferences.corrections=$('corrections').value;
   speechPreferences.enabled=$('corrections-enabled').checked;
+  speechPreferences.barge=$('barge-in').checked;
   try{localStorage.setItem('voice-speech',JSON.stringify(speechPreferences));}catch(_){}
 }
 function effectiveLanguage(){return $('language').value==='auto'?autoLanguage:$('language').value;}
@@ -426,6 +538,8 @@ $('corrections').oninput=()=>{correctionRules();saveSpeech();};
 $('corrections-enabled').onchange=saveSpeech;
 if(typeof speechPreferences.corrections==='string')$('corrections').value=speechPreferences.corrections.slice(0,2400);
 if(typeof speechPreferences.enabled==='boolean')$('corrections-enabled').checked=speechPreferences.enabled;
+if(typeof speechPreferences.barge==='boolean')$('barge-in').checked=speechPreferences.barge;
+$('barge-in').onchange=saveSpeech;
 correctionRules();
 // ------------------------------------------------------------- directory access
 // Qwen can ask for a folder; only this card can hand one over.  The flow is

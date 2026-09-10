@@ -543,6 +543,11 @@ Neither the old installer backup nor the ASR backups were restore-tested here.
 | 503 “conversation model is busy” | One generation holds `chat_lock`; both bridges share the model. |
 | Says “One moment.” / “Let me check your notes.” then goes quiet | The reply it was covering came back **empty** (`gen 0 tok` in `run/qwen.log`). The microphone stays live on purpose; ask again. |
 | Talks over itself at the start of a reply | By design: the acknowledgment is stopped the instant the reply audio is in hand, so it can be cut mid-word. Switch off “Say something while it thinks”. |
+| Text is on screen and the voice lags a second behind it | Regression. The page is asking for the whole answer in one `/tts` request again; it should issue one per sentence. `make test-browser` (`voice_tts_browser`) is the gate. |
+| A short breath between sentences of one reply | By design, and it is the fix: each sentence is synthesized separately so the first word arrives in ~0.1 s instead of ~1.2 s. `SPEECH_CHUNK.minChars` in `web/chat.js` merges more of them if it reads as choppy. |
+| The orb dims, or interruption stops working, between two sentences | Regression. `playReply` must be called with `final = false` for every clip but the last, or the glow and the barge-in gate are torn down at each seam. |
+| Only the first sentences of a long reply are spoken | A later `/tts` request failed. The words are still all on screen and the microphone stays live on purpose; check the Kokoro service. |
+| Says “One moment.” and immediately talks over itself | Expected when the first sentence synthesizes faster than the acknowledgment plays. It is cut at the last moment before real speech, not when the answer merely exists. |
 | Says “One moment.” on every reply | It should not. The line is armed on a 900 ms deadline and on a real tool event only; if it fires on fast turns the deadline is being charged to turns that earned none. |
 | Assistant stopped answering and the page went silent | Check `run/qwen.log` for `gen 0 tok`. Since `voice-barge-20260910-a`+ this is survivable; before it, one empty completion ended the session. |
 | 503 STT unavailable | Inspect existing stack logs/health; an app update is not permission to restart the GPU service. |

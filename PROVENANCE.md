@@ -380,3 +380,59 @@ tool turns generating 116–178 for the final answer. A tool turn is therefore a
 second full generation *and* a three-to-four-times-longer thing to synthesise and
 to listen to. The acknowledgment addresses the part of that which is fixable in
 the page; the length is a prompt decision, not a latency bug.
+
+## Not waiting for the whole reply — `voice-pipeline-tts-20260910`
+
+The section above concluded that synthesis speed was not the regression, and it
+was right: the engine holds a flat ~2 ms per character. It stopped one step short,
+though, and the gap the user kept describing as "TTS feels slower" lives in that
+step.
+
+The page used to issue **one** `/tts` request for the entire answer and then play
+it. The engine returns no audio until it has synthesized the whole request, so
+time-to-first-word was `generation + synthesis(whole answer)`. On a tool turn —
+116–178 tokens, roughly 700–900 characters — that is **1.2 s of silence after the
+words are already on the screen**. The text appears instantly; the voice lingers
+a second and a half behind it. That interval is the entire complaint, and it is a
+buffering policy, not an engine.
+
+`web/chat.js` now splits the reply at sentence boundaries and issues one request
+per sentence, with two in flight. The first word is audible after ~0.1 s and the
+rest of the answer is synthesized while the voice is already saying the first
+part. `SPEECH_CHUNK` holds the three knobs: `minChars` (24) merges fragments too
+short to be worth a request, `maxChars` (420) bounds a run-on clause, `prefetch`
+(2) is how far ahead of the mouth it asks — enough that the voice never waits,
+few enough that a long answer does not stampede a GPU already carrying a 27B
+model and an ASR worker.
+
+Three things were load-bearing and are now gated:
+
+* **Nothing may be lost at a seam.** The chunks rejoin to the original
+  word-for-word. A hard cut goes after punctuation, then onto a space, and only
+  through a word as a last resort — a word cut in half is worse than the pause
+  the feature set out to remove. `tests/speech_chunk_test.mjs` asserts this over
+  twelve shapes, including a 900-character string with no punctuation at all.
+* **The first request must be small.** Asserted directly, not inferred from a
+  screenshot.
+* **The requests must overlap.** `tests/browser/voice_tts_browser.mjs` runs a
+  fake engine that spends 400 ms on any request, then asserts the second sentence
+  reached the server before the first finished. The paired sabotage keeps every
+  sentence and every byte of audio and merely fetches them one at a time: the
+  reply sounds identical and the assertion goes red at 492 ms. That is the whole
+  point — the feature is only the overlap.
+
+Two page behaviours had to survive the change. The glow and the barge-in gate are
+torn down when a clip ends, so `playReply` now takes a `final` flag and keeps both
+up between sentences of the same reply; without it the orb blinks out and
+interruption disarms at every comma. `startBargeWatch` became re-entrant, because
+the element is briefly paused at each seam and the loop bails out on that.
+
+The acknowledgment from the previous section gets exactly as much air as the first
+sentence took to synthesize, and is cut at the last moment before real speech
+begins. That is a deliberate change of moment: with synthesis costing 1.2 s the
+filler usually finished on its own, and with it costing 0.1 s it would otherwise
+be clipped mid-syllable on almost every turn.
+
+A synthesis failure no longer ends the conversation. The words are already on the
+screen and the microphone still works, so a lost sentence carries `keepSession`
+and the turn stays open — the same lesson the empty-reply fix taught.

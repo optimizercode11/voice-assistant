@@ -80,6 +80,18 @@ speech gate to decide when to interrupt. Turning that checkbox off restores
 the mode that mutes the microphone throughout a reply; end and restart the
 conversation after changing it.
 
+A reply is **spoken as it is synthesized, not after**. The speech engine returns
+no audio until it has synthesized a whole request, so asking for an entire answer
+in one request means the listener waits ~1.2 s *after* the words are already on
+the screen. The page therefore issues one request per sentence and keeps the next
+couple in flight, so the first word is audible in about 0.1 s and the rest of the
+answer is synthesized while the voice is already saying the first part. The seams
+land where a speaker would breathe. **Say something while it thinks** is also
+checked by default: on a slow turn the assistant says which tool it is using
+(“Let me check your notes.”) instead of leaving a silence that is
+indistinguishable from a hang, and gets out of the way the moment the first
+sentence is ready.
+
 The browser supplies echo cancellation (AEC3 on browser paths using libwebrtc);
 the page adds a comparison between microphone energy and the reply's waveform.
 It requests `autoGainControl: false` when barge-in is wanted, because automatic

@@ -309,6 +309,9 @@ function startBargeWatch() {
     if (note) note.textContent = 'Unavailable on this audio device: no echo cancellation.';
     return false;
   }
+  // Re-entrant on purpose.  A reply is now played as several clips, and the
+  // gate has to survive the seam between them; a frame where the element is
+  // briefly paused makes the loop bail out, so it must be safe to start again.
   // The whole point: capture stays open while the reply plays.
   stream.getTracks().forEach(track => { track.enabled = true; });
   const samples = new Float32Array(analyser.fftSize);
@@ -426,13 +429,16 @@ function mentionThinking(text, id, signal) {
     })
     .catch(() => {});
 }
-async function playReply(blob, signal) {
+async function playReply(blob, signal, final = true) {
   replaceAudio(blob);
   await new Promise((resolve,reject)=>{
     let settled = false;
     const cleanup = () => {
       settled = true;
-      stopPlaybackGlow(); stopBargeWatch(); setGlow(0);
+      // Between two sentences of the same reply the voice is not finished, so
+      // the glow and the interruption gate stay up.  Tearing them down per clip
+      // would blink the orb out and disarm barge-in at every comma.
+      if (final) { stopPlaybackGlow(); stopBargeWatch(); setGlow(0); }
       player.removeEventListener('ended',ended);player.removeEventListener('error',failed);signal.removeEventListener('abort',cancelled);
       if(resumePlayback===attempt)resumePlayback=null;
       $('resume').hidden=true;
@@ -446,6 +452,7 @@ async function playReply(blob, signal) {
       player.play().then(()=>{if(!settled && !player.paused){startPlaybackGlow();startBargeWatch();}},error=>{
         if(settled || signal.aborted)return;
         if(error.name!=='NotAllowedError'){failed();return;}
+        if(!final){startBargeWatch();return;}   // re-entrant: attempt() is already the retry path
         resumePlayback=attempt;$('resume').hidden=false;
         setState('speaking','Choose Play reply to allow audio in your browser.');
       });
@@ -454,6 +461,110 @@ async function playReply(blob, signal) {
     if(signal.aborted){cancelled();return;}
     attempt();
   });
+}
+
+// ---------------------------------------------------------------- speaking a reply
+// The engine synthesizes an entire request before it returns a single byte of
+// audio.  Measured live against the deployed Kokoro: 32 characters take 0.10 s,
+// 108 take 0.29 s, 441 take 0.93 s, 774 take 1.16 s -- about 2 ms per character
+// with no fixed cost to amortize.  Asking for a whole answer in one request is
+// therefore a promise that the listener waits the full 1.2 s *after* the words
+// are already on the screen.  That gap is what people call "slow TTS": the
+// engine is not slow, the page asked for too much at once.
+//
+// Sentences are the natural seam.  The page issues one request per sentence,
+// starts the first immediately and keeps the next couple in flight, so the
+// first word is audible after ~0.1 s and the remainder is synthesized while the
+// voice is already busy saying the first part.  The seams land where a speaker
+// would breathe anyway.
+// SPEECH-CHUNK-BEGIN
+const SPEECH_CHUNK = {minChars: 24, maxChars: 420, prefetch: 2};
+
+function speechChunks(text) {
+  // Only words can be spoken.  A number or an object reaching here is a bug
+  // somewhere upstream, and saying "NaN" or "object Object" aloud to a person
+  // is a worse outcome than saying nothing at all.
+  const clean = typeof text === 'string' ? text.replace(/\s+/g, ' ').trim() : '';
+  if (!clean) return [];
+  // A sentence ends at a full stop, bang, question mark or ellipsis and may
+  // carry a closing quote or bracket with it.  Anything after the last mark is
+  // a sentence the engine left unpunctuated, and it still has to be spoken.
+  const sentences = clean.match(/[^.!?\u2026]+[.!?\u2026]+["'\u201d\u2019)\]]*|[^.!?\u2026]+$/g) ?? [clean];
+  const chunks = [];
+  for (let piece of sentences.map(value => value.trim())) {
+    if (!piece) continue;
+    // A run-on clause with no full stop in it is still too long to hold the
+    // voice hostage.  Break at the last comma or semicolon that fits, then at
+    // the last space: a seam mid-word is audible as a word cut in half, which
+    // is a worse defect than the pause we are trying to remove.
+    while (piece.length > SPEECH_CHUNK.maxChars) {
+      const room = SPEECH_CHUNK.maxChars;
+      const clause = Math.max(piece.lastIndexOf(',', room), piece.lastIndexOf(';', room));
+      const space = piece.lastIndexOf(' ', room);
+      // Cut after punctuation when there is punctuation to cut after, otherwise
+      // on a space, and only as a last resort through the middle of a word.
+      const at = clause > SPEECH_CHUNK.minChars ? clause + 1
+               : space > SPEECH_CHUNK.minChars ? space
+               : room;
+      chunks.push(piece.slice(0, at).trim());
+      piece = piece.slice(at).trim();
+    }
+    if (!piece) continue;
+    // "Yes." is a real turn of speech; a stray "\u2026" is a click.  A fragment too
+    // short to be worth its own request joins the sentence before it -- but the
+    // first sentence never waits for anyone, because that is the one the
+    // listener is waiting for.
+    if (piece.length < SPEECH_CHUNK.minChars && chunks.length) chunks[chunks.length - 1] += ' ' + piece;
+    else chunks.push(piece);
+  }
+  return chunks.filter(Boolean);
+}
+// SPEECH-CHUNK-END
+
+async function speakReply(answer, signal, onFirstClip) {
+  const spoken = replyVoice(answer);
+  const query = new URLSearchParams({format: 'wav', language: spoken.language,
+                                     voice: spoken.voice, speed: String(speechSpeed())});
+  const parts = speechChunks(answer);
+  if (!parts.length) {
+    const empty = new Error('The reply audio was empty.');
+    empty.keepSession = true;
+    throw empty;
+  }
+  const clips = new Map();
+  const clip = index => {
+    if (!clips.has(index)) {
+      clips.set(index, fetch('/tts?' + query, {method: 'POST', body: parts[index], signal})
+        .then(response => {
+          if (!response.ok) throw new Error('Speech synthesis failed. Your reply is shown above.');
+          return response.blob();
+        })
+        .then(audio => {
+          if (audio.size <= 44) throw new Error('The reply audio was empty.');
+          return audio;
+        })
+        .catch(error => {
+          // The words are already on the screen and the microphone is still
+          // good: a synthesis failure is a lost sentence, not a dead session.
+          if (error.name !== 'AbortError') error.keepSession = true;
+          throw error;
+        }));
+    }
+    return clips.get(index);
+  };
+  // Fire ahead, but only a little: enough that the voice never waits on the
+  // engine, few enough that a long answer does not stampede a GPU that is
+  // already carrying the 27B model and the ASR worker.
+  const ahead = index => { if (index >= 0 && index < parts.length) clip(index).catch(() => {}); };
+  for (let index = 0; index < SPEECH_CHUNK.prefetch; index++) ahead(index);
+  for (let index = 0; index < parts.length; index++) {
+    const audio = await clip(index);
+    ahead(index + SPEECH_CHUNK.prefetch);
+    // The acknowledgment gets exactly as much air as the first sentence took to
+    // synthesize, and is cut at the last moment before real speech begins.
+    if (!index) onFirstClip?.();
+    await playReply(audio, signal, index === parts.length - 1);
+  }
 }
 async function runTurn(input, forced = false, voicedMs = null) {
   if (!(input instanceof Blob)) { heldText = ''; fragmentHolds = 0; }
@@ -541,15 +652,12 @@ async function runTurn(input, forced = false, voicedMs = null) {
     // user needs to see is one poll overdue.  Fetch it now, not in four seconds.
     refreshApprovals();
     $('turns').textContent=`${history.length/2} ${history.length===2?'turn':'turns'} · Just this tab`;
-    setState('synthesizing','Your reply is becoming speech…');
-    const spoken=replyVoice(answer);
-    const query = new URLSearchParams({format:'wav',language:spoken.language,voice:spoken.voice,speed:String(speechSpeed())});
-    const response = await fetch('/tts?'+query,{method:'POST',body:answer,signal:controller.signal});
-    if(!response.ok) throw new Error('Speech synthesis failed. Your reply is shown above.');
-    const audio = await response.blob();check();if(audio.size<=44)throw new Error('The reply audio was empty.');
-    setState('speaking',active?'Press Space to interrupt and speak. Listening resumes after the reply.':'Press Space to stop the reply.');
-    stopThinkingAloud();          // the reply is in hand: it never waits behind the acknowledgment
-    await playReply(audio,controller.signal);check();busy=false;
+    setState('synthesizing','Your reply is becoming speech\u2026');
+    await speakReply(answer, controller.signal, () => {
+      stopThinkingAloud();        // the reply is in hand: it never waits behind the acknowledgment
+      setState('speaking',active?'Press Space to interrupt and speak. Listening resumes after the reply.':'Press Space to stop the reply.');
+    });
+    check();busy=false;
     if(active)listen();else setState('idle','Send another message, or start a voice conversation.');
   } catch(error) {
     if(id !== epoch) return;

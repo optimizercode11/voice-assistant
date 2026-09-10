@@ -163,3 +163,30 @@ this tree to `:8092` is a separate, authorized decision, not a side effect.
 
 Both are recorded because they are the argument for deploying before believing,
 not because they are interesting in themselves.
+
+### Read-only file browsing over MCP (same campaign)
+
+`tools/mcp_files.py` adds `list_dir` / `read_file` / `grep` / `find` / `roots`
+as a second MCP server.  The bridge's tool count goes 2 -> 8, and
+`doctor --probe` reports `files  up  5 tools  restarts=0`.
+
+Two findings came out of building it that were not the request:
+
+1. **The output cap produced invalid JSON.**  The first implementation enforced
+   `max_output_chars` by slicing the serialized string, so any large result
+   reached the model as a document that no longer parses: a "too long" guard
+   that turned a big answer into a corrupt one.  It was caught by a test that
+   only existed because the fixture file happened to be big enough to trip the
+   cap.  `_fit()` now trims the payload -- drop rows, shorten the text field --
+   and reports `rows_dropped`, so the response is always valid JSON.
+2. **The containment check is load-bearing, and only the sabotage proves it.**
+   Under the tempting refactor "we already rejected `..` and absolute paths, so
+   a plain join is enough", `read_file("escape")` where `escape -> /etc/passwd`
+   returns the real `/etc/passwd`.  The argument layer never sees a symlink;
+   only `realpath()` after resolution does.  `make sabotage` runs that arm and
+   requires it to fail.
+
+Verified offline: 29 tests in `tests/mcp_files_test.py` against a real
+subprocess peer, `make check` green, `make sabotage` refusing for the right
+reason.  The shipped `config/host.toml` exposes exactly one root -- the
+deployed tree, checked for credentials and key material -- not `$HOME`.

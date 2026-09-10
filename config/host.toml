@@ -5,7 +5,9 @@
 # say so, with the file named in the reply.  The MCP server is a real second
 # process that reports the stack's own health.
 #
-# Nothing here writes, deletes, or leaves the machine.
+# Nothing here writes, deletes, or leaves the machine.  It does *read* local
+# files now, which is the one capability worth reading twice about -- see the
+# [mcp.server] named "files" at the bottom for what is actually exposed.
 
 [limits]
 rounds = 2
@@ -34,4 +36,30 @@ name = "stack"
 command = "python3"
 args = ["tools/mcp_stack_status.py"]
 timeout_seconds = 15
+enabled = true
+
+# Browsing, reading and grepping local files.
+#
+# Read-only, and scoped by an explicit --root allow-list.  The model never
+# supplies an absolute path: it names a root plus a path relative to it, '..'
+# is refused at the argument layer, and containment is re-checked against
+# realpath() *after* resolution so a symlink inside the root cannot reach
+# /etc/passwd.  `make test-files` proves that; `make sabotage` proves the
+# check is load-bearing.
+#
+# What this exposes is exactly one directory: the deployed tree, because that
+# is what "what port is the bridge on?" and "how do I restart the stack?" are
+# answered from.  It contains no credentials (checked: no .env, no key
+# material, no private keys).
+#
+# TO WIDEN IT: add another --root, one per directory, then run
+#   python3 tools/mcp_files.py --root <dir> --doctor
+# and read what it prints *before* restarting the bridge.  Do not point it at
+# $HOME or at "/": everything inside a root is readable by the model, and the
+# transcript it lands in is visible to a browser.
+[[mcp.server]]
+name = "files"
+command = "python3"
+args = ["tools/mcp_files.py", "--root", "."]
+timeout_seconds = 20
 enabled = true

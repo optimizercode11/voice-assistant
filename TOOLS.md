@@ -136,6 +136,46 @@ A server that will not start is a **note in `doctor`, not a crash**: the
 assistant comes up with its remaining tools and `doctor --probe` exits non-zero
 so a deployment cannot miss it.
 
+### Browsing local files: `tools/mcp_files.py`
+
+`list_dir`, `read_file`, `grep`, `find`, `roots` — read-only, stdlib only.
+The official `@modelcontextprotocol/server-filesystem` does the same job, but
+this host has no node and no npm, and stdlib keeps the deploy offline.
+Swapping to it is a config line, not a code change.
+
+It is a separate **process** rather than four more builtins because the
+*authority* is the point: a child started with an explicit `--root` list cannot
+read outside it, and an operator can see that list in `ps`.  A builtin would
+inherit the bridge's whole filesystem view, which is the whole machine.
+
+| Control | Why it is there |
+|---|---|
+| No `--root`, no server (exit 2) | Defaulting to `.` or `/` would make "the model can read the disk" the factory setting. |
+| The model never names an absolute path | It names a root plus a path **relative** to it.  Absolute paths, `~`, drive letters and `..` are refused at the argument layer. |
+| Containment is checked **after** `realpath()` | The argument layer never sees a symlink.  `read_file("escape")` where `escape -> /etc/passwd` resolves outside the root and is refused. |
+| The descriptor is verified as well | `realpath()` and `open()` are two syscalls with a swap window between them, so `/proc/self/fd` is asked where the fd **actually** landed. |
+| `O_RDONLY \| O_NOFOLLOW` is the only open flag in the file | There is no write, delete, move or chmod tool, and there will not be one. |
+| Binaries refused on a NUL sniff | A 40 MB `.so` returned as "text" is not an answer; `grep` skips it and keeps searching. |
+| Caps on bytes, lines, matches, files walked, output chars | A `grep` over a home directory has to cost something bounded. |
+| Output is **trimmed, never sliced** | Cutting the serialized JSON mid-token hands the model an unparseable document, so `_fit()` drops rows and reports `rows_dropped`. |
+| `.git`, `node_modules`, `venv`, … pruned from the walk | Walking `.git` is slow and reads objects nobody meant to publish. |
+
+**What it still leaks: everything inside a root.**  Exposing a repository
+publishes every `.env`, key and credential in it to whatever the model decides
+to read, and the transcript it lands in is visible to a browser.  That is why
+roots are opt-in per directory, why `--doctor` prints exactly what is exposed,
+and the shipped `config/host.toml` names one directory — the deployed tree,
+checked for credentials — rather than `$HOME`.
+
+```bash
+python3 tools/mcp_files.py --root <dir> --doctor   # read this before restarting the bridge
+```
+
+`make test-files` drives a real subprocess peer through 29 tests including
+every escape shape above.  `make sabotage` removes the post-resolution
+containment check and **must** fail: with it gone, `read_file("escape")`
+returns `/etc/passwd`, which is the proof the check is load-bearing.
+
 ## `fetch_url`
 
 Off unless `enabled = true` **and** `allow_hosts` is non-empty — an empty

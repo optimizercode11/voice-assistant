@@ -19,6 +19,16 @@ WHAT IT CAN SEE: NOTHING BY DEFAULT
     it refuses to start rather than defaulting to "/" or the cwd, because a
     voice assistant whose default is "the whole disk" is an incident.
 
+    --roots-file adds directories a human approved *while the assistant was
+    running*, and it is re-read before every tool call so a grant needs no
+    restart.  That is the one way this server's scope can widen after launch,
+    so the rules are: --roots-file can only ever ADD to --root, never replace
+    it; every entry is re-checked against the deny-list here as well as at
+    approval time; a file that will not parse leaves the previously reviewed
+    list intact rather than emptying or widening it; and this process opens
+    that file to read it and nothing else.  The authority to grant lives in
+    the bridge, behind an HTTP route this server has no client for.
+
     The model never supplies an absolute path.  It names a root (optional when
     there is exactly one) and a path *relative* to it.  Absolute paths, `~`,
     drive letters and `..` are refused at the argument layer, and containment
@@ -48,6 +58,8 @@ import os
 import re
 import stat
 import sys
+
+import approvals
 
 PROTOCOL = "2025-03-26"
 SERVER_INFO = {"name": "local-files", "version": "1.0"}
@@ -92,19 +104,8 @@ class Roots:
     """The allow-list.  Every path this server touches resolves under one of these."""
 
     def __init__(self, entries, ignore=DEFAULT_IGNORE, max_read_bytes=65536, max_lines=2000,
-                 max_matches=200, max_walk=20000, max_entries=400, max_output_chars=24000):
-        self.roots = []                              # (name, realpath)
-        for entry in entries:
-            real = os.path.realpath(os.path.abspath(os.path.expanduser(entry)))
-            if not os.path.isdir(real):
-                raise Refused(f"--root {entry!r} is not a directory")
-            name = os.path.basename(real) or "root"
-            if any(name == existing for existing, _ in self.roots):
-                name = f"{name}{len(self.roots) + 1}"
-            self.roots.append((name, real))
-        if not self.roots:
-            raise Refused("no --root given: refusing to expose the filesystem")
-        self.by_name = dict(self.roots)
+                 max_matches=200, max_walk=20000, max_entries=400, max_output_chars=24000,
+                 roots_files=()):
         self.ignore = set(ignore)
         self.max_read_bytes = max_read_bytes
         self.max_lines = max_lines
@@ -112,6 +113,78 @@ class Roots:
         self.max_walk = max_walk
         self.max_entries = max_entries
         self.max_output_chars = max_output_chars
+        self.static = []                             # (name, realpath) from --root, fixed forever
+        for entry in entries:
+            real = os.path.realpath(os.path.abspath(os.path.expanduser(entry)))
+            if not os.path.isdir(real):
+                raise Refused(f"--root {entry!r} is not a directory")
+            self.static.append((self._name_for(real, self.static), real))
+        # --roots-file deliberately cannot satisfy this.  A server that starts
+        # with an empty grants file and no --root would be a server whose scope
+        # is decided by whoever writes that file next.
+        if not self.static:
+            raise Refused("no --root given: refusing to expose the filesystem")
+        self.roots_files = [os.path.realpath(os.path.abspath(os.path.expanduser(entry)))
+                            for entry in roots_files]
+        self.granted, self.granted_notes = [], []
+        self._merge()
+
+    @staticmethod
+    def _name_for(real, taken) -> str:
+        """A root name the model can use.  Two folders called "docs" become docs, docs2."""
+        base = os.path.basename(real) or "root"
+        names = {name for name, _ in taken}
+        if base not in names:
+            return base
+        counter = 2
+        while f"{base}{counter}" in names:
+            counter += 1
+        return f"{base}{counter}"
+
+    def _granted(self):
+        """Roots a human approved at runtime, plus notes on anything skipped.
+
+        refusal() is re-checked *here* and not only at approval time.  The
+        approvals file is a plain file on disk, and a file server should not
+        expose /etc because something other than the page wrote it in.
+        """
+        found, notes = [], []
+        for location in self.roots_files:
+            try:
+                store = approvals.Store(location)
+                approved = store.granted_roots()
+            except (OSError, ValueError, approvals.ApprovalError) as error:
+                notes.append(f"{location} could not be read ({error}); using the roots from --root")
+                continue
+            for real in approved:
+                blocked = approvals.refusal(real)
+                if blocked:
+                    notes.append(f"skipped approved {real}: {blocked}")
+                    continue
+                if any(real == known for _, known in self.static + found):
+                    continue
+                found.append((self._name_for(real, self.static + found), real))
+        return found, notes
+
+    def _merge(self) -> None:
+        self.granted, self.granted_notes = self._granted()
+        self.roots = list(self.static) + list(self.granted)     # (name, realpath)
+        self.by_name = dict(self.roots)
+
+    def refresh(self) -> None:
+        """Re-read the grants file.  Called between requests, never mid-request.
+
+        serve() is a sequential stdio loop, so nothing can be resolving a path
+        while this swaps the list -- which is the only reason an in-place swap
+        is safe at all.  A failure keeps the previously reviewed list: losing a
+        grant is recoverable, inventing one is not.
+        """
+        if not self.roots_files:
+            return
+        try:
+            self._merge()
+        except Exception as error:                                # noqa: BLE001 - see above
+            self.granted_notes = list(self.granted_notes) + [f"refresh failed: {error}"]
 
     def pick(self, name):
         """Resolve a root by name, or the single root when there is only one."""
@@ -352,8 +425,11 @@ def tool_find(roots, args):
 
 
 def tool_roots(roots, args):
-    return {"roots": [{"name": name, "path": real} for name, real in roots.roots],
+    approved = {real for _, real in roots.granted}
+    return {"roots": [{"name": name, "path": real, "granted": real in approved}
+                      for name, real in roots.roots],
             "ignore": sorted(roots.ignore),
+            "granted_notes": list(roots.granted_notes),
             "caps": {"max_read_bytes": roots.max_read_bytes, "max_lines": roots.max_lines,
                      "max_matches": roots.max_matches, "max_walk": roots.max_walk,
                      "max_output_chars": roots.max_output_chars}}
@@ -489,6 +565,10 @@ def serve(roots: Roots) -> int:
             if handler is None:
                 _tool_result(identifier, f"tool error: unknown tool {name!r}", True)
                 continue
+            # Between requests, never during one: a grant the user clicked a
+            # moment ago must be visible to the next call, and a revocation must
+            # stop working on the next call rather than the next restart.
+            roots.refresh()
             try:
                 payload = handler(roots, arguments)
                 _tool_result(identifier, _fit(roots, payload))
@@ -506,6 +586,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Read-only filesystem MCP server.")
     parser.add_argument("--root", action="append", default=[], metavar="DIR",
                         help="Directory to expose. Repeatable. Required: no roots means no server.")
+    parser.add_argument("--roots-file", action="append", default=[], metavar="PATH",
+                        help="JSON file of directories a human approved at runtime "
+                             "(tools/approvals.py). Re-read before every tool call. Adds to "
+                             "--root; it can never replace it or take a root away.")
     parser.add_argument("--ignore", action="append", default=[],
                         help="Directory name to skip while walking (adds to the defaults).")
     parser.add_argument("--max-read-bytes", type=int, default=65536)
@@ -529,15 +613,21 @@ def main(argv=None) -> int:
         roots = Roots(args.root, ignore=set(DEFAULT_IGNORE) | set(args.ignore),
                       max_read_bytes=args.max_read_bytes, max_lines=args.max_lines,
                       max_matches=args.max_matches, max_walk=args.max_walk,
-                      max_output_chars=args.max_output_chars)
+                      max_output_chars=args.max_output_chars, roots_files=args.roots_file)
     except Refused as error:
         print(f"mcp_files: {error}", file=sys.stderr)
         return 2
     if args.doctor:
         print("Read-only filesystem MCP server.  These directories are readable by the model:")
+        approved = {real for _, real in roots.granted}
         for name, real in roots.roots:
             files = sum(1 for _ in roots.walk(real))
-            print(f"  {name}: {real}  ({files} files walkable)")
+            origin = "  [approved at runtime]" if real in approved else ""
+            print(f"  {name}: {real}  ({files} files walkable){origin}")
+        for location in roots.roots_files:
+            print(f"  grants file: {location} (re-read before every tool call)")
+        for note in roots.granted_notes:
+            print(f"  note: {note}")
         print(f"  skipped directory names: {', '.join(sorted(roots.ignore))}")
         print(f"  caps: read={roots.max_read_bytes}B lines={roots.max_lines} "
               f"matches={roots.max_matches} walk={roots.max_walk} "

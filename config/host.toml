@@ -19,6 +19,29 @@ generation_seconds = 45
 [builtins]
 now = true
 
+# Directory access the assistant can *ask for* in the middle of a conversation.
+#
+# The "files" server below can read exactly one directory, which is right for
+# "what port is the bridge on?" and wrong for "look at the folder I mean". The
+# old answer was to edit this file and restart a bridge on a host with 4.9 GiB
+# of free GPU -- so in practice the answer was "it can't".
+#
+# This turns on the asking, not the granting. request_directory files a request
+# and always answers NOT GRANTED; the grant happens when a person clicks Approve
+# on the chat page, which shows them the realpath, the file count and any
+# credential-looking filenames inside first. / and ~/.ssh and an entire home
+# directory are refused no matter what gets clicked -- see tools/approvals.py.
+#
+# The file is relative on purpose: the bridge, the page and the file server are
+# three processes that all resolve it against WorkingDirectory, so they cannot
+# disagree about which file holds the grants. It lives under var/, which is
+# gitignored and never checked in. A redeploy into a new campaign directory
+# therefore starts with an empty allow-list -- every grant has to be re-clicked.
+# That is the safe direction to fail.
+[approvals]
+enabled = true
+file = "var/approvals.json"
+
 [retrieval]
 enabled = true
 sources = ["README.md", "ARCHITECTURE.md", "RUNBOOK.md", "TOOLS.md", "PROVENANCE.md", "tests/README.md"]
@@ -64,7 +87,13 @@ enabled = true
 # answered from.  It contains no credentials (checked: no .env, no key
 # material, no private keys).
 #
-# TO WIDEN IT: add another --root, one per directory, then run
+# RUNTIME GRANTS: --roots-file points at the approvals file above. The file
+# server re-reads it before every tool call, so an approval takes effect on the
+# next call and a revocation stops working on the next call -- no restart. It
+# can only ADD roots, never remove one or replace the list, and it re-applies
+# the deny-list itself rather than trusting what is in the file.
+#
+# TO WIDEN IT PERMANENTLY: add another --root, one per directory, then run
 #   python3 tools/mcp_files.py --root <dir> --doctor
 # and read what it prints *before* restarting the bridge.  Do not point it at
 # $HOME or at "/": everything inside a root is readable by the model, and the
@@ -72,6 +101,6 @@ enabled = true
 [[mcp.server]]
 name = "files"
 command = "python3"
-args = ["tools/mcp_files.py", "--root", "."]
+args = ["tools/mcp_files.py", "--root", ".", "--roots-file", "var/approvals.json"]
 timeout_seconds = 20
 enabled = true

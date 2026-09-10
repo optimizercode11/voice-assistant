@@ -282,6 +282,9 @@ async function runTurn(input, forced = false) {
     check();
     history = [...pending,{role:'assistant',content:reply.text}];committed=true;
     message('assistant',reply.text,null,{tools:reply.tools,sources:reply.sources});
+    // A request_directory call happened during that generation, so the card the
+    // user needs to see is one poll overdue.  Fetch it now, not in four seconds.
+    refreshApprovals();
     $('turns').textContent=`${history.length/2} ${history.length===2?'turn':'turns'} · Just this tab`;
     setState('synthesizing','Your reply is becoming speech…');
     const spoken=replyVoice(reply.text);
@@ -399,6 +402,102 @@ $('corrections-enabled').onchange=saveSpeech;
 if(typeof speechPreferences.corrections==='string')$('corrections').value=speechPreferences.corrections.slice(0,2400);
 if(typeof speechPreferences.enabled==='boolean')$('corrections-enabled').checked=speechPreferences.enabled;
 correctionRules();
+// ------------------------------------------------------------- directory access
+// Qwen can ask for a folder; only this card can hand one over.  The flow is
+// deliberately not a held-open request: request_directory files the ask and
+// returns at once, the turn ends, and on the next turn the folder is simply
+// readable.  That costs one round trip of patience and buys the property that
+// no generation is ever blocked on a click that may never come.
+let approvalsSeen = '', deciding = false;
+function decide(decision, payload, button) {
+  const card = $('approvals');
+  deciding = true;
+  for (const node of card.querySelectorAll('button')) node.disabled = true;
+  if (button) button.textContent = '…';
+  fetch('/approvals',{method:'POST',headers:{'Content-Type':'application/json'},
+                     body:JSON.stringify({decision, ...payload})})
+    .then(async response => {
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(typeof result.error === 'string' ? result.error
+        : 'That did not work. The folder list may have changed; reload the page.');
+      approvalsSeen = '';
+      renderApprovals(result);
+      if (decision === 'approve') $('status').textContent =
+        'Approved. Ask again and Qwen can read it now.';
+      if (decision === 'revoke') $('status').textContent = 'Access removed. It stops on the next read.';
+    })
+    .catch(error => { $('status').textContent = error.message; refreshApprovals(); })
+    .finally(() => { deciding = false; });
+}
+function approvalRow(entry) {
+  const row = document.createElement('div'); row.className = 'approval';
+  const path = document.createElement('code'); path.textContent = entry.realpath; row.append(path);
+  if (entry.reason) { const why = document.createElement('div'); why.className = 'why';
+    why.textContent = `Qwen asked for it because: ${entry.reason}`; row.append(why); }
+  const scope = document.createElement('div'); scope.className = 'scope';
+  scope.textContent = entry.error
+    ? `Its contents could not be checked (${entry.error}).`
+    : `Approving lets Qwen read everything under this folder — about ${entry.files}${entry.truncated ? '+' : ''} files.`;
+  row.append(scope);
+  if (Array.isArray(entry.hints) && entry.hints.length) {
+    const extra = entry.hints.length > 3 ? ` and ${entry.hints.length - 3} more` : '';
+    const risk = document.createElement('div'); risk.className = 'risk';
+    risk.textContent = `Heads up, it also contains ${entry.hints.slice(0, 3).join(', ')}${extra}. `
+      + 'Read those names before you approve.';
+    row.append(risk);
+  }
+  const actions = document.createElement('div'); actions.className = 'row';
+  const yes = document.createElement('button'); yes.type = 'button'; yes.className = 'approve';
+  yes.textContent = 'Approve'; yes.onclick = () => decide('approve', {id: entry.id}, yes);
+  const no = document.createElement('button'); no.type = 'button'; no.textContent = 'Not now';
+  no.onclick = () => decide('decline', {id: entry.id}, no);
+  actions.append(yes, no); row.append(actions);
+  return row;
+}
+function renderApprovals(state) {
+  if (deciding) return;
+  const card = $('approvals');
+  const pending = Array.isArray(state?.pending) ? state.pending : [];
+  const granted = Array.isArray(state?.granted) ? state.granted : [];
+  const shown = JSON.stringify([state?.enabled ?? false, pending, granted]);
+  // Re-rendering on every poll would rebuild the buttons and eat a click that
+  // landed in between.  Nothing changed, nothing moves.
+  if (shown === approvalsSeen) return;
+  approvalsSeen = shown;
+  card.replaceChildren();
+  if (!state?.enabled || (!pending.length && !granted.length)) { card.hidden = true; return; }
+  card.hidden = false;
+  const head = document.createElement('h3');
+  head.textContent = pending.length ? 'Qwen asked to read a folder' : 'Folders Qwen can read';
+  card.append(head);
+  for (const entry of pending) card.append(approvalRow(entry));
+  if (granted.length) {
+    const wrap = document.createElement('div'); wrap.className = 'granted';
+    const label = document.createElement('span');
+    label.textContent = `Approved: ${granted.length} folder${granted.length > 1 ? 's' : ''}`;
+    wrap.append(label);
+    for (const entry of granted) {
+      const chip = document.createElement('button'); chip.type = 'button'; chip.title = entry.realpath;
+      const leaf = String(entry.realpath).split('/').filter(Boolean).pop() || entry.realpath;
+      chip.textContent = `stop reading ${leaf}`;
+      chip.onclick = () => decide('revoke', {path: entry.realpath}, chip);
+      wrap.append(chip);
+    }
+    card.append(wrap);
+  }
+}
+function refreshApprovals() {
+  // A convenience, never a dependency: if the queue cannot be read the
+  // conversation carries on exactly as it did before this feature existed.
+  fetch('/approvals').then(response => response.ok ? response.json() : {enabled: false})
+    .then(renderApprovals).catch(() => {});
+}
+// No polling timer.  A new request can only have been filed by a generation, and
+// the turn above already refreshes when one finishes; coming back to a hidden tab
+// is the only other moment worth catching up on.  A 4 s interval was tried first
+// and it kept a background request in flight forever, which is both a timer on a
+// page whose whole job is the microphone and enough to wedge the browser suite.
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshApprovals(); });
 window.addEventListener('pagehide',()=>{stopSession();releaseAudioContext();});
 (async()=>{
   try{
@@ -409,7 +508,7 @@ window.addEventListener('pagehide',()=>{stopSession();releaseAudioContext();});
     streaming = health.streaming === true && Array.isArray(health.tools) && health.tools.length > 0;
     languageList=languages.languages;autoLanguage=languages.default;
     $('language').replaceChildren();const automatic=document.createElement('option');automatic.value='auto';automatic.textContent='Auto: English / Hindi';$('language').append(automatic);for(const lang of languageList){const option=document.createElement('option');option.value=lang.code;option.textContent=lang.name;$('language').append(option);}$('language').value=[...$('language').options].some(x=>x.value===speechPreferences.language)?speechPreferences.language:'auto';
-    voiceList=catalogue.voices;voices();ready=true;
+    voiceList=catalogue.voices;voices();ready=true;refreshApprovals();
     if(!canRecord && location.protocol==='http:' && Number.isInteger(health.https_port)){
       const url=new URL(location.href);url.protocol='https:';url.port=health.https_port;secureURL=url.href;$('start').textContent='Open secure conversation';
     }

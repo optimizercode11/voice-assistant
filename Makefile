@@ -8,7 +8,7 @@ CPU = CUDA_VISIBLE_DEVICES=""
 NODE   ?= /tmp/kokoro-playback-browser/node_modules/.bin/node
 PLAYWRIGHT ?= /tmp/kokoro-playback-browser/node_modules/playwright/index.mjs
 
-.PHONY: help test test-bridge test-chat test-tools test-retrieval test-mcp test-files test-loop test-browser \
+.PHONY: help test test-bridge test-chat test-tools test-retrieval test-mcp test-files test-approvals test-loop test-browser \
         sabotage check check-site doctor fingerprint inputs
 
 help:
@@ -20,7 +20,7 @@ help:
 	                '  check         everything that runs offline' \
 	                '  inputs        the asset list a guarded start binds with --input'
 
-test: test-bridge test-chat test-retrieval test-tools test-mcp test-files test-loop test-turn
+test: test-bridge test-chat test-retrieval test-tools test-mcp test-files test-approvals test-loop test-turn
 
 test-bridge:
 	@test -z "$${CUDA_VISIBLE_DEVICES-}" || { echo "rerun with CUDA_VISIBLE_DEVICES=''"; exit 2; }
@@ -49,6 +49,12 @@ test-files:
 test-turn:
 	$(CPU) $(PYTHON) -u tests/turn_control_test.py
 
+# Directory grants are the one capability that can widen while the assistant is
+# running, so they get their own suite: the claim under test is that the model
+# can ask and cannot take.  It spawns a real file server and a real bridge.
+test-approvals:
+	$(CPU) $(PYTHON) -W error::ResourceWarning -u tests/approvals_test.py
+
 test-loop:
 	$(CPU) $(PYTHON) -u tests/tool_loop_test.py
 
@@ -75,7 +81,7 @@ sabotage:
 	# result, a server cannot rename a tool mid-turn, and a file server's
 	# containment cannot be reduced to a plain join (that is the arm that
 	# leaks /etc/passwd through a symlink).
-	for suite in tool_loop_test mcp_test mcp_files_test turn_control_test; do \
+	for suite in tool_loop_test mcp_test mcp_files_test turn_control_test approvals_test; do \
 	  if $(CPU) $(PYTHON) -u tests/$$suite.py --sabotage >/dev/null 2>&1; then \
 	    echo "SABOTAGE PASSED (this is the failure): $$suite.py --sabotage"; failures=$$((failures+1)); \
 	  else echo "ok  correctly refused: $$suite.py --sabotage"; fi; \

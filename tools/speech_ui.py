@@ -17,6 +17,7 @@ import ssl
 import voice_chat
 import agent_config
 import agent_tools
+import approvals
 import turn_control
 import subprocess
 import tempfile
@@ -306,6 +307,19 @@ class Progress:
             pass
 
 
+def approvals_store(registry):
+    """The directory-grant queue for this bridge, or None when it is switched off.
+
+    Derived from the registry rather than passed around, because there are two
+    listeners (plain and TLS) and a store per listener would mean a grant made
+    on one is invisible on the other -- and the microphone only ever uses the
+    TLS one.
+    """
+    if registry is None:
+        return None
+    return agent_tools.approvals_store(registry.config, registry.context.root)
+
+
 class SpeechServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -355,6 +369,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
+
+    def same_origin(self) -> bool:
+        origin = self.headers.get("Origin")
+        return not origin or urlsplit(origin).netloc == self.headers.get("Host")
 
     def body(self, limit):
         if self.headers.get("Transfer-Encoding"):
@@ -441,13 +459,16 @@ class Handler(BaseHTTPRequestHandler):
                                     "https_port": getattr(config, "https_port", None),
                                     "backend": "qasr" if getattr(config, "asr_url", None) else "vvasr",
                                     "max_bytes": MAX_BYTES, "max_seconds": MAX_SECONDS})
+        if self.command == "GET" and path == "/approvals":
+            return self.approvals()
         if self.command == "GET" and path in {"/languages", "/voices", "/stats", "/health"}:
             return self.proxy()
-        if self.command != "POST" or path not in {"/tts", "/stt", "/chat/completions"}:
+        if self.command != "POST" or path not in {"/tts", "/stt", "/chat/completions", "/approvals"}:
             raise RequestError(404, "Not found.")
-        origin = self.headers.get("Origin")
-        if origin and urlsplit(origin).netloc != self.headers.get("Host"):
+        if not self.same_origin():
             raise RequestError(403, "Use the speech UI on this server to submit audio or text.")
+        if path == "/approvals":
+            return self.approvals()
         if path == "/chat/completions":
             if not getattr(config, "llm_url", None):
                 raise RequestError(503, "The conversation model is unavailable.")
@@ -505,6 +526,57 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(200, result)
         finally:
             self.server.asr_lock.release()
+
+    def approvals(self):
+        """The directory-grant queue.  GET reads it; POST is a human's click on it.
+
+        This is the only code path in the deployment that can turn a request
+        into a grant, so it is worth being explicit about why exposing it on the
+        microphone's own port is not the hole it looks like:
+
+        * It accepts no path.  The only decision it can express is
+          approve/revoke against an id the assistant already filed, so a caller
+          cannot conjure "let me read /home" -- they can only confirm a request
+          a person can see on the page, with its file count and credential
+          warnings attached.
+        * It is same-origin, for the read as well as the write.  A random page
+          the user visits can neither see which folders were asked about nor
+          click on their behalf.
+        * Revoking needs the path, not a secret.  That is deliberate: the point
+          of the page is that access can be taken away immediately by whoever
+          is looking at it.
+
+        A stale id is a 400 rather than a 500 -- an approval card left open in
+        two tabs is ordinary life, and the page just refetches the queue.
+        """
+        if not self.same_origin():
+            raise RequestError(403, "Use the speech UI on this server to manage directory access.")
+        store = approvals_store(self.server.registry)
+        if store is None:
+            return self.reply(200, {"enabled": False, "pending": [], "granted": []})
+        if self.command == "GET":
+            return self.reply(200, {"enabled": True, "pending": store.pending(),
+                                    "granted": store.granted()})
+        try:
+            claim = json.loads(self.body(4096).decode("utf-8", "replace"))
+        except ValueError as error:
+            raise RequestError(400, "The approval request was not a valid JSON object.") from error
+        if not isinstance(claim, dict):
+            raise RequestError(400, "The approval request must be a JSON object.")
+        decision = str(claim.get("decision") or "")
+        try:
+            if decision == "approve":
+                outcome = store.approve(str(claim.get("id") or ""))
+            elif decision == "decline":
+                outcome = store.decline(str(claim.get("id") or ""))
+            elif decision == "revoke":
+                outcome = store.revoke(str(claim.get("path") or ""))
+            else:
+                raise RequestError(400, "decision must be 'approve', 'decline' or 'revoke'")
+        except approvals.ApprovalError as error:
+            raise RequestError(400, str(error)) from error
+        return self.reply(200, {**outcome, "enabled": True, "pending": store.pending(),
+                                "granted": store.granted()})
 
     def do_GET(self):
         self.dispatch()

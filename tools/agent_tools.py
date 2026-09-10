@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import agent_config
+import approvals
 import retrieval
 
 MAX_ARGUMENT_CHARS = 8000
@@ -253,6 +254,68 @@ def urlsplit_scheme(url: str) -> str:
     return urllib.parse.urlsplit(url).scheme
 
 
+# ------------------------------------------------------------- directory grants
+def approvals_store(config: "agent_config.AgentConfig", root=None):
+    """The grants file, resolved against the assistant's own directory.
+
+    Three parties need the same file: the builtin that asks, the page that
+    grants, and the file server that re-reads it before every call.  Deriving
+    the path in one place is what makes that true by construction rather than
+    by three people writing the same string.  The Store is stateless -- it
+    reads on every call -- which is exactly why a grant needs no restart.
+    """
+    if not config.approvals.enabled:
+        return None
+    base = Path(root) if root is not None else Path.cwd()
+    return approvals.Store(base / config.approvals.file)
+
+
+def _request_directory(arguments: dict, context: "Context") -> ToolResult:
+    """Ask a human for a directory.  It records a question and grants nothing.
+
+    The wording of the reply is the security control here.  A tool result that
+    said "request created" would be read as success, and the model would go on
+    to describe a folder it has never opened.  So the first word is NOT GRANTED
+    and the instruction is to stop talking about the folder's contents.
+    """
+    store = approvals_store(context.config, context.root)
+    if store is None:
+        return ToolResult(False, "", error="directory approvals are not enabled in this deployment",
+                          meta={"name": "request_directory"})
+    raw = str(arguments.get("path") or "").strip()
+    if not raw:
+        return ToolResult(False, "", error="request_directory needs a path",
+                          meta={"name": "request_directory"})
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        base = Path(context.root) if context.root is not None else Path.cwd()
+        candidate = base / candidate
+    try:
+        record = store.request(candidate, arguments.get("reason", ""))
+    except approvals.ApprovalError as error:
+        # The refusal text names the deny-list rule, which is what the model
+        # needs in order to ask for something narrower instead of retrying.
+        return ToolResult(False, "", error=str(error), meta={"name": "request_directory"})
+    real = record["realpath"]
+    if record.get("already_granted"):
+        return ToolResult(True, f"{real} is already approved. Read it with the file tools now.",
+                          meta={"name": "request_directory", "granted": True})
+    size = f"~{record['files']} files" if not record.get("truncated") \
+        else f"{record['files']}+ files"
+    warning = ""
+    if record.get("hints"):
+        warning = (" It also contains credential-looking files: "
+                   + ", ".join(str(h) for h in record["hints"][:3]) + ".")
+    return ToolResult(True,
+                      f"NOT GRANTED. {real} ({size}) is now waiting for the user to approve it on "
+                      f"the page.{warning} Say in one short sentence which folder you want to read "
+                      f"and why, and that they can approve it on the page. Then stop: you cannot "
+                      f"read that folder until they do, so do not describe, summarise or guess at "
+                      f"anything inside it, and do not say you have access.",
+                      meta={"name": "request_directory", "granted": False, "realpath": real,
+                            "files": record.get("files", 0), "hints": record.get("hints", [])})
+
+
 # ------------------------------------------------------------------ registry
 class Context:
     """What a handler may look at.  Deliberately not the HTTP connection."""
@@ -302,6 +365,22 @@ class Registry:
                            {"type": "object", "properties": {"url": {"type": "string", "maxLength": 2000}},
                             "required": ["url"]}, _fetch_url, "builtin",
                            self.config.fetch.timeout_seconds + 2, read_only=True))
+        if config.approvals.enabled:
+            # read_only=False is deliberate: it writes one line to the pending
+            # list.  It never touches the folder being asked about, and the
+            # status page should not claim this is a pure read.
+            self._add(Tool("request_directory",
+                           "Ask the user to approve one additional directory for reading. Use when "
+                           "the file tools refuse because a folder is not in the allowed roots. This "
+                           "only files the request: access is granted by the user approving it on the "
+                           "page, never by this tool, so the reply always says NOT GRANTED.",
+                           {"type": "object", "properties":
+                            {"path": {"type": "string", "minLength": 1, "maxLength": 500,
+                                      "description": "Directory to read, absolute or relative to the assistant"},
+                             "reason": {"type": "string", "maxLength": 300,
+                                        "description": "One sentence on why, shown to the user"}},
+                            "required": ["path"]},
+                           _request_directory, "builtin", 5.0, read_only=False))
 
     @classmethod
     def build(cls, config: agent_config.AgentConfig, root: Path | None = None) -> "Registry":

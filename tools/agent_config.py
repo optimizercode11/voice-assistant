@@ -66,6 +66,7 @@ class MCPServerConfig:
     timeout_seconds: float = 15.0
     allow: list[str] = field(default_factory=list)     # empty = every tool it lists
     deny: list[str] = field(default_factory=list)
+    purpose: str = ""                                  # one line, shown to the model
 
     def __post_init__(self):
         self.name = str(self.name)
@@ -83,17 +84,33 @@ class FetchConfig:
 
 
 @dataclass
+class ApprovalsConfig:
+    """Directory grants the assistant may ask for *while it runs*.
+
+    Every other capability is fixed at config time; this one grows.  It is
+    therefore off unless a person turns it on, and even then it only enables
+    the *asking*: no code path from a tool call to a grant exists, and the
+    click that grants lives on the page behind an HTTP route the model has no
+    tool for.  See tools/approvals.py for why the ordering is that way.
+    """
+    enabled: bool = False
+    file: Path = Path("var/approvals.json")
+
+
+@dataclass
 class AgentConfig:
     limits: ToolLimits = field(default_factory=ToolLimits)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     fetch: FetchConfig = field(default_factory=FetchConfig)
+    approvals: ApprovalsConfig = field(default_factory=ApprovalsConfig)
     mcp: list[MCPServerConfig] = field(default_factory=list)
     builtins: dict[str, bool] = field(default_factory=lambda: {"now": True})
     source: Path | None = None
 
     @property
     def tool_count_hint(self) -> int:
-        return len(self.builtins) + len(self.mcp) + (1 if self.retrieval.enabled else 0)
+        return (len(self.builtins) + len(self.mcp) + (1 if self.retrieval.enabled else 0)
+                + (1 if self.approvals.enabled else 0))
 
 
 def _typed(raw: dict, key: str, kind, label: str):
@@ -169,6 +186,27 @@ def _fetch(raw: dict) -> FetchConfig:
     return fetch
 
 
+def _approvals(raw: dict) -> ApprovalsConfig:
+    if not raw:
+        return ApprovalsConfig()
+    unknown = set(raw) - {"enabled", "file"}
+    if unknown:
+        raise ConfigError(f"[approvals] unknown keys: {sorted(unknown)}")
+    value = raw.get("file", str(ApprovalsConfig.file))
+    if isinstance(value, Path):
+        value = str(value)
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError("approvals.file must be a path")
+    # Relative to the assistant's own directory, always.  An absolute grants
+    # file is a second, unreviewed input: the operator would have to remember
+    # that the file the *page* writes and the file the *file server* reads are
+    # resolved by two different processes with two different working directories.
+    if os.path.isabs(value) or value.startswith("~"):
+        raise ConfigError("approvals.file must be relative to the assistant's directory, so the "
+                          "bridge, the page and the file server all resolve it the same way")
+    return ApprovalsConfig(enabled=_flag(raw, "enabled", "approvals"), file=Path(value))
+
+
 def _mcp(raw: list) -> list[MCPServerConfig]:
     if not isinstance(raw, list):
         raise ConfigError("[[mcp.server]] must be an array of tables")
@@ -176,7 +214,8 @@ def _mcp(raw: list) -> list[MCPServerConfig]:
     for row in raw:
         if not isinstance(row, dict):
             raise ConfigError("each [[mcp.server]] must be a table")
-        unknown = set(row) - {"name", "command", "args", "env", "enabled", "timeout_seconds", "allow", "deny"}
+        unknown = set(row) - {"name", "command", "args", "env", "enabled", "timeout_seconds", "allow",
+                              "deny", "purpose"}
         if unknown:
             raise ConfigError(f"[[mcp.server]] unknown keys: {sorted(unknown)}")
         name = str(row.get("name", ""))
@@ -197,7 +236,11 @@ def _mcp(raw: list) -> list[MCPServerConfig]:
         if not isinstance(env, dict) or any(not isinstance(k, str) or not isinstance(v, str)
                                             for k, v in env.items()):
             raise ConfigError(f"mcp server {name} env must be a table of strings")
+        purpose = row.get("purpose", "")
+        if not isinstance(purpose, str):
+            raise ConfigError(f"mcp server {name} purpose must be a string")
         servers.append(MCPServerConfig(name=name, command=command, args=list(args), env=dict(env),
+                                       purpose=purpose.strip()[:300],
                                        enabled=_flag(row, "enabled", f"mcp.server.{name}", True),
                                        timeout_seconds=float(row.get("timeout_seconds", 15.0)),
                                        allow=list(row.get("allow", [])), deny=list(row.get("deny", []))))
@@ -217,7 +260,7 @@ def load(path: Path | None) -> AgentConfig:
         raw = tomllib.loads(path.read_text(encoding="utf-8"))
     except Exception as error:
         raise ConfigError(f"{path} is not readable TOML: {error}") from error
-    unknown = set(raw) - {"limits", "retrieval", "fetch", "mcp", "builtins"}
+    unknown = set(raw) - {"limits", "retrieval", "fetch", "approvals", "mcp", "builtins"}
     if unknown:
         raise ConfigError(f"{path}: unknown top-level keys: {sorted(unknown)}")
     limits_raw = _table(raw, "limits")
@@ -235,7 +278,8 @@ def load(path: Path | None) -> AgentConfig:
         if not isinstance(value, (int, float)) or isinstance(value, bool):
             raise ConfigError(f"[limits] {key} must be a number, got {value!r}")
     config = AgentConfig(limits=ToolLimits(**limits_raw), retrieval=_retrieval(_table(raw, "retrieval")),
-                         fetch=_fetch(_table(raw, "fetch")), mcp=_mcp(raw.get("mcp", {}).get("server", [])
+                         fetch=_fetch(_table(raw, "fetch")),
+                         approvals=_approvals(_table(raw, "approvals")), mcp=_mcp(raw.get("mcp", {}).get("server", [])
                                                                       if isinstance(raw.get("mcp"), dict)
                                                                       else raw.get("mcp", [])),
                          builtins=dict(builtins), source=path)

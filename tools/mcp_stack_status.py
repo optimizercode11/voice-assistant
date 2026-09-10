@@ -18,7 +18,11 @@ ENDPOINTS = {
     "tts": ("http://127.0.0.1:8090/health", "Kokoro TTS"),
     "llm": ("http://127.0.0.1:8080/health", "Qwen3.8-27B"),
     "stt": ("http://127.0.0.1:8095/health", "Qwen3-ASR (resident)"),
-    "bridge": ("http://127.0.0.1:8092/chat/health", "speech bridge"),
+    # 8091/8093 are the HTTP listeners; 8092/8094 are the TLS ones.  Probing a
+    # TLS port over plain http gets a connection reset and the tool then tells
+    # the model the bridge is down -- a wrong answer that reads like a real
+    # outage, which is the worst kind for a health tool.
+    "bridge": ("http://127.0.0.1:8091/chat/health", "speech bridge"),
     "tools_bridge": ("http://127.0.0.1:8093/chat/health", "tools bridge"),
 }
 TOOLS = [{

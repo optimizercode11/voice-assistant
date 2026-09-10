@@ -1,0 +1,31 @@
+{
+  "campaign": "voice-tools-20260910",
+  "command": [
+    "sh",
+    "-c",
+    "PATH=\"$PWD/bin:$PATH\" make check"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "24-27",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stack/voice-tools-20260910",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-10T01:00:50.142786784Z",
+  "git_head": "dfbf2497522c6e013974a2c28054dda0764b4ad9",
+  "inputs": [],
+  "label": "regression",
+  "log": "/home/ambudsharma/qwen36/voice-stack/voice-tools-20260910/evidence/guarded-voice-tools-20260910-20260910T010039Z-3998327.log",
+  "run_id": "voice-tools-20260910-20260910T010039Z-3998327",
+  "schema_version": 2,
+  "source_fingerprint": "356012b3d142951919672e4d51579ea5e4a4d039252d52f791e58ed28ffaf889",
+  "started_utc": "2026-09-10T01:00:41.473506607Z",
+  "status": "PASS"
+}

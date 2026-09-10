@@ -1,0 +1,33 @@
+{
+  "campaign": "voice-pipeline-tts-20260910",
+  "command": [
+    "systemctl",
+    "--user",
+    "--job-mode=ignore-dependencies",
+    "restart",
+    "voice-tools-bridge.service"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "24-27",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stage/voice-pipeline-tts-20260910",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-10T05:43:21.397431743Z",
+  "git_head": "d753f87581efe27b49e83029af82b8ecc9b28e32",
+  "inputs": [],
+  "label": "restart",
+  "log": "/home/ambudsharma/qwen36/voice-stage/voice-pipeline-tts-20260910/evidence/guarded-voice-pipeline-tts-20260910-20260910T054321Z-776360.log",
+  "run_id": "voice-pipeline-tts-20260910-20260910T054321Z-776360",
+  "schema_version": 2,
+  "source_fingerprint": "3b9ec7fae53498968157fb63cba08ae5fe1974dda1ee3d7e67bdbc611b1dbd5c",
+  "started_utc": "2026-09-10T05:43:21.361718164Z",
+  "status": "PASS"
+}

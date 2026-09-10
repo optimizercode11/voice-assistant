@@ -1,0 +1,67 @@
+{
+  "campaign": "voice-pipeline-tts-20260910",
+  "command": [
+    "bash",
+    "-c",
+    "\n    set -euo pipefail\n    live=\"$HOME/qwen36/voice-stack/voice-tools-20260910\"\n    test ! -e rollback\n    systemctl --user is-active voice-stack-gpu2.service\n    systemctl --user --job-mode=ignore-dependencies stop voice-tools-bridge.service\n    mkdir rollback\n    rsync -a \"$live/\" rollback/\n    touch rollback-complete\n    rsync -aR web tools deploy scripts config README.md ARCHITECTURE.md RUNBOOK.md TOOLS.md PROVENANCE.md tests/README.md .guarded-run \"$live/\"\n    cd \"$live\"\n    python3 tools/voicectl.py --config config/host.toml index build\n    python3 tools/voicectl.py --config config/host.toml doctor\n  "
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "24-27",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stage/voice-pipeline-tts-20260910",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-10T05:42:48.685576607Z",
+  "git_head": "d753f87581efe27b49e83029af82b8ecc9b28e32",
+  "inputs": [
+    {
+      "bytes": 52374,
+      "exists": true,
+      "path": "web/chat.js",
+      "sha256": "2d27b4d43d5cea3e669e54da2e983819a69575c4bbf5e3d60100d0b708a0d36c",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 13969,
+      "exists": true,
+      "path": "web/chat.html",
+      "sha256": "8580c8a60af6e5428f532f815c5ce8696f92bc38e47677588fccbc89e59e9927",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 37289,
+      "exists": true,
+      "path": "tools/speech_ui.py",
+      "sha256": "b457791e07bf1e11ed6b87658b06027adf18f6f4f0d5e01ab9873825f56a3a31",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 9086,
+      "exists": true,
+      "path": "tools/turn_control.py",
+      "sha256": "c0d0c598d5b7c9b7740d4d5a83f83bfa0e432767ec5ff922a2a4cf5b5dd51f7e",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 4680,
+      "exists": true,
+      "path": "config/host.toml",
+      "sha256": "895fe78ed872f91cadc5c47bd89d8d7f233722e3fd69878c6f57d73a2087591d",
+      "verification": "current_local"
+    }
+  ],
+  "label": "install",
+  "log": "/home/ambudsharma/qwen36/voice-stage/voice-pipeline-tts-20260910/evidence/guarded-voice-pipeline-tts-20260910-20260910T054248Z-776267.log",
+  "run_id": "voice-pipeline-tts-20260910-20260910T054248Z-776267",
+  "schema_version": 2,
+  "source_fingerprint": "3b9ec7fae53498968157fb63cba08ae5fe1974dda1ee3d7e67bdbc611b1dbd5c",
+  "started_utc": "2026-09-10T05:42:48.410951069Z",
+  "status": "PASS"
+}

@@ -1,0 +1,33 @@
+{
+  "campaign": "voice-thinkaloud-20260910",
+  "command": [
+    "systemctl",
+    "--user",
+    "--job-mode=ignore-dependencies",
+    "restart",
+    "voice-tools-bridge.service"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "24-27",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stage/voice-thinkaloud-20260910",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-10T05:13:30.294940269Z",
+  "git_head": "b1543ebf62605ba3f7bb3a9b706b977c675c0ea1",
+  "inputs": [],
+  "label": "restart",
+  "log": "/home/ambudsharma/qwen36/voice-stage/voice-thinkaloud-20260910/evidence/guarded-voice-thinkaloud-20260910-20260910T051330Z-774716.log",
+  "run_id": "voice-thinkaloud-20260910-20260910T051330Z-774716",
+  "schema_version": 2,
+  "source_fingerprint": "027ddec6e6c45d59f0d2868177dfe9255141728f3f1f99fae31d36c9304f7ccf",
+  "started_utc": "2026-09-10T05:13:30.274001047Z",
+  "status": "PASS"
+}

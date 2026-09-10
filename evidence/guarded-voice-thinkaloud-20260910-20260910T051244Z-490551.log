@@ -1,0 +1,22 @@
+guarded-run: campaign=voice-thinkaloud-20260910 label=stage mode=cpu cpus=24-27
+command: bash -c $'\n  set -euo pipefail\n  find . -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true\n  printf "export GUARD_GIT_HEAD=%s\\nexport GUARD_SOURCE_FP=%s\\nexport VOICE_TOOLS_CAMPAIGN=%s\\n" \\\n    "$GUARD_GIT_HEAD" "$GUARD_SOURCE_FP" "voice-thinkaloud-20260910" > deploy/source.env\n  echo "--- staged tree identity ---"; head -3 deploy/source.env\n  echo "--- deployment profile against staged bytes ---"\n  PYTHONDONTWRITEBYTECODE=1 python3 deploy/check_site.py --require-assets 2>&1 | tail -3\n  echo "--- GATE: index built inside the stage ---"\n  PYTHONDONTWRITEBYTECODE=1 python3 tools/voicectl.py --config config/host.toml index build\n  echo "--- GATE: does the NEW code understand the config it will run with? ---"\n  PYTHONDONTWRITEBYTECODE=1 python3 -u tools/voicectl.py --config config/host.toml doctor\n'
+--- staged tree identity ---
+export GUARD_GIT_HEAD=b1543ebf62605ba3f7bb3a9b706b977c675c0ea1
+export GUARD_SOURCE_FP=027ddec6e6c45d59f0d2868177dfe9255141728f3f1f99fae31d36c9304f7ccf
+export VOICE_TOOLS_CAMPAIGN=voice-thinkaloud-20260910
+--- deployment profile against staged bytes ---
+  ok   inputs bind deploy/voice_stack.py
+  ok   all 107 bound inputs exist on this machine
+== PASS: 20 checks, 0 failures ==
+--- GATE: index built inside the stage ---
+indexed 6 documents into 118 chunks in 0.02s at var/notes.sqlite
+--- GATE: does the NEW code understand the config it will run with? ---
+tools (4): fetch_url, now, request_directory, search_notes
+  fetch_url                          builtin
+  now                                builtin
+  request_directory                  builtin
+  search_notes                       retrieval
+limits: rounds=2 per_call=10.0s turn=150.0s result_chars=6000
+warn: fetch_url is enabled for en.wikipedia.org
+warn: ffmpeg is not on PATH; the bridge cannot decode uploads
+doctor: ok

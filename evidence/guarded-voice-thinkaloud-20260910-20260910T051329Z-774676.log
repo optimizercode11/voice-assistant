@@ -1,0 +1,14 @@
+guarded-run: campaign=voice-thinkaloud-20260910 label=install mode=cpu cpus=24-27
+command: bash -c $'\n    set -euo pipefail\n    live="$HOME/qwen36/voice-stack/voice-tools-20260910"\n    test ! -e rollback\n    systemctl --user is-active voice-stack-gpu2.service\n    systemctl --user --job-mode=ignore-dependencies stop voice-tools-bridge.service\n    mkdir rollback\n    rsync -a "$live/" rollback/\n    touch rollback-complete\n    echo "--- snapshot taken into stage/rollback/ ---"\n    rsync -aR web tools deploy scripts config README.md ARCHITECTURE.md RUNBOOK.md \\\n      TOOLS.md PROVENANCE.md tests/README.md .guarded-run "$live/"\n    cd "$live"\n    python3 tools/voicectl.py --config config/host.toml index build\n    python3 -u tools/voicectl.py --config config/host.toml doctor\n  '
+active
+--- snapshot taken into stage/rollback/ ---
+indexed 6 documents into 118 chunks in 0.016s at var/notes.sqlite
+tools (4): fetch_url, now, request_directory, search_notes
+  fetch_url                          builtin
+  now                                builtin
+  request_directory                  builtin
+  search_notes                       retrieval
+limits: rounds=2 per_call=10.0s turn=150.0s result_chars=6000
+warn: fetch_url is enabled for en.wikipedia.org
+warn: ffmpeg is not on PATH; the bridge cannot decode uploads
+doctor: ok

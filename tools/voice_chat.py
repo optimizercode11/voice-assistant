@@ -33,19 +33,41 @@ A previous reply may have been interrupted, so do not assume the user heard all 
 it unless asked. Speech transcripts can contain errors: infer obvious wording from context, but
 ask one brief clarification when a name, number or key detail is unclear. Do not invent it.
 Be warm and candid without repetitive greetings, praise or filler. Ask a follow-up only when it
-helps; do not end every reply with a question. Be honest about uncertainty. You have no live web,
-device-control or external-action tools in this conversation; do not claim to look things up,
-perform actions, or hear tone and background sounds that were not described in the text."""
+helps; do not end every reply with a question. Be honest about uncertainty."""
 
 TOOLS_PREAMBLE = """
-You have tools. Call one when it genuinely beats answering from memory: for the
-current time or date, for anything in the user's own notes, or for a host the
+You have tools, listed in the tools field with their real names and arguments.
+Call one when it genuinely beats answering from memory: for the current time or
+date, for anything in the user's own notes, for the files the deployment exposes,
+for reference lookups when a lookup tool is present, or for a host the
 deployment explicitly allows. Do not call a tool to be polite or to seem
 thorough; answer directly when you already can.
+Before you state a fact about a real person, place, film or date that is not
+already in this conversation, ask whether a tool could actually check it. If
+none can, say that you are unsure rather than sounding certain: a confident
+wrong fact costs the user more than an honest gap.
 After a tool result, say what you learned in plain spoken language and cite the
 file or host in words rather than as a link. If a tool errors or finds nothing,
 say so plainly and answer as far as you can; never invent what the tool did not
 return. Never narrate that you are about to call something -- just call it."""
+
+NO_CAPABILITY_NOTE = """
+You have no live web, device-control or external-action tools in this
+conversation; do not claim to look things up, perform actions, or hear tone and
+background sounds that were not described in the text."""
+
+
+def system_prompt(specs):
+    """Pick the capability half of the prompt from what is actually attached.
+
+    SYSTEM used to end with "you have no live web ... do not claim to look
+    things up", and that sentence was sent on every turn -- including the ones
+    with eight tools attached.  The model was instructed not to do the thing it
+    had just been handed schemas for, which is how a model that is merely
+    uncertain ends up confidently refusing to check.
+    """
+    return SYSTEM + TOOLS_PREAMBLE if specs else SYSTEM + NO_CAPABILITY_NOTE
+
 
 MAX_BODY = 64 * 1024
 MAX_RESPONSE_BYTES = 1024 * 1024 + 1
@@ -184,7 +206,7 @@ def _tool_calls(choice):
 
 
 def complete(url, body, disconnected):
-    request = payload(body)
+    request = payload(body, system=system_prompt([]))
     decoded = _exchange(url, request, disconnected, 65)
     choice = decoded['choices'][0]
     text = _speakable(choice)
@@ -203,7 +225,7 @@ def turn(url, body, disconnected, *, registry=None, limits=None, on_event=None):
     rounds = int(getattr(limits, 'rounds', 1) or 1)
     generation_seconds = float(getattr(limits, 'generation_seconds', 45) or 45)
     turn_seconds = float(getattr(limits, 'turn_seconds', 150) or 150)
-    system = SYSTEM + TOOLS_PREAMBLE if specs else SYSTEM
+    system = system_prompt(specs)
     messages = payload(body, system=system)['messages']
     turn_deadline = time.monotonic() + turn_seconds
     usage, tools_used, sources = {}, [], []

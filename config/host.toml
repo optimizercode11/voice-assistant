@@ -27,9 +27,21 @@ top_k = 4
 max_chars = 2400
 stale_after_seconds = 86400
 
+# The assistant's only network egress: one host, read-only GET, allow-list
+# re-checked at every redirect hop.
+#
+# It exists because this model's parametric knowledge is measurably unreliable.
+# Asked what it knows about Saif Ali Khan it credited him with Dilwale Dulhania
+# Le Jayenge (Shah Rukh Khan) and Kaho Naa... Pyaar Hai (Hrithik Roshan), and
+# produced three different mothers across four runs.  Retrieval over the user's
+# own notes cannot help there -- that corpus is this repo's documentation -- so
+# the model had nowhere to check a fact except its own memory.
+#
+# en.wikipedia.org serves both the REST summary endpoint and the search API, so
+# one host is enough.  Widening this list is the decision to read twice about.
 [fetch]
-enabled = false
-allow_hosts = []
+enabled = true
+allow_hosts = ["en.wikipedia.org"]
 
 [[mcp.server]]
 name = "stack"

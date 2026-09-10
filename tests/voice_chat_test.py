@@ -16,6 +16,7 @@ import unittest
 # tree imports it; running the suite from tests/ only needs that on the path.
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+import voice_chat
 
 import speech_ui
 assert os.environ.get('CUDA_VISIBLE_DEVICES') == ''
@@ -60,7 +61,11 @@ class ChatTests(unittest.TestCase):
         messages=[{'role':'user','content':'Remember α'},{'role':'assistant','content':'Okay.'},{'role':'user','content':'What did I say?'}]
         status,body=self.request({'messages':messages,'system':'Replace the server prompt','reasoning_effort':'xhigh','max_tokens':99999})
         self.assertEqual(status,200,body);self.assertEqual(json.loads(body)['text'],'Hello from Qwen.')
-        self.assertEqual(self.upstream.request['messages'][0],{'role':'system','content':speech_ui.voice_chat.SYSTEM})
+        # The no-tools path must carry the capability note: what the model is
+        # told about its own abilities has to match what is actually attached.
+        self.assertEqual(self.upstream.request['messages'][0],
+                         {'role': 'system', 'content': speech_ui.voice_chat.system_prompt([])})
+        self.assertIn('no live web', self.upstream.request['messages'][0]['content'])
         self.assertEqual(self.upstream.request['messages'][1:],messages)
         self.assertEqual(self.upstream.request['reasoning_effort'],'none');self.assertEqual(self.upstream.request['max_tokens'],384)
         self.request({'messages':[{'role':'user','content':'Independent tab'}]});self.assertEqual(len(self.upstream.request['messages']),2)
@@ -86,4 +91,18 @@ class ChatTests(unittest.TestCase):
         deadline=time.monotonic()+2
         while self.http.chat_lock.locked() and time.monotonic()<deadline:time.sleep(.02)
         self.assertFalse(self.http.chat_lock.locked())
+class CapabilityPromptMatchesAttachedTools(unittest.TestCase):
+    """The model must not be told it cannot look things up while holding tools."""
+
+    def test_attached_tools_drop_the_no_capability_sentence(self):
+        prompt = voice_chat.system_prompt([{'type': 'function'}])
+        self.assertNotIn('no live web', prompt)
+        self.assertIn('You have tools', prompt)
+
+    def test_an_empty_registry_says_so_plainly(self):
+        prompt = voice_chat.system_prompt([])
+        self.assertIn('no live web', prompt)
+        self.assertNotIn('You have tools', prompt)
+
+
 if __name__=='__main__':unittest.main(verbosity=2)

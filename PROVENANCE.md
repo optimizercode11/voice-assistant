@@ -444,15 +444,16 @@ Deployed as campaign `voice-history-20260910-a` from head `5b039de`; the served
 byte-identical to this checkout. GPU 2 was not touched: PID `761368`, active
 since `05:02:04 UTC` before the campaign and after it.
 
-Two reported symptoms had the same cause and neither looked like the cause. A
-thread about one film restarted itself with "I'm not sure what you mean by
-Carlton"; a one-character message got a confident reply about a place called
-Carlton. Both read as a model that was not doing knowledge-aware context
-processing. The mechanism was duller: `tools/voice_chat.py` keeps no session and
-`parse_messages` takes the role from *position*, so the transcript in
-`web/chat.js` is the model's entire context, and a page reload deleted it. The
-model was not failing to reason about the conversation; on that turn there was no
-conversation to reason about.
+A thread about one film restarted itself with "I'm not sure what you mean by
+Carlton", which read as a model that was not doing knowledge-aware context
+processing. The mechanism underneath is duller and is worth stating precisely:
+`tools/voice_chat.py` keeps no session and `parse_messages` takes the role from
+*position*, so the transcript in `web/chat.js` is the model's entire context, and
+a page reload deleted it. **A reload is therefore a mechanism that reproduces
+that symptom exactly -- it is not a proven cause of it.** No log was recovered
+for the turn in question, so this is a candidate explanation with a fix, not a
+diagnosis. What is established is the general failure: with no persistence, any
+reload mid-thread leaves the model a first question to reason about.
 
 That is why the fix is in the page and not on the server. A server-side session
 would need an identity to hang state on, a lifetime, and a privacy statement, to

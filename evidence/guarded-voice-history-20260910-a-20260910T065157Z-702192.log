@@ -1,0 +1,5 @@
+guarded-run: campaign=voice-history-20260910-a label=stage-2 mode=cpu cpus=24-27
+command: bash -c $'\n  set -euo pipefail\n  find . -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true\n  PYTHONDONTWRITEBYTECODE=1 python3 deploy/check_site.py --require-assets 2>&1 | tail -2\n  sha256sum web/chat.js\n'
+  ok   all 107 bound inputs exist on this machine
+== PASS: 20 checks, 0 failures ==
+0ea4e4a5fa64e55b428be6dad8a3dddbd7e46038e635ff2fbe4ddd286a10d5b3  web/chat.js

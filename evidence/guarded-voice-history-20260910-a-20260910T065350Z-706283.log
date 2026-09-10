@@ -1,0 +1,12 @@
+guarded-run: campaign=voice-history-20260910-a label=restart-2 mode=cpu cpus=24-27
+command: bash -c $'\n  set -euo pipefail\n  cd "$HOME/qwen36/voice-stack/voice-tools-20260910"\n  python3 tools/voicectl.py --config config/host.toml index build\n  python3 tools/voicectl.py --config config/host.toml doctor\n  systemctl --user --job-mode=ignore-dependencies restart voice-tools-bridge.service\n'
+indexed 6 documents into 129 chunks in 0.015s at var/notes.sqlite
+tools (4): fetch_url, now, request_directory, search_notes
+  fetch_url                          builtin
+  now                                builtin
+  request_directory                  builtin
+  search_notes                       retrieval
+limits: rounds=2 per_call=10.0s turn=150.0s result_chars=6000
+warn: fetch_url is enabled for en.wikipedia.org
+warn: ffmpeg is not on PATH; the bridge cannot decode uploads
+doctor: ok

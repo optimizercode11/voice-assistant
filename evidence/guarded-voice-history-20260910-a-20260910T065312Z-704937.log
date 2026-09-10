@@ -1,0 +1,14 @@
+guarded-run: campaign=voice-history-20260910-a label=install-2 mode=cpu cpus=24-27
+command: bash -c $'\n  set -euo pipefail\n  live="$HOME/qwen36/voice-stack/voice-tools-20260910"\n  test -e rollback-complete\n  find . -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true\n  printf "export GUARD_GIT_HEAD=%s\\nexport GUARD_SOURCE_FP=%s\\nexport VOICE_TOOLS_CAMPAIGN=voice-history-20260910-a\\n" "$GUARD_GIT_HEAD" "$GUARD_SOURCE_FP" > deploy/source.env\n  systemctl --user is-active voice-stack-gpu2.service\n  systemctl --user --job-mode=ignore-dependencies stop voice-tools-bridge.service\n  rsync -aR web deploy/source.env README.md ARCHITECTURE.md RUNBOOK.md TOOLS.md PROVENANCE.md tests/README.md "$live/"\n  cd "$live"\n  python3 tools/voicectl.py --config config/host.toml doctor\n  sha256sum web/chat.js\n'
+active
+tools (4): fetch_url, now, request_directory, search_notes
+  fetch_url                          builtin
+  now                                builtin
+  request_directory                  builtin
+  search_notes                       retrieval
+limits: rounds=2 per_call=10.0s turn=150.0s result_chars=6000
+warn: the index is stale: corpus changed since the index was built
+warn: fetch_url is enabled for en.wikipedia.org
+warn: ffmpeg is not on PATH; the bridge cannot decode uploads
+doctor: ok
+0ea4e4a5fa64e55b428be6dad8a3dddbd7e46038e635ff2fbe4ddd286a10d5b3  web/chat.js

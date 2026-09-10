@@ -436,3 +436,66 @@ be clipped mid-syllable on almost every turn.
 A synthesis failure no longer ends the conversation. The words are already on the
 screen and the microphone still works, so a lost sentence carries `keepSession`
 and the turn stays open — the same lesson the empty-reply fix taught.
+
+## The conversation moved into the browser — 2026-09-10
+
+Deployed as campaign `voice-history-20260910-a` from head `5b039de`; the served
+`chat.js` is `0ea4e4a5fa64e55b428be6dad8a3dddbd7e46038e635ff2fbe4ddd286a10d5b3`,
+byte-identical to this checkout. GPU 2 was not touched: PID `761368`, active
+since `05:02:04 UTC` before the campaign and after it.
+
+Two reported symptoms had the same cause and neither looked like the cause. A
+thread about one film restarted itself with "I'm not sure what you mean by
+Carlton"; a one-character message got a confident reply about a place called
+Carlton. Both read as a model that was not doing knowledge-aware context
+processing. The mechanism was duller: `tools/voice_chat.py` keeps no session and
+`parse_messages` takes the role from *position*, so the transcript in
+`web/chat.js` is the model's entire context, and a page reload deleted it. The
+model was not failing to reason about the conversation; on that turn there was no
+conversation to reason about.
+
+That is why the fix is in the page and not on the server. A server-side session
+would need an identity to hang state on, a lifetime, and a privacy statement, to
+re-learn something the browser already holds — and it would still be the same
+stateless bridge underneath. So `web/chat.js` now owns one more contract: **the
+page is the model's memory**, and it says so in the header rather than implying
+it remembers more than it sends.
+
+Three constants were measured against the deployed bridge, not read off the
+source, and the first draft of the comments had one of them wrong (it said 100;
+the ceiling is 101):
+
+| Constant | Value | Measured on `:8094` |
+| --- | --- | --- |
+| `SEND_TURNS` | 40 turns = 81 messages sent | 101 messages → 200, 102 → 400 |
+| `MAX_MESSAGE` | 8000 characters | 8000 → 200, 8001 → 400 |
+| `STORE_TURNS` / `STORE_BYTES` | 200 turns / 1.2 MB | localStorage budget, trimmed proportionally |
+
+`transcript` is the single source of truth and `history` is derived from it, so
+the model can never be shown a turn the browser would lose on refresh, nor forget
+one it kept. A roll-off repaints for the same reason: a bubble that a refresh
+would delete is a lie on screen.
+
+Two defects were caught by the new suite rather than by reading the code. The
+ownership rule — a tab may write only into the conversation whose id it owns —
+was initially too strict, and **"New chat" could never take the key back**: it
+cleared the screen and left the transcript on disk, so the next reload resurrected exactly what the user had just erased. Claiming the key is now an explicit
+act. The other was the byte trim: dropping one turn per attempt could exhaust the
+retry budget on a large record and exit **without writing anything** while the
+counter still read "saved in this browser". The trim is now proportional.
+
+`tests/browser/voice_history_browser.mjs` asserts nine claims by reading the
+`/chat/completions` bodies and the stored record, never a screenshot, because
+"the bubbles came back" and "the model got its context back" are different claims
+and the first is nearly free to fake. Its sabotage keeps every bubble, every
+request and every byte of audio and merely stops writing the turn down; it fails
+at the first assertion, and `make sabotage-selftest` proves the arm is capable of
+failing. The suite also seeds storage by hand to prove a forged record cannot
+author an assistant turn or exceed the per-message ceiling, and opens a second tab
+to prove a *New chat* over there is not resurrected by a reply finishing here.
+
+What is **not** claimed: the reload step of the 30-second manual check was not
+performed on real hardware, and nothing here says anything about a room. The
+transcript now persists in the browser profile, which is a change in where user
+data lives; the page footnote says so plainly, and **New chat** and clearing site
+data are the two ways it goes away.

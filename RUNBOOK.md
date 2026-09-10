@@ -473,6 +473,51 @@ The stage directory `~/qwen36/voice-stage/voice-barge-20260910-a/rollback/` is
 the **only** snapshot of the pre-barge-in CPU tree. Do not delete it until the
 manual check has passed.
 
+### Executed: 2026-09-10, campaign `voice-history-20260910-a`
+
+Steps 1-5 were run in order from head `5b039de`, shipping the persisted-chat
+build. Every host-writing step went through the CPU guard on `--cpus 24-27
+--nice 10`; no command in this campaign named a GPU.
+
+| Label | Result | Evidence |
+| --- | --- | --- |
+| `stage` | PASS, 20 checks, notes index rebuilt in the stage, `doctor: ok` | `guarded-...-20260910T064944Z-697195` |
+| `install` | PASS, GPU unit active, rollback snapshot + `rollback-complete` | `guarded-...-20260910T064957Z-778911` |
+| `restart` | PASS | `guarded-...-20260910T065006Z-779005` |
+| `stage-2` | PASS, re-stage after a comment-only correction to the ceiling constant | `guarded-...-20260910T065157Z-702192` |
+| `install-2` | PASS; rebuilt `deploy/source.env` with the current head | `guarded-...-20260910T065312Z-704937` |
+| `restart-2` | PASS; notes index rebuilt first | `guarded-...-20260910T065350Z-706283` |
+
+Two things went wrong and neither reached the running service. The first
+`install-2` attempt was run over plain SSH with `./.guarded-run` directly and
+referenced `$GUARD_GIT_HEAD`, which only `guarded-hostrun` exports
+(`scripts/guarded-hostrun:80`); `set -u` aborted it on that line, **before** the
+`stop` two lines later, and the bridge was confirmed still active afterwards.
+The lesson is that a host-side step must either `source deploy/source.env` first
+as step 3 does, or go through `guarded-hostrun`. Second, `install-2` promoted
+the documentation but not the notes index, and `doctor` then warned **"the index
+is stale: corpus changed since the index was built"** -- the same staleness that
+once disabled `search_notes` outright. `restart-2` rebuilt it before starting.
+**Any step that rsyncs the corpus must rebuild the index in the same step.**
+
+Post-deploy verification:
+
+* Served `chat.js` over TLS is
+* `0ea4e4a5fa64e55b428be6dad8a3dddbd7e46038e635ff2fbe4ddd286a10d5b3`, byte-
+  identical to this checkout; `rsync -aRnic` over `web tools
+  deploy/site_config.py` reports no source differences.
+* GPU 2 was never touched: PID `761368`, active since `05:02:04 UTC`, before the
+  campaign began and unchanged after it.
+* Bridge: PID `782391` since `06:53:54 UTC`, `NRestarts=0`, `/chat/health`
+  reports `available: true`, `streaming: true`, 10 tools.
+* The send window was measured against the deployed bridge rather than inferred:
+  101 messages is a 200 and 102 is a 400; one message of 8000 characters is a
+  200 and one of 8001 is a 400. The page sends 81 at its cap.
+
+Not performed: the speaker-to-microphone check above, including the reload step.
+`voice_history_browser` proves the transcript and the model's context survive a
+reload in Chromium; it does not prove anything about a room.
+
 ### 6. Roll back this app update if copy, startup or acceptance fails
 
 Use the *new* snapshot from step 3; do not rerun the old ASR campaign.
@@ -560,6 +605,7 @@ Neither the old installer backup nor the ASR backups were restore-tested here.
 | 503 STT unavailable | Inspect existing stack logs/health; an app update is not permission to restart the GPU service. |
 | Audio stops but next turn waits | The resident upstream may finish its bounded generation despite client cancellation. |
 | Tools service is up but new behavior is absent | Compare deployed file bytes, service start time, target port and browser cache. |
+| Conversation is gone after a reload | Regression. The transcript is saved in `localStorage` under `voice-chat`, and `web/chat.js` must write it at the same moment it commits a turn. `make test-browser` (`voice_history_browser`) is the gate. |
 
 The GPU stack's original startup certification is separate:
 `deploy/voice_stack.py` verifies pins/releases, starts its processes and runs

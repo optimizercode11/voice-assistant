@@ -2,19 +2,40 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
 assert.equal(process.env.CUDA_VISIBLE_DEVICES,'');
 // Playwright is deliberately NOT a dependency of this repo: point PLAYWRIGHT at any
 // install whose chromium/webkit browsers are already downloaded, e.g.
 //   PLAYWRIGHT=/path/to/node_modules/playwright/index.mjs node tests/browser/<name>.mjs
+const sabotage=process.argv.includes('--sabotage'),live=process.argv.includes('--live');
+const deadSabotage=process.argv.includes('--dead-sabotage');
+const assertionsComplete='ASSERTIONS COMPLETE: browser controls';
+assert.ok(!(live&&(sabotage||deadSabotage)),'sabotage must use the local page replacement');
+// Both flags run the child through the real sabotage exit path with a no-op.
+if(deadSabotage&&!sabotage){
+ const run=spawnSync(process.execPath,[process.argv[1],'--sabotage','--dead-sabotage'],
+  {encoding:'utf8',timeout:120000});
+ process.stdout.write(run.stdout??'');
+ process.stderr.write(run.stderr??'');
+ assert.ifError(run.error);
+ assert.equal(run.signal,null,'dead sabotage must finish normally');
+ assert.equal(run.status,0,'an uncaught sabotage must exit zero so make rejects it');
+ assert.ok(run.stdout.split('\n').includes(assertionsComplete),'the browser assertions must finish');
+ console.log('DEAD SABOTAGE PASS: no-op mutation escaped after the browser assertions ran');
+ process.exit(0);
+}
 const {chromium,webkit} = await import(process.env.PLAYWRIGHT
   ?? '/tmp/kokoro-playback-browser/node_modules/playwright/index.mjs');
-const sabotage=process.argv.includes('--sabotage'),live=process.argv.includes('--live');
 const wav=fs.readFileSync('tests/fixtures/microphone.wav');
+let mutations=0;
 const server=http.createServer((req,res)=>{
  const name=req.url==='/chat.js'?'chat.js':'chat.html';let body=fs.readFileSync('web/'+name,'utf8');
  if(sabotage && name==='chat.js'){
    const check="if(event.code!=='Space' && event.key!==' ')return;";
-   assert(body.includes(check));body=body.replace(check,'return; // paired sabotage disables only the keyboard handler');
+   assert.ok(body.includes(check),'the sabotage anchor no longer matches web/chat.js');
+   const armed=body.replace(check,deadSabotage?check:'return; // paired sabotage disables only the keyboard handler');
+   if(deadSabotage)assert.equal(armed,body,'dead sabotage must leave the page unchanged');
+   body=armed;mutations++;
  }
  res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':'text/html');res.end(body);
 });
@@ -41,6 +62,13 @@ for(const [name,type] of (sabotage?[['chromium',chromium]]:[['chromium',chromium
  await page.route('**/tts?*',async r=>{speeds.push(new URL(r.request().url()).searchParams.get('speed'));if(deny)await page.evaluate(()=>window.denyPlay=true);await r.fulfill({contentType:'audio/wav',body:wav});});
  await page.goto(live?'https://192.168.228.113:8092/chat':`http://127.0.0.1:${server.address().port}/chat`);
  await page.waitForFunction(()=>!document.querySelector('#send').disabled);
+ // This suite guards the controls, and one of them is "Space interrupts and
+ // capture comes back". Barge-in keeps the microphone live during a reply on
+ // purpose, which would make the isolation assertions below false for the wrong
+ // reason, so switch it off here -- the same click a user makes. It persists
+// through the reload below, which is itself the preference being exercised.
+// voice_barge_browser.mjs owns the mode where the microphone stays open.
+ await page.uncheck('#barge-in');
  assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
  const darkBackground=await page.evaluate(()=>getComputedStyle(document.body).backgroundColor);
  await page.locator('#theme').click();assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
@@ -100,6 +128,9 @@ for(const [name,type] of (sabotage?[['chromium',chromium]]:[['chromium',chromium
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'mobile layout has no horizontal overflow');
  await page.screenshot({path:`evidence/browser/${name}-${live?'live':'controls'}-mobile.png`,fullPage:true});
  console.log(`PASS ${name}: dark/light theme persistence and mobile layout, Space interruption/editing/modifiers, hidden playback, autoplay recovery/cancel, speed1.2/1.5${name==='chromium'?', real microphone resumes after Space':''}`);
+ if(sabotage)assert.ok(mutations>0,'the page must load the sabotage replacement');
+ console.log(assertionsComplete);
+ if(sabotage)console.error('SABOTAGE PASSED (this is the failure): keyboard handler');
  }finally{await browser.close();}
 }
 }finally{await new Promise(resolve=>server.close(resolve));}

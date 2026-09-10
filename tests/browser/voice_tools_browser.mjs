@@ -1,13 +1,30 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
 assert.equal(process.env.CUDA_VISIBLE_DEVICES,'');
 // The tool-loop UI.  /chat/completions here is a real chunked NDJSON stream with
 // deliberate gaps, not a mocked body: the whole point is that progress arrives
 // *before* the answer, and a fulfill() that hands over one buffer cannot show that.
-const {chromium} = await import(process.env.PLAYWRIGHT ?? '/tmp/kokoro-playback-browser/node_modules/playwright/index.mjs');
 const sabotage=process.argv.includes('--sabotage');
+const deadSabotage=process.argv.includes('--dead-sabotage');
+const assertionsComplete='ASSERTIONS COMPLETE: browser tools';
+// Both flags run the child through the real sabotage exit path with a no-op.
+if(deadSabotage&&!sabotage){
+ const run=spawnSync(process.execPath,[process.argv[1],'--sabotage','--dead-sabotage'],
+  {encoding:'utf8',timeout:120000});
+ process.stdout.write(run.stdout??'');
+ process.stderr.write(run.stderr??'');
+ assert.ifError(run.error);
+ assert.equal(run.signal,null,'dead sabotage must finish normally');
+ assert.equal(run.status,0,'an uncaught sabotage must exit zero so make rejects it');
+ assert.ok(run.stdout.split('\n').includes(assertionsComplete),'the browser assertions must finish');
+ console.log('DEAD SABOTAGE PASS: no-op mutation escaped after the browser assertions ran');
+ process.exit(0);
+}
+const {chromium} = await import(process.env.PLAYWRIGHT ?? '/tmp/kokoro-playback-browser/node_modules/playwright/index.mjs');
 const wav=fs.readFileSync('tests/fixtures/microphone.wav');
+let mutations=0;
 const events=[
  {type:'status',phase:'tool',round:1,calls:['search_notes']},
  {type:'tool',name:'search_notes',ok:true,ms:12,source:'retrieval',citations:[{path:'/home/me/notes/deploy.md',chunk:0,heading:'Ports'}]},
@@ -39,7 +56,13 @@ const server=http.createServer((req,res)=>{
     let body=fs.readFileSync(file,'utf8');
     // Sabotage: make the page ignore the progress stream. Live status and
     // citations must then stop appearing, not merely look different.
-    if(sabotage&&file.endsWith('.js'))body=body.replace("streaming\n      ? await responseProgress","false\n      ? await responseProgress");
+    if(sabotage&&file.endsWith('.js')){
+      const anchor="streaming\n      ? await responseProgress";
+      assert.ok(body.includes(anchor),'the sabotage anchor no longer matches web/chat.js');
+      const armed=body.replace(anchor,deadSabotage?anchor:"false\n      ? await responseProgress");
+      if(deadSabotage)assert.equal(armed,body,'dead sabotage must leave the page unchanged');
+      body=armed;mutations++;
+    }
     res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript; charset=utf-8':'text/html; charset=utf-8');
     return res.end(body);
   }
@@ -58,6 +81,7 @@ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const base=`http://127.0.0.1:${server.address().port}`;
 try{
  const browser=await chromium.launch({headless:true,args:['--disable-gpu']});
+ try{
  const context=await browser.newContext();
  const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(String(e)));
  page.setDefaultTimeout(15000);
@@ -92,9 +116,16 @@ try{
  await page.waitForFunction(()=>document.querySelectorAll('.message.assistant').length===4);
  assert.equal((await page.locator('.message.assistant').last().locator('p').first().textContent()).trim(),'Plain as day.');
  assert.deepEqual(errors,[]);
- if(sabotage)throw new Error('sabotage unexpectedly passed: the page still rendered tool progress');
- fs.mkdirSync('evidence/browser',{recursive:true});
- await page.screenshot({path:'evidence/browser/chromium-tools.png',fullPage:true});
- console.log('PASS chromium: live tool progress, citations kept, failed tool disclosed, citation markup inert, plain-JSON fallback');
- await browser.close();
+ if(sabotage)assert.ok(mutations>0,'the page must load the sabotage replacement');
+ console.log(assertionsComplete);
+ if(sabotage){
+  console.error('SABOTAGE PASSED (this is the failure): the page still rendered tool progress');
+  // The assertions passed: exit zero so make sabotage rejects this arm.
+  process.exitCode=0;
+ }else{
+  fs.mkdirSync('evidence/browser',{recursive:true});
+  await page.screenshot({path:'evidence/browser/chromium-tools.png',fullPage:true});
+  console.log('PASS chromium: live tool progress, citations kept, failed tool disclosed, citation markup inert, plain-JSON fallback');
+ }
+ }finally{await browser.close();}
 }finally{await new Promise(resolve=>server.close(resolve));}

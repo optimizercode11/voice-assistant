@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import {execFileSync} from 'node:child_process';
+import {execFileSync, spawnSync} from 'node:child_process';
 assert.equal(process.env.CUDA_VISIBLE_DEVICES,'');
 // The carry-forward test: someone says "I", pauses for breath, then says "want
 // to go to the museum".  The endpointer cuts that into two clips, and before the
@@ -15,10 +15,26 @@ assert.equal(process.env.CUDA_VISIBLE_DEVICES,'');
 // sentence.  Nothing here is stubbed except the network.
 //
 //   PLAYWRIGHT=/path/to/playwright/index.mjs node tests/browser/voice_carry_browser.mjs
+const sabotage=process.argv.includes('--sabotage');
+const deadSabotage=process.argv.includes('--dead-sabotage');
+const assertionsComplete='ASSERTIONS COMPLETE: browser carry';
+// Both flags run the child through the real sabotage exit path with a no-op.
+if(deadSabotage&&!sabotage){
+ const run=spawnSync(process.execPath,[process.argv[1],'--sabotage','--dead-sabotage'],
+  {encoding:'utf8',timeout:120000});
+ process.stdout.write(run.stdout??'');
+ process.stderr.write(run.stderr??'');
+ assert.ifError(run.error);
+ assert.equal(run.signal,null,'dead sabotage must finish normally');
+ assert.equal(run.status,0,'an uncaught sabotage must exit zero so make rejects it');
+ assert.ok(run.stdout.split('\n').includes(assertionsComplete),'the browser assertions must finish');
+ console.log('DEAD SABOTAGE PASS: no-op mutation escaped after the browser assertions ran');
+ process.exit(0);
+}
 const {chromium} = await import(process.env.PLAYWRIGHT
   ?? '/tmp/kokoro-playback-browser/node_modules/playwright/index.mjs');
-const sabotage=process.argv.includes('--sabotage');
 const wav=fs.readFileSync('tests/fixtures/microphone.wav');
+let mutations=0;
 
 // The hold verdict comes from the REAL tools/turn_control.py.  A suite that
 // re-implemented the server's rules in JavaScript would keep passing while the
@@ -41,8 +57,13 @@ const server=http.createServer((req,res)=>{
  let body=fs.readFileSync(file,'utf8');
  // The paired sabotage: keep the hold, throw the words away.  This is the
  // regression itself, and this suite must go red for it.
- if(sabotage&&file.endsWith('.js'))
-   body=body.replaceAll("heldText = (carried ? carried + ' ' : '') + text;","heldText = '';");
+ if(sabotage&&file.endsWith('.js')){
+   const anchor="heldText = (carried ? carried + ' ' : '') + text;";
+   assert.ok(body.includes(anchor),'the sabotage anchor no longer matches web/chat.js');
+   const armed=body.replaceAll(anchor,deadSabotage?anchor:"heldText = '';");
+   if(deadSabotage)assert.equal(armed,body,'dead sabotage must leave the page unchanged');
+   body=armed;mutations++;
+ }
  res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':'text/html');res.end(body);
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -105,8 +126,11 @@ try{
 
   await page.locator('#end').click();
   assert.deepEqual(errors,[]);
-  if(sabotage){console.error('SABOTAGE PASSED (this is the failure): the carry-forward is load-bearing');
-   process.exitCode=1;}
+  if(sabotage)assert.ok(mutations>0,'the page must load the sabotage replacement');
+  console.log(assertionsComplete);
+  if(sabotage){console.error('SABOTAGE PASSED (this is the failure): the page drops a held fragment');
+   // The assertions passed: exit zero so make sabotage rejects this arm.
+   process.exitCode=0;}
   else{fs.mkdirSync('evidence/browser',{recursive:true});
    await page.screenshot({path:'evidence/browser/carry.png',fullPage:true});
    console.log('PASS chromium: real two-clip utterance held, carried and dispatched as one sentence');}

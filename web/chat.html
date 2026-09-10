@@ -9,6 +9,23 @@
 .settings small{font-size:11px;line-height:1.45}.speech-corrections{grid-column:1/-1;font-size:12px;text-align:left}.speech-corrections summary{cursor:pointer}.speech-corrections label{margin-top:12px}.speech-corrections .check{display:flex;align-items:center;gap:8px}.speech-corrections textarea{width:100%;resize:vertical;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px;font-size:12px}.speech-corrections small{display:block;color:var(--muted);margin-top:8px}.message .transcript-note{font-size:12px;color:var(--muted);margin-top:8px}
 .message .toolnote,.message .sources{font-size:11px;color:var(--muted);margin:8px 0 0;padding-top:7px;border-top:1px dashed var(--line);letter-spacing:.2px}
 .message .sources{color:var(--green)}
+/* The orb is the one place this page can admit what it is actually doing.
+   --glow is written by chat.js once per animation frame from measured audio
+   energy -- microphone RMS while listening, the reply's own waveform while
+   speaking -- never from a timer, so a silent room cannot make it breathe.
+   The halo lives on ::after and the core on ::before on purpose: the base
+   sheet's @keyframes breathe animates the orb's own box-shadow, and a keyframe
+   overwrites any dynamic shadow we set on the element itself.  Pseudo-elements
+   are outside that animation's reach. */
+.orb{--glow:0}
+.orb::before{content:"";position:absolute;inset:0;border-radius:50%;pointer-events:none;
+background:radial-gradient(circle at 50% 50%,#f4fff8 0%,#8fe6b4 34%,#3f8f6a00 70%);
+opacity:calc(var(--glow)*.92);transform:scale(calc(.26+var(--glow)*.68));
+transition:opacity .09s linear,transform .09s ease-out}
+.orb::after{box-shadow:0 0 calc(var(--glow)*58px) calc(var(--glow)*6px) #6fdc9f4d;transition:box-shadow .09s linear}
+.orb[data-state=listening]::after,.orb[data-state=speaking]::after{box-shadow:0 0 calc(var(--glow)*72px) calc(var(--glow)*9px) #6fdc9f73}
+[data-theme="dark"] .orb::before{background:radial-gradient(circle at 50% 50%,#f6fffa 0%,#9df0c0 35%,#2f7f5c00 72%)}
+[data-theme="dark"] .orb[data-state=listening]::after,[data-theme="dark"] .orb[data-state=speaking]::after{box-shadow:0 0 calc(var(--glow)*88px) calc(var(--glow)*12px) #7ce3ab8c}
 </style>
 </head>
 <body>

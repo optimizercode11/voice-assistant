@@ -55,6 +55,70 @@ function clearCapture() {
   if (recorder) { recorder.onstop = null; recorder.ondataavailable = null; if (recorder.state !== 'inactive') recorder.stop(); recorder = null; }
   if (stream) stream.getTracks().forEach(track => {track.enabled = false;});
   $('level').style.width = '0%';
+  setGlow(0);
+}
+// ---------------------------------------------------------------- the orb glow
+// --glow is the orb's single source of truth for "I am hearing/speaking right
+// now".  It is written once per animation frame from measured audio energy, so
+// a silent room leaves it at zero instead of breathing on a timer.  Attack is
+// fast (a syllable should light up immediately) and release is slow (a word's
+// consonant gaps should not strobe).
+let glowRaf = 0, glowSmooth = 0, glowArmed = false, mediaSource = null, playbackAnalyser = null;
+function setGlow(target) {
+  const wanted = Math.max(0, Math.min(1, Number(target) || 0));
+  glowSmooth = wanted > glowSmooth ? glowSmooth + (wanted - glowSmooth) * .55
+                                   : glowSmooth * .86 + wanted * .14;
+  if (glowSmooth < .004) glowSmooth = 0;
+  $('orb').style.setProperty('--glow', glowSmooth.toFixed(3));
+}
+function rmsOf(samples, scale) {
+  let sum = 0;
+  for (let i = 0; i < samples.length; i++) { const x = samples[i] * scale; sum += x * x; }
+  return Math.sqrt(sum / samples.length);
+}
+function startPlaybackGlow() {
+  if (!playbackAnalyser) return;              // no graph, no glow: audio still plays
+  stopPlaybackGlow();
+  const bytes = new Uint8Array(playbackAnalyser.fftSize);
+  const step = () => {
+    if (player.paused || player.ended) { glowRaf = 0; setGlow(0); return; }
+    playbackAnalyser.getByteTimeDomainData(bytes);
+    setGlow(rmsOf(bytes.map ? Array.from(bytes, v => (v - 128) / 128) : bytes, 1) * 4.5);
+    glowRaf = requestAnimationFrame(step);
+  };
+  glowRaf = requestAnimationFrame(step);
+}
+function stopPlaybackGlow() { if (glowRaf) cancelAnimationFrame(glowRaf); glowRaf = 0; }
+async function armGlow() {
+  // Routing the reply through WebAudio is the only way to see its waveform, and
+  // it is also the only way to *lose* it: a MediaElementSource attached to a
+  // suspended context feeds a graph that never renders, so the reply goes
+  // silent.  So build it only from a user gesture, only once the context says
+  // it is running, and only ever once per media element.  Anything less
+  // ambitious leaves the element on the native output -- no glow beats no audio.
+  if (glowArmed) return;
+  try {
+    const Audio = window.AudioContext || window.webkitAudioContext;
+    if (!Audio || !window.AnalyserNode || !player.createMediaElementSource) return;
+    if (!context || context.state === 'closed') context = new Audio();
+    const ctx = context;
+    if (ctx.state === 'suspended') await ctx.resume();
+    if (ctx.state !== 'running') return;
+    glowArmed = true;
+    mediaSource = ctx.createMediaElementSource(player);
+    playbackAnalyser = ctx.createAnalyser(); playbackAnalyser.fftSize = 1024;
+    mediaSource.connect(playbackAnalyser); playbackAnalyser.connect(ctx.destination);
+  } catch (_) {
+    // Already armed by an earlier gesture, or the browser refused: either way
+    // the reply keeps playing through the element's own output.
+    if (!playbackAnalyser) { glowArmed = false; mediaSource = null; }
+  }
+}
+function releaseAudioContext() {
+  stopPlaybackGlow(); setGlow(0);
+  source?.disconnect(); source = null; analyser = null;
+  mediaSource = null; playbackAnalyser = null; glowArmed = false;
+  if (context) {context.close().catch(()=>{}); context = null;}
 }
 function replaceAudio(blob) {
   if (audioURL) URL.revokeObjectURL(audioURL);
@@ -70,10 +134,12 @@ function primeAudio() {
 }
 function stopSession(note = 'Conversation ended. Start again whenever you like.') {
   active = false; epoch++; abort?.abort(); abort = null; busy = false;
-  clearCapture(); player.pause();
+  clearCapture(); player.pause(); stopPlaybackGlow(); setGlow(0);
   if (stream) {stream.getTracks().forEach(track=>track.stop()); stream = null;}
   source?.disconnect(); source = null; analyser = null;
-  if (context) {context.close().catch(()=>{}); context = null;}
+  // The AudioContext deliberately survives: the reply's glow is wired with
+  // createMediaElementSource, which may only be called once per element ever,
+  // so closing the context here would silently give up on it for good.
   setState('idle', note);
 }
 async function responseJSON(url, body, signal) {
@@ -131,6 +197,7 @@ function listen() {
     analyser.getFloatTimeDomainData(samples);
     const rms = Math.sqrt(samples.reduce((sum,x)=>sum+x*x,0)/samples.length), now=performance.now();
     $('level').style.width = `${Math.min(100,rms*1000)}%`;
+    setGlow(rms * 7);                       // same measurement, one shared meter
     if (rms > .015) {voiced += Math.min(100,now-lastTick);lastVoice=now;}
     lastTick=now;
     // 20 s, not the engine's 30 s ceiling: measured against known ground truth,
@@ -148,6 +215,7 @@ async function playReply(blob, signal) {
     let settled = false;
     const cleanup = () => {
       settled = true;
+      stopPlaybackGlow(); setGlow(0);
       player.removeEventListener('ended',ended);player.removeEventListener('error',failed);signal.removeEventListener('abort',cancelled);
       if(resumePlayback===attempt)resumePlayback=null;
       $('resume').hidden=true;
@@ -158,7 +226,7 @@ async function playReply(blob, signal) {
     const attempt = () => {
       if(settled || signal.aborted)return;
       $('resume').hidden=true;
-      player.play().catch(error=>{
+      player.play().then(()=>{if(!settled && !player.paused)startPlaybackGlow();},error=>{
         if(settled || signal.aborted)return;
         if(error.name!=='NotAllowedError'){failed();return;}
         resumePlayback=attempt;$('resume').hidden=false;
@@ -223,7 +291,10 @@ $('start').onclick = async () => {
     const acquired=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
     if(id!==epoch){acquired.getTracks().forEach(track=>track.stop());return;}
     stream=acquired;
-    const Audio = window.AudioContext || window.webkitAudioContext;context=new Audio();await context.resume();
+    armGlow();
+    const Audio = window.AudioContext || window.webkitAudioContext;
+    if(!context || context.state==='closed')context=new Audio();
+    await context.resume();
     if(id!==epoch)return;
     analyser=context.createAnalyser();analyser.fftSize=2048;source=context.createMediaStreamSource(stream);source.connect(analyser);
     listen();
@@ -259,8 +330,8 @@ window.addEventListener('keyup',event=>{if(spaceHeld && (event.code==='Space'||e
 window.addEventListener('blur',()=>{spaceHeld=false;});
 function speechSpeed(){const value=Number($('speed').value);return Number.isFinite(value)?Math.min(2,Math.max(.5,value)):1.2;}
 $('speed').oninput=()=>{const value=speechSpeed().toFixed(1);$('speed-value').value=value+'×';$('speed').setAttribute('aria-valuetext',value+' times');};
-$('new').onclick=()=>{stopSession('A fresh conversation. Start talking or type below.');history=[];$('messages').replaceChildren();$('turns').textContent='Just this tab';player.removeAttribute('src');if(audioURL){URL.revokeObjectURL(audioURL);audioURL=null;}};
-$('compose').onsubmit=event=>{event.preventDefault();const text=$('text').value.trim();if(!text||busy||!ready)return;primeAudio();$('text').value='';runTurn(text);};
+$('new').onclick=()=>{stopSession('A fresh conversation. Start talking or type below.');setGlow(0);history=[];$('messages').replaceChildren();$('turns').textContent='Just this tab';player.removeAttribute('src');if(audioURL){URL.revokeObjectURL(audioURL);audioURL=null;}};
+$('compose').onsubmit=event=>{event.preventDefault();const text=$('text').value.trim();if(!text||busy||!ready)return;primeAudio();armGlow();$('text').value='';runTurn(text);};
 let languageList=[],autoLanguage='a',speechPreferences={voices:{}};
 try{const saved=JSON.parse(localStorage.getItem('voice-speech')||'null');if(saved && typeof saved==='object' && !Array.isArray(saved))speechPreferences={...saved,voices:saved.voices&&typeof saved.voices==='object'?saved.voices:{}};}catch(_){}
 function saveSpeech(){
@@ -312,7 +383,7 @@ $('corrections-enabled').onchange=saveSpeech;
 if(typeof speechPreferences.corrections==='string')$('corrections').value=speechPreferences.corrections.slice(0,2400);
 if(typeof speechPreferences.enabled==='boolean')$('corrections-enabled').checked=speechPreferences.enabled;
 correctionRules();
-window.addEventListener('pagehide',()=>stopSession());
+window.addEventListener('pagehide',()=>{stopSession();releaseAudioContext();});
 (async()=>{
   try{
     const responses=await Promise.all(['/chat/health','/languages','/voices'].map(url=>fetch(url)));

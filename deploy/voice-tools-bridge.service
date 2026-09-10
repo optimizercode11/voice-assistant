@@ -1,0 +1,25 @@
+[Unit]
+# The tools bridge: the same page and the same three resident models as
+# voice-stack-gpu2, plus tools / RAG / MCP, on its own ports.  Wants rather than
+# Requires, and no Conflicts -- stopping this must never take the certified
+# assistant down with it.
+Description=Voice assistant bridge with tools, RAG and MCP (reuses the GPU 2 stack)
+After=voice-stack-gpu2.service
+Wants=voice-stack-gpu2.service
+StartLimitIntervalSec=900
+StartLimitBurst=3
+
+[Service]
+Type=simple
+WorkingDirectory=%h/qwen36/voice-stack/voice-tools-20260910
+ExecStart=/bin/bash %h/qwen36/voice-stack/voice-tools-20260910/deploy/start-tools-bridge.sh
+Restart=on-failure
+RestartSec=5
+# SIGTERM goes to the bridge, which exits 0 through its clean shutdown path and
+# reaps its MCP child; mixed still clears anything left behind.
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

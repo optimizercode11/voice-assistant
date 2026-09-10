@@ -142,3 +142,12 @@ GPU_MEMORY_MIB = 32607
 # Set VOICE_TOOLS_CONFIG=config/assistant.toml to turn them on for a site.
 # --------------------------------------------------------------------------
 TOOLS_CONFIG = _text("VOICE_TOOLS_CONFIG", "")
+
+# The tools bridge runs side-by-side with the certified stack rather than
+# replacing it: the GPU has ~5 GiB free, so a second Qwen is impossible and the
+# new bridge reuses the resident q38 / qasr / Kokoro on device 2.  Separate
+# ports mean `systemctl stop voice-tools-bridge` can never take the live
+# assistant down with it.
+TOOLS_HTTP_PORT = 8093
+TOOLS_HTTPS_PORT = 8094
+TOOLS_CAMPAIGN = _text("VOICE_TOOLS_CAMPAIGN", "voice-tools-20260910")

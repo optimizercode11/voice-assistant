@@ -81,6 +81,10 @@ sabotage:
 check-site:
 	$(CPU) $(PYTHON) -u deploy/check_site.py
 
+# The MCP server the deployed bridge ships with, exercised as a real peer.
+mcp-probe:
+	$(CPU) $(PYTHON) -u tools/mcp_client.py --command $(PYTHON) --arg tools/mcp_stack_status.py
+
 check: test check-site
 
 fingerprint:

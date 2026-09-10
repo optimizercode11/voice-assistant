@@ -1,0 +1,37 @@
+# Capabilities for the deployed tools bridge on vllm.
+#
+# The corpus is this repo's own documentation, so "what port is the bridge on?"
+# and "how do I restart the stack?" are answered from the files that actually
+# say so, with the file named in the reply.  The MCP server is a real second
+# process that reports the stack's own health.
+#
+# Nothing here writes, deletes, or leaves the machine.
+
+[limits]
+rounds = 2
+per_call_seconds = 10
+result_chars = 6000
+turn_seconds = 150
+generation_seconds = 45
+
+[builtins]
+now = true
+
+[retrieval]
+enabled = true
+sources = ["README.md", "ARCHITECTURE.md", "RUNBOOK.md", "TOOLS.md", "PROVENANCE.md", "tests/README.md"]
+index = "var/notes.sqlite"
+top_k = 4
+max_chars = 2400
+stale_after_seconds = 86400
+
+[fetch]
+enabled = false
+allow_hosts = []
+
+[[mcp.server]]
+name = "stack"
+command = "python3"
+args = ["tools/mcp_stack_status.py"]
+timeout_seconds = 15
+enabled = true

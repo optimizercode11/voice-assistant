@@ -541,6 +541,10 @@ Neither the old installer backup nor the ASR backups were restore-tested here.
 | Four pauses still send half a sentence | `web/chat.js` bounds `fragmentHolds` at 3 holds. |
 | Assistant cuts off in a silent room | Record browser/output/volume and disable voice interruption; the scalar `BARGE.echoGain` gate has failed the manual echo check. |
 | 503 “conversation model is busy” | One generation holds `chat_lock`; both bridges share the model. |
+| Says “One moment.” / “Let me check your notes.” then goes quiet | The reply it was covering came back **empty** (`gen 0 tok` in `run/qwen.log`). The microphone stays live on purpose; ask again. |
+| Talks over itself at the start of a reply | By design: the acknowledgment is stopped the instant the reply audio is in hand, so it can be cut mid-word. Switch off “Say something while it thinks”. |
+| Says “One moment.” on every reply | It should not. The line is armed on a 900 ms deadline and on a real tool event only; if it fires on fast turns the deadline is being charged to turns that earned none. |
+| Assistant stopped answering and the page went silent | Check `run/qwen.log` for `gen 0 tok`. Since `voice-barge-20260910-a`+ this is survivable; before it, one empty completion ended the session. |
 | 503 STT unavailable | Inspect existing stack logs/health; an app update is not permission to restart the GPU service. |
 | Audio stops but next turn waits | The resident upstream may finish its bounded generation despite client cancellation. |
 | Tools service is up but new behavior is absent | Compare deployed file bytes, service start time, target port and browser cache. |

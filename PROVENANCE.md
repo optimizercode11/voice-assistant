@@ -297,3 +297,86 @@ running. Its interruption build and browser assets were not redeployed here.
 The0.6B release remains available for rollback. Full deployment/rollback records
 are in `/mnt/inference-engine/qwen3-asr-1.7b/evidence/fp8-deploy/`.
 `deploy/check_site.py`:19/19 offline checks pass for this profile.
+
+## The turn that answered nothing, and the silence that hid it
+
+A conversation ran for seventeen turns and then stopped mid-reply. Every server
+said otherwise: the bridge logged 87 responses, 86 of them 200 (the 404 was a
+favicon), no traceback anywhere; the ASR logged every clip; the GPU stack had not
+restarted. The page asked for a transcript, asked for a reply, and then asked for
+nothing at all — no TTS, no further poll — and its connection went away.
+
+The last line of `run/qwen.log` says what happened:
+
+```
+[chat] prompt 3646 tok (3613 cached) prefill 279 t/s | gen 0 tok 0.0 t/s | reason 0 tok, body 0 tok | stop
+```
+
+**Zero tokens, `stop`, HTTP 200.** As far as the protocol is concerned an empty
+completion is still a completion, so the failure had nowhere to surface except
+the one place nobody was watching.
+
+`web/chat.js` then did the two worst possible things at once. It committed
+`{role:'assistant', content:''}` into history, which would have replayed an empty
+turn into every later prompt, and it went on to ask the TTS to speak silence. The
+exception that followed was caught by the turn's `catch`, which calls
+`stopSession()` — and `stopSession()` sets `active = false` and stops the
+microphone tracks. A refusal to answer was therefore indistinguishable, from the
+user's chair, from the assistant dying.
+
+An empty reply is now an error rather than a turn: never committed, never sent to
+the TTS, and carrying `keepSession` so the microphone stays open and the next
+sentence needs no second click on Start. `tests/browser/voice_think_browser.mjs`
+asserts in a real browser that after an empty reply the transcript did not grow,
+nothing reached `/tts`, the next prompt contains no empty assistant message, and
+the following turn works.
+
+**Not reproduced:** the zero-token generation itself. It is one observation in one
+engine run at 3646 prompt tokens, and nothing here makes it less likely to recur —
+only no longer fatal. Whether the prefix cache or the prompt length caused it is a
+question for the engine, not the page.
+
+## Saying so: thinking aloud
+
+A tool round costs a second full generation — visible in `qwen.log` as a fresh
+`prompt N tok (0 cached)` after a `tc ok N` — so the gap between the last word of
+a question and the first word of an answer can run to several seconds. Silence
+there is indistinguishable from a hang, which is exactly how the empty-reply bug
+above presented.
+
+The page now speaks during that gap, and the wording comes from the tool the
+server actually reported running (`search_notes` → "Let me check your notes.",
+`fetch_url` → "Let me look that up."), never from a guess. Three properties are
+asserted rather than intended:
+
+| | |
+|---|---|
+| fast reply, no tools | **no** acknowledgment — a 60 ms answer is never padded with a fake "one moment" |
+| slow reply, no tools | the 900 ms deadline says "One moment."; the answer still arrives |
+| slow reply, two tool rounds | exactly **one** acknowledgment for the turn |
+| answer arrives | the acknowledgment is dropped if it has not started, stopped if it has — it never delays the reply |
+| switch off | both routes to the mouth honour it (the first version gated only the timer, and the test caught it) |
+
+The acknowledgment is deliberately **not** phase `speaking`, so barge-in stays
+disarmed for it: a room cannot interrupt its own filler and be credited with
+interrupting the reply. Space still stops everything.
+
+### What is actually slow, measured on the live bridge
+
+Synthesised speech is not the regression. Timed against `https://127.0.0.1:8094/tts`
+with the stack idle:
+
+| reply length | time to first byte |
+|---|---|
+| 32 chars | 0.098 s |
+| 108 chars | 0.290 s |
+| 441 chars | 0.925 s |
+| 774 chars | 1.163 s |
+
+That is a flat ~1.5–2.1 ms per character, i.e. roughly 500 characters a second,
+with no fixed cost worth mentioning. What changed is the **length** of the
+answers: the same `qwen.log` shows plain turns generating 50–85 tokens and
+tool turns generating 116–178 for the final answer. A tool turn is therefore a
+second full generation *and* a three-to-four-times-longer thing to synthesise and
+to listen to. The acknowledgment addresses the part of that which is fixable in
+the page; the length is a prompt decision, not a latency bug.

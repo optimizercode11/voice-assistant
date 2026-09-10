@@ -18,13 +18,14 @@ starts and certifies the whole stack.
                         ┌── your own notes (SQLite FTS5 / BM25)
                         ├── MCP servers you named in a config
                         └── an allowlisted web page
-                        The loop runs on the server; the browser only hears
-                        "looking that up…" and the answer.  See TOOLS.md.
+                        The loop runs on the server.  The browser hears it
+                        out loud -- "Let me check your notes." -- and then the
+                        answer.  See TOOLS.md.
 ```
 
 | Piece | What it is | Lives in |
 |---|---|---|
-| `/chat` page | microphone capture, pause detection, playback, interruption | this repo (`web/`) |
+| `/chat` page | microphone capture, pause detection, playback, interruption, thinking aloud | this repo (`web/`) |
 | speech bridge | one same-origin HTTP/TLS door for STT, chat, TTS | this repo (`tools/`) |
 | conversation adapter | system prompt, message rules, the tool loop, timeouts, cancellation | this repo (`tools/`) |
 | capability layer | tool registry, BM25 retrieval, MCP client, TOML config | this repo (`tools/`, `TOOLS.md`) |

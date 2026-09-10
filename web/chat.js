@@ -181,7 +181,7 @@ function primeAudio() {
   replaceAudio(new Blob([wav],{type:'audio/wav'})); player.play().catch(()=>{});
 }
 function stopSession(note = 'Conversation ended. Start again whenever you like.') {
-  stopBargeWatch();
+  stopBargeWatch(); stopThinkingAloud();
   heldText = ''; fragmentHolds = 0;
   active = false; epoch++; abort?.abort(); abort = null; busy = false;
   clearCapture(); player.pause(); stopPlaybackGlow(); setGlow(0);
@@ -335,6 +335,97 @@ function startBargeWatch() {
   bargeRaf = requestAnimationFrame(step);
   return true;
 }
+// ------------------------------------------------------ thinking aloud
+// A tool round costs a second full generation, so the gap between the last
+// word of the question and the first word of the answer can be several seconds
+// of nothing.  Silence there is indistinguishable from a hang -- the user
+// cannot tell "it is reading your notes" from "it died" -- so say which it is,
+// in the same voice, and get out of the way the moment the reply is ready.
+//
+// Two rules keep this honest.  It never claims more than is happening: the
+// wording comes from the tool the server actually reported running, and the
+// fallback is deliberately generic.  And it never delays the answer: the clip
+// is fetched in parallel with the generation, dropped if the answer wins the
+// race, and stopped mid-syllable if the answer arrives while it is playing.
+const THINK = {afterMs: 900};
+const THINK_LINES = {
+  search_notes: 'Let me check your notes.',
+  fetch_url: 'Let me look that up.',
+  request_directory: 'I need permission for that folder first.',
+  mcp__stack__health: 'Let me check how the stack is doing.',
+};
+let thinkTimer = 0, thinkToken = 0, thinkSpoken = false, thinkPlaying = false;
+
+function thinkingAloudWanted() {
+  const box = $('think-aloud');
+  return !(box && box.checked === false);              // on unless switched off
+}
+function thinkLine(calls) {
+  for (const call of calls || []) {
+    if (call === 'now') continue;                      // instant; never worth a word
+    if (THINK_LINES[call]) return THINK_LINES[call];
+    if (call.startsWith('mcp__files__')) return 'Let me have a look at the files.';
+  }
+  return 'One moment.';
+}
+function cancelThinkingAloud() {
+  thinkToken++;                                        // any in-flight clip is now stale
+  if (thinkTimer) { clearTimeout(thinkTimer); thinkTimer = 0; }
+  thinkSpoken = false;
+}
+function stopThinkingAloud() {
+  // Called when the reply exists, and from every path that ends a turn.
+  cancelThinkingAloud();
+  if (!thinkPlaying) return;
+  thinkPlaying = false;
+  player.pause();
+  stopPlaybackGlow(); setGlow(0);
+}
+function armThinkingAloud(id, signal) {
+  cancelThinkingAloud();
+  if (!thinkingAloudWanted()) return;                  // every reply here is spoken, so this one is too
+  const token = thinkToken;
+  thinkTimer = setTimeout(() => {
+    thinkTimer = 0;
+    if (id !== epoch || thinkToken !== token || signal.aborted) return;
+    mentionThinking('One moment.', id, signal);
+  }, THINK.afterMs);
+}
+function mentionThinking(text, id, signal) {
+  if (!thinkingAloudWanted()) return;                  // both throats answer to the same switch
+  if (thinkSpoken) return;                             // one per turn, not one per tool round
+  thinkSpoken = true;
+  let spoken;
+  try { spoken = replyVoice(text); } catch (_) { return; }
+  const token = thinkToken;
+  const query = new URLSearchParams({format:'wav', language:spoken.language,
+                                     voice:spoken.voice, speed:String(speechSpeed())});
+  const filler = new AbortController();
+  signal.addEventListener('abort', () => filler.abort(), {once: true});
+  fetch('/tts?' + query, {method:'POST', body:text, signal:filler.signal})
+    .then(response => response.ok ? response.blob() : null)
+    .then(audio => {
+      if (!audio || audio.size <= 44) return;
+      // The answer won the race, or the turn moved on: throw the clip away.
+      if (id !== epoch || thinkToken !== token || signal.aborted) return;
+      // Deliberately NOT phase 'speaking': barge-in stays disarmed for an
+      // acknowledgment, so a room can never interrupt its own filler and be
+      // credited with interrupting the reply.  Space still stops everything.
+      thinkPlaying = true;
+      const finish = () => {
+        player.removeEventListener('ended', finish);
+        player.removeEventListener('error', finish);
+        if (thinkToken !== token) return;
+        thinkPlaying = false; stopPlaybackGlow(); setGlow(0);
+      };
+      replaceAudio(audio);
+      startPlaybackGlow();
+      player.addEventListener('ended', finish);
+      player.addEventListener('error', finish);
+      player.play().catch(() => { finish(); });
+    })
+    .catch(() => {});
+}
 async function playReply(blob, signal) {
   replaceAudio(blob);
   await new Promise((resolve,reject)=>{
@@ -410,10 +501,16 @@ async function runTurn(input, forced = false, voicedMs = null) {
       fragmentHolds = 0; heldText = '';
     }
     message('user',text,original); setState('thinking','Qwen is preparing a reply…');
+    armThinkingAloud(id, controller.signal);
     const pending = [...before,{role:'user',content:text}];
     const progress = event => {
       check();
-      if (event.type === 'status') setState('thinking', `Looking that up — ${event.calls.join(', ')}…`);
+      if (event.type === 'status') {
+        setState('thinking', `Looking that up — ${event.calls.join(', ')}…`);
+        // A tool round is a second full generation, so this is exactly where the
+        // silence would otherwise start: name the tool instead of waiting for it.
+        mentionThinking(thinkLine(event.calls), id, controller.signal);
+      }
       else if (event.type === 'tool') setState('thinking', event.ok
         ? (event.citations?.length ? `Found ${event.citations.length} passage${event.citations.length > 1 ? 's' : ''} in your notes…` : 'Read it. Thinking…')
         : 'That did not work. Answering from what it has…');
@@ -422,26 +519,52 @@ async function runTurn(input, forced = false, voicedMs = null) {
       ? await responseProgress('/chat/completions', JSON.stringify({messages: pending}), controller.signal, progress)
       : await responseJSON('/chat/completions', JSON.stringify({messages: pending}), controller.signal);
     check();
-    history = [...pending,{role:'assistant',content:reply.text}];committed=true;
-    message('assistant',reply.text,null,{tools:reply.tools,sources:reply.sources});
+    // No further acknowledgment may start from here, but one already playing
+    // keeps playing: the reply's own audio still needs a few hundred ms of
+    // synthesis, and cutting the line now would trade one silence for another.
+    cancelThinkingAloud();
+    // The engine can answer with zero tokens -- measured live: prompt 3646 tok,
+    // "gen 0 tok | stop", HTTP 200, empty body.  Committing that as an assistant
+    // turn puts an empty turn into every later prompt, and asking the TTS to speak
+    // it asks for silence.  That is how a working conversation stopped dead with no
+    // error recorded on any server.  Refuse it, keep the history clean, and let the
+    // person ask again.
+    const answer = String(reply.text ?? '').trim();
+    if (!answer) {
+      const empty = new Error('That came back empty. Please ask it again.');
+      empty.keepSession = true;
+      throw empty;
+    }
+    history = [...pending,{role:'assistant',content:answer}];committed=true;
+    message('assistant',answer,null,{tools:reply.tools,sources:reply.sources});
     // A request_directory call happened during that generation, so the card the
     // user needs to see is one poll overdue.  Fetch it now, not in four seconds.
     refreshApprovals();
     $('turns').textContent=`${history.length/2} ${history.length===2?'turn':'turns'} · Just this tab`;
     setState('synthesizing','Your reply is becoming speech…');
-    const spoken=replyVoice(reply.text);
+    const spoken=replyVoice(answer);
     const query = new URLSearchParams({format:'wav',language:spoken.language,voice:spoken.voice,speed:String(speechSpeed())});
-    const response = await fetch('/tts?'+query,{method:'POST',body:reply.text,signal:controller.signal});
+    const response = await fetch('/tts?'+query,{method:'POST',body:answer,signal:controller.signal});
     if(!response.ok) throw new Error('Speech synthesis failed. Your reply is shown above.');
     const audio = await response.blob();check();if(audio.size<=44)throw new Error('The reply audio was empty.');
     setState('speaking',active?'Press Space to interrupt and speak. Listening resumes after the reply.':'Press Space to stop the reply.');
+    stopThinkingAloud();          // the reply is in hand: it never waits behind the acknowledgment
     await playReply(audio,controller.signal);check();busy=false;
     if(active)listen();else setState('idle','Send another message, or start a voice conversation.');
   } catch(error) {
     if(id !== epoch) return;
     if(!committed) history=before;
-    stopSession(error.name==='AbortError'?'Reply stopped.':error.message);
-    if(error.name!=='AbortError')setState('error',error.message);
+    stopThinkingAloud();
+    // A refusal is not the end of a conversation.  Anything that merely declined
+    // to answer keeps the microphone, so the next sentence needs no second click
+    // on Start.
+    if (error.keepSession && active) {
+      busy = false; listen();
+      setState('listening', error.message);
+    } else {
+      stopSession(error.name==='AbortError'?'Reply stopped.':error.message);
+      if(error.name!=='AbortError')setState('error',error.message);
+    }
   } finally {if(id===epoch)abort=null;}
 }
 $('start').onclick = async () => {
@@ -504,6 +627,7 @@ function saveSpeech(){
   speechPreferences.corrections=$('corrections').value;
   speechPreferences.enabled=$('corrections-enabled').checked;
   speechPreferences.barge=$('barge-in').checked;
+  speechPreferences.think=$('think-aloud').checked;
   try{localStorage.setItem('voice-speech',JSON.stringify(speechPreferences));}catch(_){}
 }
 function effectiveLanguage(){return $('language').value==='auto'?autoLanguage:$('language').value;}
@@ -550,6 +674,8 @@ if(typeof speechPreferences.corrections==='string')$('corrections').value=speech
 if(typeof speechPreferences.enabled==='boolean')$('corrections-enabled').checked=speechPreferences.enabled;
 if(typeof speechPreferences.barge==='boolean')$('barge-in').checked=speechPreferences.barge;
 $('barge-in').onchange=saveSpeech;
+if(typeof speechPreferences.think==='boolean')$('think-aloud').checked=speechPreferences.think;
+$('think-aloud').onchange=saveSpeech;
 correctionRules();
 // ------------------------------------------------------------- directory access
 // Qwen can ask for a folder; only this card can hand one over.  The flow is

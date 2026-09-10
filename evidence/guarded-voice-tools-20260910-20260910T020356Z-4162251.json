@@ -1,0 +1,31 @@
+{
+  "campaign": "voice-tools-20260910",
+  "command": [
+    "sh",
+    "-c",
+    "mkdir -p bin && ln -sf ~/qwen36/kokoro-codex-stt-tts-ui-20260908/stt-tts-ui-20260908/runtime/ffmpeg/imageio_ffmpeg/binaries/ffmpeg-linux-x86_64-v7.0.2 bin/ffmpeg && PATH=\"$PWD/bin:$PATH\" make check"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "24-27",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stack/voice-tools-20260910",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-10T02:04:06.532292267Z",
+  "git_head": "321c17d27970f28c4bf5df9e3f687525faa9b412",
+  "inputs": [],
+  "label": "regression",
+  "log": "/home/ambudsharma/qwen36/voice-stack/voice-tools-20260910/evidence/guarded-voice-tools-20260910-20260910T020356Z-4162251.log",
+  "run_id": "voice-tools-20260910-20260910T020356Z-4162251",
+  "schema_version": 2,
+  "source_fingerprint": "98b48cbe29e633e22ae879b0256d1837a2ef67780bbeebdf6767d53a4dda0598",
+  "started_utc": "2026-09-10T02:03:57.660187907Z",
+  "status": "PASS"
+}

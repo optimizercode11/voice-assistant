@@ -1,0 +1,3 @@
+guarded-run: campaign=voice-tools-20260910 label=index-rebuild mode=cpu cpus=24-27
+command: sh -c mkdir\ -p\ bin\ \&\&\ ln\ -sf\ ~/qwen36/kokoro-codex-stt-tts-ui-20260908/stt-tts-ui-20260908/runtime/ffmpeg/imageio_ffmpeg/binaries/ffmpeg-linux-x86_64-v7.0.2\ bin/ffmpeg\ \&\&\ PATH=\"\$PWD/bin:\$PATH\"\ python3\ tools/voicectl.py\ --config\ config/host.toml\ index\ build
+indexed 6 documents into 60 chunks in 0.011s at var/notes.sqlite

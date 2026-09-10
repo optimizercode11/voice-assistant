@@ -16,6 +16,34 @@ tail -f ~/qwen36/voice-stack/voice-restore-20260908/run/{supervisor,qwen,tts,stt
 authorized for the device named in `deploy/site_config.py` (`GPU`), not as a
 casual SSH command.
 
+## Capabilities: check before you start
+
+Tools, RAG and MCP are inert until a config names them, and the live site keeps
+them inert: `site_config.py:TOOLS_CONFIG` is empty, so the supervisor does not
+pass `--tools-config` and the bridge offers no tools at all.  That is deliberate
+— a deployment that quietly started offering tools is no longer the thing
+`PROVENANCE.md` certified.
+
+To see what a config would allow, and what is already broken, without starting
+anything:
+
+```bash
+python3 tools/voicectl.py --config config/assistant.toml doctor            # offline
+python3 tools/voicectl.py --config config/assistant.toml doctor --probe    # starts the MCP servers
+python3 tools/voicectl.py --config config/assistant.toml index build       # rebuild the RAG index
+python3 tools/voicectl.py --config config/assistant.toml tools list        # exact specs the model sees
+```
+
+`doctor --probe` exits non-zero when a *configured* MCP server will not come up.
+A dead server degrades the assistant — it comes up with its remaining tools and
+records a note — so without the probe that degradation is invisible.
+
+Enabling capabilities at a site is one line in `deploy/site_config.py`
+(`TOOLS_CONFIG = "config/assistant.toml"`), a rebuilt index, and a restart of
+the bridge inside a task authorized for the GPU it names.  The bridge refuses to
+start on a config it cannot fully understand, so a typo in the capability file
+costs a startup, not a half-loaded tool set.
+
 ## What "started" means
 
 `systemctl` is not the authority.  The unit is `Type=forking` and its

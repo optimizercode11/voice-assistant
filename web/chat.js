@@ -13,7 +13,7 @@ $('theme').onclick=()=>setTheme(document.documentElement.dataset.theme==='dark'?
 setTheme(document.documentElement.dataset.theme==='light'?'light':'dark');
 let active = false, busy = false, ready = false, epoch = 0, abort = null;
 let stream = null, context = null, source = null, analyser = null, recorder = null, raf = 0;
-let history = [], voiceList = [], audioURL = null, secureURL = null, phase = 'idle';
+let history = [], voiceList = [], audioURL = null, secureURL = null, phase = 'idle', streaming = false;
 const canRecord = !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
 function setState(value, message) {
   phase = value; $('orb').dataset.state = value;
@@ -27,12 +27,27 @@ function setState(value, message) {
   $('language').disabled = busy; $('voice').disabled = busy;
   $('corrections').disabled=busy;$('corrections-enabled').disabled=busy;
 }
-function message(role, text, original = null) {
+function shortPath(path) { const parts = String(path).split('/').filter(Boolean); return parts.slice(-2).join('/'); }
+function message(role, text, original = null, evidence = null) {
   $('messages').querySelector('.empty')?.remove();
   const item = document.createElement('div'); item.className = `message ${role}`;
   const label = document.createElement('span'); label.className = 'role'; label.textContent = role === 'user' ? 'You' : 'Qwen';
   const body = document.createElement('p'); body.textContent = text; item.append(label, body); $('messages').append(item);
   if(original!==null){const note=document.createElement('p');note.className='transcript-note';note.textContent='Speech correction · STT heard: '+original;item.append(note);}
+  // Provenance stays visible after the reply: "which of my notes said that" is
+  // the question a person asks next, and it must not require asking again.
+  if (evidence?.tools?.length) {
+    const used = document.createElement('p'); used.className = 'toolnote';
+    used.textContent = 'Looked up · ' + evidence.tools.map(tool =>
+      `${tool.name.replace(/^mcp__[^_]+__/, '')}${tool.ok === false ? ' (did not work)' : ''} ${tool.ms}ms`).join(' · ');
+    item.append(used);
+  }
+  if (evidence?.sources?.length) {
+    const from = document.createElement('p'); from.className = 'sources';
+    from.textContent = 'From your notes · ' + evidence.sources.map(source =>
+      source.heading ? `${source.heading} · ${shortPath(source.path)}` : shortPath(source.path)).join(' · ');
+    item.append(from);
+  }
   $('messages').scrollTop = $('messages').scrollHeight;
 }
 function clearCapture() {
@@ -66,6 +81,33 @@ async function responseJSON(url, body, signal) {
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || 'The request failed. Please try again.');
   return result;
+}
+async function responseProgress(url, body, signal, onEvent) {
+  // The bridge owns the tool loop, so one request can take several generations.
+  // Progress arrives as newline-delimited JSON so the page can say so out loud;
+  // a server without tools keeps replying with one plain JSON object.
+  const response = await fetch(url, {method: 'POST', body, signal,
+    headers: {'Content-Type': 'application/json', 'Accept': 'application/x-ndjson'}});
+  const type = response.headers.get('Content-Type') || '';
+  if (!type.includes('x-ndjson')) return responseJSON(url, body, signal);
+  const reader = response.body.getReader(), decoder = new TextDecoder();
+  let buffer = '', answer = null;
+  for (;;) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, {stream: true});
+    let at;
+    while ((at = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, at).trim(); buffer = buffer.slice(at + 1);
+      if (!line) continue;
+      let event; try { event = JSON.parse(line); } catch (_) { continue; }
+      if (event.type === 'answer') answer = event;
+      else if (event.type === 'error') throw new Error(event.error || 'The reply failed. Please try again.');
+      else onEvent?.(event);
+    }
+  }
+  if (!answer) throw new Error('The reply ended before it finished. Please try again.');
+  return answer;
 }
 function listen() {
   if (!active || !stream) return;
@@ -139,9 +181,20 @@ async function runTurn(input) {
     }
     message('user',text,original); setState('thinking','Qwen is preparing a reply…');
     const pending = [...before,{role:'user',content:text}];
-    const reply = await responseJSON('/chat/completions',JSON.stringify({messages:pending}),controller.signal);check();
+    const progress = event => {
+      check();
+      if (event.type === 'status') setState('thinking', `Looking that up — ${event.calls.join(', ')}…`);
+      else if (event.type === 'tool') setState('thinking', event.ok
+        ? (event.citations?.length ? `Found ${event.citations.length} passage${event.citations.length > 1 ? 's' : ''} in your notes…` : 'Read it. Thinking…')
+        : 'That did not work. Answering from what it has…');
+    };
+    const reply = streaming
+      ? await responseProgress('/chat/completions', JSON.stringify({messages: pending}), controller.signal, progress)
+      : await responseJSON('/chat/completions', JSON.stringify({messages: pending}), controller.signal);
+    check();
     history = [...pending,{role:'assistant',content:reply.text}];committed=true;
-    message('assistant',reply.text);$('turns').textContent=`${history.length/2} ${history.length===2?'turn':'turns'} · Just this tab`;
+    message('assistant',reply.text,null,{tools:reply.tools,sources:reply.sources});
+    $('turns').textContent=`${history.length/2} ${history.length===2?'turn':'turns'} · Just this tab`;
     setState('synthesizing','Your reply is becoming speech…');
     const spoken=replyVoice(reply.text);
     const query = new URLSearchParams({format:'wav',language:spoken.language,voice:spoken.voice,speed:String(speechSpeed())});
@@ -262,6 +315,7 @@ window.addEventListener('pagehide',()=>stopSession());
     if(responses.some(r=>!r.ok))throw new Error('The voice service is unavailable. Please reload shortly.');
     const [health,languages,catalogue]=await Promise.all(responses.map(r=>r.json()));
     if(!health.available)throw new Error('The conversation model is not connected yet.');
+    streaming = health.streaming === true && Array.isArray(health.tools) && health.tools.length > 0;
     languageList=languages.languages;autoLanguage=languages.default;
     $('language').replaceChildren();const automatic=document.createElement('option');automatic.value='auto';automatic.textContent='Auto: English / Hindi';$('language').append(automatic);for(const lang of languageList){const option=document.createElement('option');option.value=lang.code;option.textContent=lang.name;$('language').append(option);}$('language').value=[...$('language').options].some(x=>x.value===speechPreferences.language)?speechPreferences.language:'auto';
     voiceList=catalogue.voices;voices();ready=true;

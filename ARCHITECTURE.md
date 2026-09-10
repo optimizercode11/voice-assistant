@@ -11,7 +11,14 @@ speech bridge  tools/speech_ui.py            HTTP :8091   HTTPS :8092 (microphon
    ├── POST /stt              → qasr_serve :8095        (Qwen3-ASR-0.6B, resident)
    ├── POST /chat/completions → q38_27_server :8080     (Qwen3.8-27B NVFP4)
    ├── POST /tts, GET /languages|/voices|/stats|/health → kserver :8090 (Kokoro-82M)
+   ├── GET  /tools, /chat/health         → what this bridge will let the model do
    └── GET  /chat, /chat.js, /           → the pages themselves
+
+        inside one POST /chat/completions, if tools are configured:
+        Qwen ⇄ tools  ──┬── retrieval.py   SQLite FTS5 (BM25) over your own files
+                        ├── mcp_client.py  stdio JSON-RPC to servers you named
+                        └── agent_tools.py now / fetch_url / the validator
+        …up to limits.rounds generations, then one speakable answer.
 ```
 
 Five processes, started in dependency order by `deploy/voice_stack.py`:
@@ -23,6 +30,30 @@ Five processes, started in dependency order by `deploy/voice_stack.py`:
 | 3 | `kserver` | Kokoro TTS with continuous batching and segment-level streaming. |
 | 4 | `qasr_serve` | Holds the ASR checkpoint resident, so a request costs the engine's own ~40–100 ms instead of a process spawn plus a model load. |
 | 5 | `speech_ui.py` | The only thing the browser talks to. |
+
+## The tool loop lives on the server, and that is a security boundary
+
+A tool result is an assertion about the world that the model must believe.  If
+the browser could supply one, any page able to drive this endpoint could make
+Qwen state anything it liked out loud — a prompt injection with a Content-Type.
+So `voice_chat.turn()` runs the entire loop inside a single request: the page
+sends only `user`/`assistant` text exactly as before, and receives *progress*
+events plus one answer.  Progress is display data and is never fed back.
+
+`tools/agent_tools.py` is the single choke point.  A builtin, a retrieval query
+and an MCP tool all reach the model as the same OpenAI tool object and all come
+back through the same `execute()`, so no path gets to skip the JSON-Schema
+validator, the per-call deadline, or the result-size clip.  Failures are
+returned to the model as `"tool error: …"` rather than raised as HTTP 500s — a
+model that passed `{"zone": 3}` should be told in one sentence and allowed to
+correct itself, not lose the generation that just cost the most.
+
+MCP deserves the suspicion: an MCP server is someone else's program that names
+its own tools.  The list is captured once at startup and never re-read mid-turn,
+`allow`/`deny` are applied before the model sees a name, names are folded into
+`mcp__<server>__<tool>` in the engine's own grammar, the child inherits six
+environment variables and nothing else, and a wedged server is SIGTERM'd before
+it is killed.  `TOOLS.md` has the full table.
 
 ## Why one origin
 

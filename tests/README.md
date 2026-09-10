@@ -6,9 +6,38 @@ the browser suites test the **page**.  Neither runs a model.
 ## Bridge contracts (CPU, no browser)
 
 ```bash
-CUDA_VISIBLE_DEVICES="" python3 tests/speech_ui_test.py     # 11 tests
-CUDA_VISIBLE_DEVICES="" python3 tests/voice_chat_test.py    #  5 tests
+CUDA_VISIBLE_DEVICES="" python3 tests/speech_ui_test.py     # 11 tests   bridge: ASR, uploads, TLS
+CUDA_VISIBLE_DEVICES="" python3 tests/voice_chat_test.py    #  5 tests   adapter: prompt, roles, fail-closed
+CUDA_VISIBLE_DEVICES="" python3 tests/agent_tools_test.py   # 20 tests   registry, validator, config
+CUDA_VISIBLE_DEVICES="" python3 tests/retrieval_test.py     # 11 tests   FTS5 index, staleness, misses
+CUDA_VISIBLE_DEVICES="" python3 tests/mcp_test.py           # 12 tests   real stdio MCP peer
+CUDA_VISIBLE_DEVICES="" python3 tests/tool_loop_test.py     # 12 tests   the loop, over a real TLS bridge
 ```
+
+`mcp_test.py` is run under `-W error::ResourceWarning`: an MCP server is
+spawned and reaped many times, and a leaked pipe per restart is a real defect
+that only shows up as an fd count.  (`Popen.close()` does not exist in this
+Python, so the client closes the streams by hand.)
+
+`tool_loop_test.py` scripts the upstream rather than mocking it, because the
+thing under test is a *sequence*: the model asks, the bridge executes, the
+model is answered.  The interesting failures are all about what the second
+request looks like — whether the `tool_call_id` was echoed, whether the last
+round still has `tools`, whether a browser-sent `role:"tool"` got through.
+
+`mcp_test.py` talks to `tests/fixtures/fake_mcp_server.py`, a real newline-
+delimited JSON-RPC peer with modes for hanging, crash-looping, replying with a
+JSON-RPC error, and — the one that matters — answering `tools/list` differently
+the second time.
+
+`BridgeStartTests` inside `tool_loop_test.py` is the only suite that runs
+`tools/speech_ui.py` as a **subprocess**, the way the deployment does.  It
+proves `--tools-config` reaches the registry, that a config with `fetch` enabled
+and no allow-list exits 2 rather than starting anyway, and that SIGTERM exits
+**0** — because the shutdown path is what reaps the MCP child, and the test
+reads that child's pid from `/tools` and insists it is gone afterwards.  A
+bridge that dies by signal leaves someone else's server process alive with a
+pipe to a dead parent, which is exactly what a `systemctl restart` would do.
 
 They refuse to run unless `CUDA_VISIBLE_DEVICES` is empty — a CPU oracle that
 quietly initialized a GPU is a lie about containment, not a faster test.  They
@@ -21,7 +50,20 @@ Paired sabotage, which must FAIL:
 ```bash
 CUDA_VISIBLE_DEVICES="" python3 tests/speech_ui_test.py --speaker-sabotage   # must FAIL
 CUDA_VISIBLE_DEVICES="" python3 tests/speech_ui_test.py --negative            # control, must PASS
+CUDA_VISIBLE_DEVICES="" python3 tests/tool_loop_test.py --sabotage            # must FAIL
+CUDA_VISIBLE_DEVICES="" python3 tests/mcp_test.py        --sabotage            # must FAIL
 ```
+
+The two new ones each break exactly one assertion, and each corresponds to a
+claim in `TOOLS.md` that would be quiet to lose:
+
+* `tool_loop_test.py --sabotage` makes `parse_messages` trust the role the
+  browser sent.  `test_client_cannot_inject_a_tool_message` must then fail —
+  a tab that can write `{"role":"tool"}` can author what the model says.
+* `mcp_test.py --sabotage` re-lists a server's tools before every call, the
+  obvious-looking "keep it fresh" change.  `test_the_tool_list_is_captured_once`
+  must then fail, because a server that answers `tools/list` differently the
+  second time can name a tool no operator ever allow-listed.
 
 `make sabotage` runs the failing arms and reports a sabotage that passes
 as the failure it is.

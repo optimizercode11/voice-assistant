@@ -2,6 +2,7 @@
 deploy/source.env
 run/
 rollback/
+var/
 .guarded-run
 
 # Guard manifests ARE history: a claim without the manifest that records it

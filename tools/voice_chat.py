@@ -1,4 +1,20 @@
-"""Bounded conversational adapter for the local Qwen server."""
+"""Bounded conversational adapter for the local Qwen server.
+
+Two entry points share one HTTP path:
+
+    complete()  one request, one speakable reply.  What the page did before
+                tools existed, and what it still does when no tools are
+                configured.
+    turn()      the same turn, but the model may ask to call a tool first.
+                The whole loop lives here, on the server, because a tool
+                result that the browser could write would not be a tool
+                result at all -- it would be a prompt injection with a
+                Content-Type.
+
+The fail-closed rules are the same in both: a reply must be non-empty, free of
+reasoning tags, and end with finish_reason 'stop'.  'tool_calls' is legitimate
+only *mid*-loop; ending a turn on one is a bug, and it is reported as one.
+"""
 import http.client
 import json
 import socket
@@ -21,14 +37,32 @@ helps; do not end every reply with a question. Be honest about uncertainty. You 
 device-control or external-action tools in this conversation; do not claim to look things up,
 perform actions, or hear tone and background sounds that were not described in the text."""
 
+TOOLS_PREAMBLE = """
+You have tools. Call one when it genuinely beats answering from memory: for the
+current time or date, for anything in the user's own notes, or for a host the
+deployment explicitly allows. Do not call a tool to be polite or to seem
+thorough; answer directly when you already can.
+After a tool result, say what you learned in plain spoken language and cite the
+file or host in words rather than as a link. If a tool errors or finds nothing,
+say so plainly and answer as far as you can; never invent what the tool did not
+return. Never narrate that you are about to call something -- just call it."""
+
 MAX_BODY = 64 * 1024
+MAX_RESPONSE_BYTES = 1024 * 1024 + 1
+MAX_TOOL_CALLS_PER_TURN = 8
+
 
 class ChatError(Exception):
     def __init__(self, status, message):
         self.status, self.message = status, message
 
 
-def payload(body):
+def parse_messages(body):
+    """The client contract: alternating user/assistant text, ending with a user turn.
+
+    Roles are positional, not taken from the request, so a tab cannot put words
+    in the assistant's mouth or replace the system prompt.
+    """
     try:
         data = json.loads(body)
         messages = data['messages']
@@ -46,45 +80,49 @@ def payload(body):
             raise ValueError()
     except (ValueError, KeyError, TypeError, UnicodeError):
         raise ChatError(400, 'Send a conversation ending with a user message.') from None
-    return {'model': 'qwen3.8-27b', 'messages': [{'role': 'system', 'content': SYSTEM}, *clean],
-            'reasoning_effort': 'none', 'temperature': 0.6, 'max_tokens': 384, 'stream': False}
+    return clean
 
 
-def complete(url, body, disconnected):
-    request = payload(body)
+def payload(body, tools=None, system=None):
+    clean = parse_messages(body)
+    request = {'model': 'qwen3.8-27b',
+               'messages': [{'role': 'system', 'content': system or SYSTEM}, *clean],
+               'reasoning_effort': 'none', 'temperature': 0.6, 'max_tokens': 384, 'stream': False}
+    if tools:
+        request['tools'] = tools
+    return request
+
+
+def _exchange(url, request, disconnected, timeout):
+    """One POST to the engine, cancellable, size-bounded.  Returns the decoded reply."""
     target = urlsplit(url)
     connection = http.client.HTTPConnection(target.hostname, target.port or 80, timeout=5)
     done = threading.Event()
     result = []
     try:
         connection.connect()
-        connection.sock.settimeout(60)
+        connection.sock.settimeout(max(5.0, timeout - 5))
         connection.request('POST', '/v1/chat/completions', json.dumps(request), {'Content-Type': 'application/json'})
+
         def receive():
             try:
                 response = connection.getresponse()
-                data = response.read(1024 * 1024 + 1)
-                if len(data) > 1024 * 1024:
+                data = response.read(MAX_RESPONSE_BYTES)
+                if len(data) > MAX_RESPONSE_BYTES:
                     raise ChatError(502, 'The reply exceeded the size limit.')
                 if response.status == 400:
                     raise ChatError(400, 'This conversation is too long. Start a new chat.')
                 if response.status != 200:
                     raise ChatError(503, 'The conversation model is busy or unavailable. Please try again.')
-                decoded = json.loads(data)
-                choice = decoded['choices'][0]
-                text = choice['message']['content']
-                if not isinstance(text, str) or not text.strip() or '<think>' in text or '</think>' in text:
-                    raise ChatError(502, 'The model did not return a speakable reply. Please try again.')
-                if choice.get('finish_reason') != 'stop':
-                    raise ChatError(502, 'The reply was cut short. Please ask a shorter question.')
-                result.append({'text': text.strip(), 'usage': decoded.get('usage', {})})
+                result.append(json.loads(data))
             except Exception as error:
                 result.append(error)
             finally:
                 done.set()
+
         worker = threading.Thread(target=receive, daemon=True)
         worker.start()
-        deadline = time.monotonic() + 65
+        deadline = time.monotonic() + timeout
         try:
             while not done.wait(.05):
                 if disconnected():
@@ -107,3 +145,120 @@ def complete(url, body, disconnected):
         raise ChatError(502, 'The conversation model is unavailable. Please try again.') from None
     finally:
         connection.close()
+
+
+def _speakable(choice):
+    """The final-answer gate.  Returns speakable text or raises; never both."""
+    text = choice['message']['content']
+    if not isinstance(text, str) or not text.strip() or '<think>' in text or '</think>' in text:
+        raise ChatError(502, 'The model did not return a speakable reply. Please try again.')
+    if choice.get('finish_reason') != 'stop':
+        raise ChatError(502, 'The reply was cut short. Please ask a shorter question.')
+    return text.strip()
+
+
+def _tool_calls(choice):
+    """Normalise the engine's tool_calls into a validated list, or []."""
+    if choice.get('finish_reason') not in ('tool_calls', 'tool'):
+        return None
+    message = choice.get('message') or {}
+    calls = message.get('tool_calls')
+    if not isinstance(calls, list) or not calls:
+        raise ChatError(502, 'The model asked for a tool call that was not well formed. Please try again.')
+    clean = []
+    for call in calls[:MAX_TOOL_CALLS_PER_TURN]:
+        if not isinstance(call, dict) or not isinstance(call.get('function'), dict):
+            continue
+        name = call['function'].get('name')
+        if not isinstance(name, str) or not name:
+            continue
+        arguments = call['function'].get('arguments', '')
+        if not isinstance(arguments, str):
+            arguments = json.dumps(arguments)
+        clean.append({'id': str(call.get('id') or f'call_{len(clean)}'),
+                      'type': 'function',
+                      'function': {'name': name, 'arguments': arguments}})
+    if not clean:
+        raise ChatError(502, 'The model asked for a tool call that was not well formed. Please try again.')
+    return clean
+
+
+def complete(url, body, disconnected):
+    request = payload(body)
+    decoded = _exchange(url, request, disconnected, 65)
+    choice = decoded['choices'][0]
+    text = _speakable(choice)
+    return {'text': text, 'usage': decoded.get('usage', {})}
+
+
+def turn(url, body, disconnected, *, registry=None, limits=None, on_event=None):
+    """Run a whole turn, tools included, and return one speakable answer.
+
+    `limits.rounds` counts generations.  Tools are offered on every generation
+    but the last, so the model always has a round where answering is the only
+    way out -- a loop that keeps offering tools can otherwise spend the whole
+    turn calling them and still have no answer to speak.
+    """
+    specs = registry.specs() if registry is not None else []
+    rounds = int(getattr(limits, 'rounds', 1) or 1)
+    generation_seconds = float(getattr(limits, 'generation_seconds', 45) or 45)
+    turn_seconds = float(getattr(limits, 'turn_seconds', 150) or 150)
+    system = SYSTEM + TOOLS_PREAMBLE if specs else SYSTEM
+    messages = payload(body, system=system)['messages']
+    turn_deadline = time.monotonic() + turn_seconds
+    usage, tools_used, sources = {}, [], []
+
+    def emit(kind, **fields):
+        if on_event is not None:
+            try:
+                on_event({'type': kind, **fields})
+            except Exception:
+                pass                                  # progress is never a failure
+
+    for round_number in range(1, rounds + 1):
+        last = round_number == rounds
+        request = {'model': 'qwen3.8-27b', 'messages': messages, 'reasoning_effort': 'none',
+                   'temperature': 0.6, 'max_tokens': 384, 'stream': False}
+        if specs and not last:
+            request['tools'] = specs
+        remaining = turn_deadline - time.monotonic()
+        if remaining <= 1:
+            raise ChatError(504, 'That took too long. Please try a shorter question.')
+        decoded = _exchange(url, request, disconnected, min(generation_seconds, remaining))
+        for key, value in (decoded.get('usage') or {}).items():
+            if isinstance(value, int):
+                usage[key] = usage.get(key, 0) + value
+        choices = decoded.get('choices')
+        if not isinstance(choices, list) or not choices:
+            raise ChatError(502, 'The model returned no reply. Please try again.')
+        choice = choices[0]
+        if not isinstance(choice, dict) or not isinstance(choice.get('message'), dict):
+            raise ChatError(502, 'The model returned an unreadable reply. Please try again.')
+        calls = _tool_calls(choice)
+        if calls is None:
+            text = _speakable(choice)
+            emit('answer', text=text, usage=usage, tools=tools_used, sources=sources)
+            return {'text': text, 'usage': usage, 'tools': tools_used, 'sources': sources}
+        if last:
+            raise ChatError(502, 'The model kept looking things up and ran out of room. Please try again.')
+        if registry is None:
+            raise ChatError(502, 'The model asked for a tool but none are enabled here.')
+        emit('status', phase='tool', round=round_number,
+             calls=[call['function']['name'] for call in calls])
+        messages.append({'role': 'assistant', 'content': choice['message'].get('content') or '',
+                         'tool_calls': calls})
+        for call in calls:
+            if turn_deadline - time.monotonic() <= 1:
+                raise ChatError(504, 'That took too long. Please try a shorter question.')
+            name = call['function']['name']
+            result = registry.execute(name, call['function']['arguments'], turn_deadline - 1)
+            row = result.public()
+            row['call_id'] = call['id']
+            tools_used.append(row)
+            for citation in result.meta.get('citations', []):
+                if citation not in sources:
+                    sources.append(citation)
+            emit('tool', **row)
+            messages.append({'role': 'tool', 'tool_call_id': call['id'],
+                             'content': result.for_model() or '(empty result)'})
+    raise ChatError(502, 'The reply did not finish. Please try again.')

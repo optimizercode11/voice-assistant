@@ -1,0 +1,56 @@
+# Capabilities for the local voice assistant.
+#
+#   voicectl doctor --config config/assistant.toml
+#   python3 tools/speech_ui.py --tools-config config/assistant.toml ...
+#
+# Defaults are deliberately inert: naming a capability here is the only way to
+# get it.  Deleting this file returns the assistant to plain speech-to-speech.
+
+[limits]
+rounds = 2                  # generations per turn; the last one has no tools, so it must answer
+per_call_seconds = 10       # one tool call, then it is abandoned and the model is told
+result_chars = 6000         # per tool result, into the model's context
+turn_seconds = 150          # the whole turn, generations and tools together
+generation_seconds = 45     # one trip to the model
+
+[builtins]
+now = true                  # the current date and time
+
+# ---------------------------------------------------------------------------
+# RAG: BM25 over your own files.  SQLite FTS5, no embeddings, no network.
+# Build it with:  voicectl index build --config config/assistant.toml
+# ---------------------------------------------------------------------------
+[retrieval]
+enabled = false
+sources = ["~/notes"]                # files or directories; .txt .md .jsonl .csv .tsv
+index = "var/notes.sqlite"
+top_k = 4
+max_chars = 2400
+stale_after_seconds = 86400
+
+# ---------------------------------------------------------------------------
+# Web fetch.  Off unless enabled AND given a non-empty allow-list; a redirect
+# re-checks the list, so a 302 cannot walk out of it.
+# ---------------------------------------------------------------------------
+[fetch]
+enabled = false
+allow_hosts = []                     # e.g. ["docs.python.org", "127.0.0.1"]
+max_bytes = 20000
+timeout_seconds = 8
+schemes = ["https"]
+
+# ---------------------------------------------------------------------------
+# MCP servers over stdio.  Each is someone else's program, so:
+#   allow/deny are applied before the model ever sees a tool name,
+#   the tool list is captured once at startup and never re-read mid-turn,
+#   the child gets PATH/HOME/LANG plus whatever `env` you name -- nothing else.
+# Tools appear to the model as mcp__<name>__<tool>.
+# ---------------------------------------------------------------------------
+# [[mcp.server]]
+# name = "filesystem"
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-filesystem", "/home/me/notes"]
+# allow = ["read_file", "list_directory"]      # empty allow = everything it lists
+# deny = []
+# timeout_seconds = 15
+# enabled = true

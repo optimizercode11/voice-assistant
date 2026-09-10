@@ -66,3 +66,46 @@ evidence to a source fingerprint, so removing those files would silently turn
 every recorded green gate for the voice campaigns into unverifiable history.
 The engine repo also keeps the engines themselves — `kserver`, `qasr_serve`,
 `q38_27_server` — which this repo consumes as pinned binaries, never rebuilds.
+
+## The capability layer (tools, RAG, MCP) — written here, not yet deployed
+
+Everything under `tools/agent_*.py`, `tools/retrieval.py`, `tools/mcp_client.py`,
+`tools/voicectl.py`, `config/`, `TOOLS.md` and the six suites that cover it is
+**new work in this repo, not a copy of anything certified**.  It has never run
+against a real model, a real GPU or the live host.  What backs it is offline and
+reproducible:
+
+```bash
+make check       # 71 contracts: 11 bridge, 5 adapter, 20 registry/config,
+                 # 11 RAG, 12 MCP, 12 loop, 19 site checks
+make sabotage    # 5 paired negatives, each must FAIL; all 5 refuse
+make test-browser  # 5 suites × chromium/webkit
+```
+
+No GPU, no model, no network: the LLM upstreams are scripted fakes and the MCP
+peer is `tests/fixtures/fake_mcp_server.py`, a real stdio JSON-RPC process.
+
+**The live deployment does not run this code.**  `https://192.168.228.113:8092/chat`
+still serves the pre-tools `chat.html`/`chat.js` and starts the bridge without
+`--tools-config`, because `site_config.py:TOOLS_CONFIG` is empty.  That is
+deliberate, and it has a consequence an operator must not discover by surprise:
+
+* `check_site.py --compare-live --require-assets` will now **fail** on the
+  `web/` assets, because the page served by the host predates the tool-progress
+  UI.  That is the gate doing its job — local and live have genuinely diverged —
+  and it stays red until the tree is deployed.
+* Deploying it means restarting the bridge, which is GPU-affecting on the device
+  named in `site_config.py`.  No device was authorized for this work, so no
+  deploy was attempted and no host parity run is claimed here.
+
+Two behaviours changed in files the live host also runs, both deliberate:
+
+1. `speech_ui.py` now requires `CUDA_VISIBLE_DEVICES=2` only on the **native
+   vvasr** path.  With `--asr-url` the bridge is `http.server` plus ffmpeg and
+   never initialises a device, so the old unconditional check was a demand to
+   *claim* a GPU rather than to use one — and it made the bridge impossible to
+   start or test on a machine with none.  The live stack launches under the
+   guard, which sets the variable anyway, so its containment claim is unchanged.
+2. `SIGTERM` now exits **0** through the clean shutdown path instead of dying by
+   signal, so the bridge reaps its MCP children on `systemctl stop`.  With no
+   MCP servers configured this is a no-op for the live stack.

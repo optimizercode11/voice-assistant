@@ -5,20 +5,22 @@ PYTHON ?= python3
 # The CPU suites refuse to run unless the variable is set AND empty: an unset
 # device is not the same claim as a deliberately emptied one.
 CPU = CUDA_VISIBLE_DEVICES=""
-NODE   ?= node
+NODE   ?= /tmp/kokoro-playback-browser/node_modules/.bin/node
 PLAYWRIGHT ?= /tmp/kokoro-playback-browser/node_modules/playwright/index.mjs
 
-.PHONY: help test test-bridge test-chat test-browser sabotage check check-site fingerprint inputs
+.PHONY: help test test-bridge test-chat test-tools test-retrieval test-mcp test-loop test-browser \
+        sabotage check check-site doctor fingerprint inputs
 
 help:
-	@printf '%s\n' '  test          bridge + adapter contracts (CPU, no model)' \
-	                '  test-browser  the four page suites, chromium + webkit' \
+	@printf '%s\n' '  test          bridge, adapter, tools, RAG, MCP, loop (CPU, no model)' \
+	                '  test-browser  the five page suites, chromium + webkit' \
 	                '  sabotage      the paired negatives; each must FAIL' \
+	                '  doctor        what the model will be able to do, and what is broken' \
 	                '  check-site    does deploy/site_config.py still describe one real deployment?' \
 	                '  check         everything that runs offline' \
 	                '  inputs        the asset list a guarded start binds with --input'
 
-test: test-bridge test-chat
+test: test-bridge test-chat test-retrieval test-tools test-mcp test-loop
 
 test-bridge:
 	@test -z "$${CUDA_VISIBLE_DEVICES-}" || { echo "rerun with CUDA_VISIBLE_DEVICES=''"; exit 2; }
@@ -28,8 +30,25 @@ test-bridge:
 test-chat:
 	$(CPU) $(PYTHON) -u tests/voice_chat_test.py
 
+test-retrieval:
+	$(CPU) $(PYTHON) -u tests/retrieval_test.py
+
+test-tools:
+	$(CPU) $(PYTHON) -u tests/agent_tools_test.py
+
+test-mcp:
+	$(CPU) $(PYTHON) -W error::ResourceWarning -u tests/mcp_test.py
+
+# The loop needs the TLS bridge and a scripted upstream; it is the one that
+# proves a browser cannot write a tool result.
+test-loop:
+	$(CPU) $(PYTHON) -u tests/tool_loop_test.py
+
+doctor:
+	$(CPU) $(PYTHON) -u tools/voicectl.py --config config/assistant.toml doctor
+
 test-browser:
-	@for suite in voice_chat_browser voice_controls_browser voice_language_browser stt_browser; do \
+	@for suite in voice_chat_browser voice_controls_browser voice_language_browser stt_browser voice_tools_browser; do \
 	  echo "== $$suite =="; \
 	  $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/$$suite.mjs || exit 1; \
 	done
@@ -44,6 +63,16 @@ sabotage:
 	    echo "SABOTAGE PASSED (this is the failure): speech_ui_test.py $$arm"; failures=$$((failures+1)); \
 	  else echo "ok  correctly refused: speech_ui_test.py $$arm"; fi; \
 	done; \
+	# Each of these is a load-bearing claim about the tool loop: the browser
+	# cannot write a tool result, and a server cannot rename a tool mid-turn.
+	for suite in tool_loop_test mcp_test; do \
+	  if $(CPU) $(PYTHON) -u tests/$$suite.py --sabotage >/dev/null 2>&1; then \
+	    echo "SABOTAGE PASSED (this is the failure): $$suite.py --sabotage"; failures=$$((failures+1)); \
+	  else echo "ok  correctly refused: $$suite.py --sabotage"; fi; \
+	done; \
+	if $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/voice_tools_browser.mjs --sabotage >/dev/null 2>&1; then \
+	  echo "SABOTAGE PASSED (this is the failure): the page ignores tool progress"; failures=$$((failures+1)); \
+	else echo "ok  correctly refused: voice_tools_browser.mjs --sabotage"; fi; \
 	if $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/voice_controls_browser.mjs --sabotage >/dev/null 2>&1; then \
 	  echo "SABOTAGE PASSED (this is the failure): keyboard handler"; failures=$$((failures+1)); \
 	else echo "ok  correctly refused: voice_controls_browser.mjs --sabotage"; fi; \

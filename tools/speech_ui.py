@@ -11,9 +11,12 @@ import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import socket
 import ssl
 import voice_chat
+import agent_config
+import agent_tools
 import subprocess
 import tempfile
 import threading
@@ -187,12 +190,64 @@ def transcribe(config, audio, directory, disconnected):
         raise RequestError(502, "The ASR engine returned incomplete or invalid output.") from error
 
 
+class Progress:
+    """Chunked NDJSON: the page learns a tool is running instead of staring at a spinner.
+
+    Only phase names, timings and citations travel here -- never the tool's
+    raw output, which the model has already been given and the browser has no
+    business re-deciding.  The stream is opt-in per request, so every client
+    that expects one JSON body keeps getting exactly that.
+    """
+
+    def __init__(self, handler):
+        self.handler = handler
+        handler.send_response(200)
+        handler.send_header("Content-Type", "application/x-ndjson")
+        handler.send_header("Transfer-Encoding", "chunked")
+        handler.send_header("Cache-Control", "no-store")
+        handler.send_header("X-Accel-Buffering", "no")
+        handler.send_header("X-Content-Type-Options", "nosniff")
+        handler.end_headers()
+        self.open = True
+
+    def _write(self, data: bytes) -> None:
+        # The socket is nonblocking while we poll for a dead tab, so each write
+        # borrows a bounded blocking window: a peer that stopped reading costs
+        # five seconds, not a wedged handler thread.
+        connection = self.handler.connection
+        try:
+            connection.settimeout(5)
+            self.handler.wfile.write(data)
+            self.handler.wfile.flush()
+        finally:
+            connection.settimeout(0)
+
+    def send(self, event: dict) -> None:
+        if not self.open:
+            return
+        payload = (json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+        try:
+            self._write(f"{len(payload):x}\r\n".encode() + payload + b"\r\n")
+        except (OSError, ValueError):
+            self.open = False                        # the tab went away; the turn still finishes
+
+    def close(self) -> None:
+        if not self.open:
+            return
+        self.open = False
+        try:
+            self._write(b"0\r\n\r\n")
+        except (OSError, ValueError):
+            pass
+
+
 class SpeechServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, address, config, *, tls=None, asr_lock=None, chat_lock=None):
+    def __init__(self, address, config, *, tls=None, asr_lock=None, chat_lock=None, registry=None):
         self.config = config
+        self.registry = registry
         self.tls = tls
         self.chat_lock = chat_lock if chat_lock is not None else threading.Lock()
         self.asr_lock = asr_lock if asr_lock is not None else threading.Lock()
@@ -297,8 +352,25 @@ class Handler(BaseHTTPRequestHandler):
             asset = config.page.parent / ("chat.js" if path == "/chat.js" else "chat.html")
             return self.reply(200, asset.read_bytes(), "text/javascript; charset=utf-8" if path == "/chat.js" else "text/html; charset=utf-8")
         if self.command == "GET" and path == "/chat/health":
-            return self.reply(200, {"available": bool(getattr(config, "llm_url", None)),
-                                    "https_port": getattr(config, "https_port", None)})
+            registry = self.server.registry
+            health = {"available": bool(getattr(config, "llm_url", None)),
+                      "https_port": getattr(config, "https_port", None),
+                      "tools": registry.names() if registry is not None else [],
+                      "streaming": registry is not None}
+            if registry is not None:
+                status = registry.status()
+                health["tool_sources"] = {row["name"]: row["source"] for row in status["tools"]}
+                health["mcp"] = status["mcp"]
+                health["retrieval"] = {key: status["retrieval"].get(key)
+                                       for key in ("enabled", "ready", "stale", "reason", "chunks", "documents")
+                                       if key in status["retrieval"]}
+            return self.reply(200, health)
+        if self.command == "GET" and path == "/tools":
+            registry = self.server.registry
+            if registry is None:
+                return self.reply(200, {"tools": [], "mcp": [], "notes": [],
+                                        "retrieval": {"enabled": False}})
+            return self.reply(200, registry.status())
         if self.command == "GET" and path == "/stt/health":
             return self.reply(200, {"available": True, "busy": self.server.asr_lock.locked(),
                                     "https_port": getattr(config, "https_port", None),
@@ -316,14 +388,41 @@ class Handler(BaseHTTPRequestHandler):
                 raise RequestError(503, "The conversation model is unavailable.")
             if not self.server.chat_lock.acquire(blocking=False):
                 raise RequestError(503, "Another reply is in progress. Please try again shortly.")
+            registry = self.server.registry
+            wants_stream = ("application/x-ndjson" in (self.headers.get("Accept") or "")
+                            or urlsplit(self.path).query in {"stream=1", "stream=true"}) and registry is not None
+            progress = None
             try:
                 body = self.body(voice_chat.MAX_BODY)
                 self.connection.setblocking(False)
                 try:
-                    result = voice_chat.complete(config.llm_url, body, self.disconnected)
+                    if registry is None:
+                        result = voice_chat.complete(config.llm_url, body, self.disconnected)
+                    else:
+                        if wants_stream:
+                            progress = Progress(self)
+
+                        def report(event):
+                            if event.get("type") == "answer":
+                                return
+                            progress.send(event)
+
+                        result = voice_chat.turn(config.llm_url, body, self.disconnected, registry=registry,
+                                                 limits=registry.config.limits,
+                                                 on_event=report if wants_stream else None)
                 except voice_chat.ChatError as error:
+                    if progress is not None and progress.open:
+                        progress.send({"type": "error", "status": error.status, "error": error.message})
+                        progress.close()
+                        self.connection.settimeout(30)
+                        return
                     raise RequestError(error.status, error.message) from error
                 self.connection.settimeout(30)
+                if progress is not None:
+                    progress.send({"type": "answer", "text": result["text"], "usage": result["usage"],
+                                   "tools": result["tools"], "sources": result["sources"]})
+                    progress.close()
+                    return
                 return self.reply(200, result)
             finally:
                 self.server.chat_lock.release()
@@ -398,6 +497,9 @@ def main():
                              "When set it replaces the per-request --asr-bin spawn; "
                              "leave it unset to keep native vvasr as the fallback.")
     parser.add_argument("--ffmpeg", default="ffmpeg")
+    parser.add_argument("--tools-config", type=Path,
+                        help="TOML describing tools, the RAG corpus and MCP servers. Without it the "
+                             "assistant keeps its pre-tool behaviour exactly: no tools are offered.")
     config = parser.parse_args()
     native = (config.asr_bin, config.model, config.tokenizer)
     if config.asr_url and any(value is not None for value in native):
@@ -423,7 +525,11 @@ def main():
         if target.scheme != "http" or not target.hostname or target.path not in {"", "/"} or target.query or target.fragment or target.username:
             parser.error("llm-url must be an HTTP origin")
     # Native vvasr currently requires physical GPU 2. Do not silently remap it.
-    if os.environ.get("CUDA_VISIBLE_DEVICES") != "2":
+    # The claim belongs to the native path only: with --asr-url this process is
+    # http.server plus ffmpeg and never initialises a device, so requiring the
+    # variable there was a demand to *claim* a GPU rather than to use one -- and
+    # it made the bridge impossible to start, or to test, on a machine with none.
+    if not config.asr_url and os.environ.get("CUDA_VISIBLE_DEVICES") != "2":
         parser.error("native ASR requires authorized CUDA_VISIBLE_DEVICES=2; launch through the GPU guard")
     keys = ["page"] if config.asr_url else ["page", "asr_bin", "model", "tokenizer"]
     for key in keys:
@@ -438,7 +544,17 @@ def main():
     target = urlsplit(config.tts_url)
     if target.scheme != "http" or not target.hostname or target.path not in {"", "/"} or target.query:
         parser.error("tts-url must be an HTTP origin")
-    with SpeechServer((config.host, config.port), config) as server:
+    registry = None
+    if config.tools_config is not None:
+        try:
+            agent = agent_config.load(config.tools_config)
+        except agent_config.ConfigError as error:
+            parser.error(f"--tools-config: {error}")
+        registry = agent_tools.Registry.build(agent, Path.cwd())
+        for note in registry.notes:
+            print(f"tools: {note}", flush=True)
+        print(f"Tools offered: {', '.join(registry.names()) or 'none'}", flush=True)
+    with SpeechServer((config.host, config.port), config, registry=registry) as server:
         secure_server = None
         if tls is not None:
             secure_server = SpeechServer((config.host, config.https_port), config,
@@ -446,14 +562,30 @@ def main():
             threading.Thread(target=secure_server.serve_forever, daemon=True).start()
             print(f"Secure recording on https://{config.host}:{config.https_port}", flush=True)
         print(f"Speech UI listening on http://{config.host}:{config.port}", flush=True)
+        # systemd and the supervisor both stop this process with SIGTERM.  Dying
+        # by default would abandon every MCP child -- someone else's long-lived
+        # process, still holding a stdio pipe to a dead parent -- so the signal
+        # goes through the same shutdown path as a clean exit.
+        stopping = threading.Event()
+
+        def request_stop(signum, frame):
+            stopping.set()
+
+        installed = signal.getsignal(signal.SIGTERM)
+        signal.signal(signal.SIGTERM, request_stop)
+        watcher = threading.Thread(target=lambda: (stopping.wait(), server.shutdown()), daemon=True)
+        watcher.start()
         try:
             server.serve_forever()
         except KeyboardInterrupt:
             pass
         finally:
+            signal.signal(signal.SIGTERM, installed)
             if secure_server is not None:
                 secure_server.shutdown()
                 secure_server.server_close()
+            if registry is not None:
+                registry.close()
 
 
 if __name__ == "__main__":

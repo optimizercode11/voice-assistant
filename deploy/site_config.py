@@ -133,3 +133,12 @@ DEPLOY_RECORDS = DEPLOY_ROOT / "evidence/deploy-qasr-20260909"
 # 23372 MiB, ASR 5268 MiB, TTS 1288 MiB.  A conservative sum of samples, not
 # a worst-case memory guarantee.
 GPU_MEMORY_MIB = 32607
+
+# --------------------------------------------------------------------------
+# Capabilities: tools, RAG, MCP.  Empty means "this site offers none", which
+# is what the live stack was certified with.  Naming a file here is the only
+# way the supervisor passes --tools-config, because a deployment that quietly
+# started offering tools is no longer the thing PROVENANCE.md certified.
+# Set VOICE_TOOLS_CONFIG=config/assistant.toml to turn them on for a site.
+# --------------------------------------------------------------------------
+TOOLS_CONFIG = _text("VOICE_TOOLS_CONFIG", "")

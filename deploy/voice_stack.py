@@ -68,7 +68,11 @@ def inputs():
         QASR_MODEL/'chat_template.json', QASR_MODEL/'preprocessor_config.json',
         QASR_ENV/'transformers/__init__.py',
         ROOT/'tools/g2p_sidecar.py', ROOT/'tools/speech_ui.py', ROOT/'tools/voice_chat.py',
-        ROOT/'web/index.html', ROOT/'web/chat.html', ROOT/'web/chat.js']
+        ROOT/'tools/agent_config.py', ROOT/'tools/agent_tools.py', ROOT/'tools/retrieval.py',
+        ROOT/'tools/mcp_client.py', ROOT/'tools/voicectl.py',
+        ROOT/'web/index.html', ROOT/'web/chat.html', ROOT/'web/chat.js',
+        # A capability config is an input only when this site actually named one.
+        *([ROOT / site.TOOLS_CONFIG] if site.TOOLS_CONFIG else [])]
 
 
 def request(path, body=None, port=None, expected=200):
@@ -224,11 +228,16 @@ def supervise():
             return bool(body.get('available')) and not body.get('sabotage')
 
         wait_for(stt_ready, seconds=300)
-        launch('bridge', ['python3', '-u', 'tools/speech_ui.py', '--host', '0.0.0.0',
+        bridge = ['python3', '-u', 'tools/speech_ui.py', '--host', '0.0.0.0',
             '--port', site.HTTP_PORT, '--https-port', site.HTTPS_PORT,
             '--tls-cert', CERT, '--tls-key', site.KEY,
             '--ffmpeg', FFMPEG, '--asr-url', f'http://127.0.0.1:{QASR_PORT}',
-            '--llm-url', f'http://127.0.0.1:{site.LLM_PORT}'], env)
+            '--llm-url', f'http://127.0.0.1:{site.LLM_PORT}']
+        if site.TOOLS_CONFIG:
+            # Refusing to start on a bad capability config is deliberate: a
+            # half-loaded tool set is worse than a bridge that will not come up.
+            bridge += ['--tools-config', str(ROOT / site.TOOLS_CONFIG)]
+        launch('bridge', bridge, env)
         wait_for(lambda: healthy(site.HTTPS_PORT, '/stt/health'))
         (RUN/'children.json').write_text(json.dumps({name: child.pid for name, child in children}))
         (RUN/'ready').write_text(str(os.getpid()))

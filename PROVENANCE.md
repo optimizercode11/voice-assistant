@@ -109,3 +109,57 @@ Two behaviours changed in files the live host also runs, both deliberate:
 2. `SIGTERM` now exits **0** through the clean shutdown path instead of dying by
    signal, so the bridge reaps its MCP children on `systemctl stop`.  With no
    MCP servers configured this is a no-op for the live stack.
+
+## Deployed beside the live stack — campaign `voice-tools-20260910`
+
+**https://192.168.228.113:8094/chat** — the tools bridge, on GPU 2, running this
+repo's code with tools + RAG + MCP enabled.
+
+It is a *second* bridge, not a replacement. The GPU holds 27719 of 32607 MiB, so
+a second Qwen is arithmetically impossible; the new bridge reuses the resident
+q38 `:8080`, qasr `:8095` and Kokoro `:8090` and listens on 8093/8094. The
+certified assistant at `:8092` was never restarted — its children are the same
+five PIDs (`400639/401257/401527/401652/402137`) they were before this work.
+
+```bash
+systemctl --user {status,restart,stop} voice-tools-bridge.service   # on vllm
+# tree: ~/qwen36/voice-stack/voice-tools-20260910
+```
+
+### Verified against the real models, not fakes
+
+| | |
+|---|---|
+| `regression` | `make check` on the host under the guard — 71 contracts + 19 site checks, rc=0 |
+| `positive` | index built (6 docs → 50 chunks); `doctor --probe`: MCP server `stack` up |
+| real tool call | q38 emitted `tool_calls` (`call_4_0`) for `search_notes`; bridge ran FTS5 in 9 ms; second generation answered grounded in `RUNBOOK.md` |
+| real MCP call | model called `mcp__stack__health` (9 ms) and relayed what qasr reports about itself |
+| real STT | `microphone.wav` → resident qasr on device 2 → 44 ms, correct transcript |
+| real TTS | Kokoro returned a 154 KB WAV through the bridge |
+| shutdown | after 4 service restarts, exactly one `mcp_stack_status.py` remains, parented to the live bridge — SIGTERM reaping holds in production |
+
+Manifests: `evidence/guarded-voice-tools-20260910-*.json`.
+
+### This is not the certified stack
+
+`voice-stack-gpu2` remains the certified deployment and still runs the
+pre-tools page. `check_site.py --compare-live --require-assets` still fails on
+the `web/` assets, correctly: local and live have genuinely diverged. Promoting
+this tree to `:8092` is a separate, authorized decision, not a side effect.
+
+### Two defects only testing the real URL could find
+
+1. **The TLS listener had no registry.** `main()` built the secure
+   `SpeechServer` with the shared locks but not the capabilities, so
+   `:8094/chat/health` reported `{"tools": []}` while `:8093` reported all
+   three. Since browsers refuse `getUserMedia` on an insecure origin, the
+   listener the microphone can use was the broken one — a page that looked
+   deployed and had no tools. 71 green contracts could not see it: every
+   in-process test builds its own `SpeechServer`, and the subprocess test
+   asserted against the plain HTTP port.
+2. **The health MCP server probed an HTTPS port over plain HTTP**, so the model
+   faithfully reported a bridge outage that did not exist. A health tool that
+   lies is worse than no health tool.
+
+Both are recorded because they are the argument for deploying before believing,
+not because they are interesting in themselves.

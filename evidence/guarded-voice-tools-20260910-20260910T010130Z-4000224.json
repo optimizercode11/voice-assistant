@@ -1,0 +1,31 @@
+{
+  "campaign": "voice-tools-20260910",
+  "command": [
+    "sh",
+    "-c",
+    "python3 tools/voicectl.py --config config/host.toml doctor --probe"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "24-27",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stack/voice-tools-20260910",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-10T01:01:31.909108855Z",
+  "git_head": "48e0a54bc3f536d6621113cacbd5ba64f44c20b9",
+  "inputs": [],
+  "label": "positive",
+  "log": "/home/ambudsharma/qwen36/voice-stack/voice-tools-20260910/evidence/guarded-voice-tools-20260910-20260910T010130Z-4000224.log",
+  "run_id": "voice-tools-20260910-20260910T010130Z-4000224",
+  "schema_version": 2,
+  "source_fingerprint": "be7bb89c8442f70459a1e9b35a2226e012e0d878621f8a36c2c83076b474fe0f",
+  "started_utc": "2026-09-10T01:01:31.820171532Z",
+  "status": "PASS"
+}

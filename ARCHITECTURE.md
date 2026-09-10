@@ -179,6 +179,36 @@ The full assistant text is committed before playback (`web/chat.js::runTurn`,
 words actually heard. Automated gate/browser tests cannot establish acoustic
 echo performance; use the manual check in [RUNBOOK.md](RUNBOOK.md).
 
+## The page owns the model's memory
+
+`tools/voice_chat.py` keeps no session.  Every `/chat/completions` request
+carries the whole transcript, and `parse_messages` treats *position*, not the
+role the client sent, as authoritative: message 0 is the user, message 1 the
+assistant, and the last must be a user turn.  Two consequences follow, and they
+point at the same file.
+
+A refresh that drops `history` does not merely clear a screen — it removes
+context from the next prompt, so the model answers a follow-up as if it were the
+first question.  That is why persistence lives in `web/chat.js` rather than in a
+server-side session: the bridge has no identity to hang one on, and inventing a
+session id to re-learn what the browser already holds would add a state store,
+a lifetime, and a privacy surface to buy nothing.
+
+The other consequence is a ceiling.  `parse_messages` refuses more than 100
+messages and more than 8000 characters in one, so an unbounded saved transcript
+eventually turns every request into a 400.  The page therefore separates *shown*
+from *sent*: up to 200 turns are kept and rendered, the last 40 are replayed, and
+the header states which of the two the model is holding.  Storage is bounded by
+bytes rather than turn count because one reply may legitimately be 8000
+characters, and `transcript` is kept equal to what actually reached storage so
+the page never displays a turn that a refresh would lose.
+
+Storage is attacker-writable, so it is read through the same suspicion as a
+request body: half turns, non-string roles and over-long messages are dropped or
+clipped, never repaired.  A tab writes only into the conversation whose id it
+owns, which is what keeps a second tab's **New chat** from being resurrected by
+a reply finishing in the first.
+
 ## Deliberate limits, written down
 
 * One Qwen slot, one ASR arena, one TTS batch: this is a conversation, not a

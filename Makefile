@@ -86,7 +86,7 @@ doctor:
 	$(CPU) $(PYTHON) -u tools/voicectl.py --config config/assistant.toml doctor
 
 test-browser:
-	@for suite in voice_chat_browser voice_carry_browser voice_barge_browser voice_controls_browser voice_language_browser stt_browser voice_tools_browser voice_think_browser voice_tts_browser; do \
+	@for suite in voice_chat_browser voice_carry_browser voice_barge_browser voice_controls_browser voice_language_browser stt_browser voice_tools_browser voice_think_browser voice_tts_browser voice_history_browser; do \
 	  echo "== $$suite =="; \
 	  $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/$$suite.mjs || exit 1; \
 	done
@@ -138,6 +138,9 @@ sabotage:
 	if $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/voice_tts_browser.mjs --sabotage >/dev/null 2>&1; then \
 	  echo "SABOTAGE PASSED (this is the failure): sentences are spoken one at a time, in series"; failures=$$((failures+1)); \
 	else echo "ok  correctly refused: voice_tts_browser.mjs --sabotage"; fi; \
+	if $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/voice_history_browser.mjs --sabotage >/dev/null 2>&1; then \
+	  echo "SABOTAGE PASSED (this is the failure): the conversation was never written down"; failures=$$((failures+1)); \
+	else echo "ok  correctly refused: voice_history_browser.mjs --sabotage"; fi; \
 	exit $$failures
 
 # Every arm above is a claim that a mutation is caught.  An arm whose anchor no
@@ -155,7 +158,7 @@ sabotage-selftest:
 	           tests/browser/voice_barge_browser.mjs tests/browser/voice_carry_browser.mjs \
 	           tests/browser/voice_tools_browser.mjs tests/browser/voice_controls_browser.mjs \
 	           tests/browser/voice_think_browser.mjs \
-	           tests/browser/voice_tts_browser.mjs; do \
+	           tests/browser/voice_tts_browser.mjs tests/browser/voice_history_browser.mjs; do \
 	  if $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" $$arm --dead-sabotage >/dev/null 2>&1; then \
 	    echo "ok  arm can fail: $$arm"; \
 	  else echo "SELFTEST FAILED: $$arm is green without catching anything"; failures=$$((failures+1)); fi; \

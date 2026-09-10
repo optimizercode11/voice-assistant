@@ -69,6 +69,185 @@ function setState(value, message) {
   $('corrections').disabled=busy;$('corrections-enabled').disabled=busy;
 }
 function shortPath(path) { const parts = String(path).split('/').filter(Boolean); return parts.slice(-2).join('/'); }
+// ------------------------------------------------------------- chat history
+// The bridge is stateless: every turn re-sends the whole transcript, so what
+// Qwen remembers is exactly what this page holds in `history`.  A refresh used
+// to throw the visible bubbles *and* that context away, which is how a
+// conversation about one film came back with "I'm not sure what you mean by
+// Carlton" -- the model had been amnesiaced mid-thread by a page reload.
+// Persisting is therefore not decoration, it is the model's memory.
+//
+// Three limits are load-bearing rather than defensive:
+//   * tools/voice_chat.py parse_messages refuses a request carrying more than
+//     100 messages, so the transcript that is *sent* is capped at SEND_TURNS.
+//     An older part of the conversation stays readable on screen, it just stops
+//     being replayed, and the counter says which of the two Qwen is holding.
+//   * localStorage is a few MB per origin and one reply may be 8000 characters,
+//     so what is *stored* is bounded by bytes, oldest turns rolling off first.
+//     `transcript` is kept equal to what actually made it to storage, so the
+//     page never shows a turn that a refresh would lose.
+//   * another tab may start a fresh conversation while this one is open.  A tab
+//     writes only into the conversation it owns, so "New chat" over there is
+//     never silently resurrected by a reply completing over here.
+// Storage failing may never cost a turn: the conversation carries on in memory
+// and the counter admits out loud that it is not being saved.
+const CHAT_KEY = 'voice-chat';
+const SEND_TURNS = 40;      // 80 messages, under the bridge's 100-message ceiling
+const STORE_TURNS = 200;
+const STORE_BYTES = 1200000;
+const MAX_MESSAGE = 8000;   // the ceiling parse_messages puts on a single message
+let transcript = [];        // every turn this browser still holds, oldest first
+let conversationId = '';
+let saving = true;          // false once storage is unavailable or another tab owns the key
+function newConversationId() {
+  try { if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID(); } catch (_) {}
+  return `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+function byteLength(text) {
+  // A Hindi reply is three bytes a character, so a character count would let a
+  // byte budget be exceeded by a third and turn a save into a quota exception.
+  try { return new TextEncoder().encode(text).length; } catch (_) { return text.length * 3; }
+}
+function usableTurn(value) {
+  // Storage is attacker-writable: a hand-edited or half-written record must not
+  // be able to author an assistant turn or push a request over the bridge's own
+  // per-message ceiling.  Anything unusable is dropped, never repaired.
+  if (!value || typeof value !== 'object') return null;
+  const q = typeof value.q === 'string' ? value.q.trim() : '';
+  const a = typeof value.a === 'string' ? value.a.trim() : '';
+  if (!q || !a) return null;                       // a half turn is not a turn
+  const turn = {q: q.slice(0, MAX_MESSAGE), a: a.slice(0, MAX_MESSAGE)};
+  if (typeof value.original === 'string' && value.original.trim())
+    turn.original = value.original.slice(0, MAX_MESSAGE);
+  if (Array.isArray(value.tools)) turn.tools = value.tools.slice(0, 8)
+    .filter(tool => tool && typeof tool.name === 'string')
+    .map(tool => ({name: tool.name.slice(0, 120), ok: tool.ok !== false, ms: Number(tool.ms) || 0}));
+  if (Array.isArray(value.sources)) turn.sources = value.sources.slice(0, 8)
+    .filter(source => source && typeof source.path === 'string')
+    .map(source => ({path: source.path.slice(0, 400),
+                     heading: typeof source.heading === 'string' ? source.heading.slice(0, 200) : ''}));
+  return turn;
+}
+function turnFrom(question, answer, original, evidence) {
+  return usableTurn({q: question, a: answer, original,
+                     tools: evidence?.tools, sources: evidence?.sources});
+}
+function messagesOf(turn) {
+  return [{role: 'user', content: turn.q}, {role: 'assistant', content: turn.a}];
+}
+function historyFrom(turns) { return turns.slice(-SEND_TURNS).flatMap(messagesOf); }
+function readStoredChat() {
+  try {
+    const raw = localStorage.getItem(CHAT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || typeof parsed.id !== 'string'
+        || !Array.isArray(parsed.turns)) return null;
+    return {id: parsed.id, turns: parsed.turns.map(usableTurn).filter(Boolean)};
+  } catch (_) { return null; }
+}
+function writeStoredChat(claim = false) {
+  if (!saving) return false;
+  let turns = transcript.slice(-STORE_TURNS);
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const payload = JSON.stringify({v: 1, id: conversationId, at: Date.now(), turns});
+    const bytes = byteLength(payload);
+    if (bytes > STORE_BYTES && turns.length > 1) {
+      // Drop a *proportional* slice, not one turn: a record far over budget has
+      // to converge inside the retry budget, or the loop exits without writing
+      // and the counter is still claiming "saved".
+      const keep = Math.ceil(turns.length * (STORE_BYTES / bytes));
+      turns = turns.slice(turns.length - Math.max(1, Math.min(turns.length - 1, keep)));
+      continue;
+    }
+    try {
+      // "New chat" is an explicit instruction to take the key over, so it writes
+      // whatever is in there.  An ordinary turn may only ever write into the
+      // conversation it owns.
+      const owner = claim ? null : readStoredChat();
+      if (owner && owner.id !== conversationId) { saving = false; break; }   // another tab took over
+      localStorage.setItem(CHAT_KEY, payload);
+      adoptTranscript(turns);
+      return true;
+    } catch (error) {
+      // QuotaExceeded is the ordinary case: a full origin or a private window.
+      if (turns.length > 1) { turns = turns.slice(Math.ceil(turns.length / 2)); continue; }
+      saving = false;
+      break;
+    }
+  }
+  adoptTranscript(turns);
+  renderTurnCount();
+  return false;
+}
+function adoptTranscript(turns) {
+  // The single place `transcript` shrinks.  Anything still on screen must be
+  // something storage also holds, so a roll-off repaints rather than leaving a
+  // bubble that a refresh would silently delete.
+  const dropped = transcript.length > turns.length;
+  transcript = turns;
+  history = historyFrom(transcript);   // what is saved is what Qwen holds
+  if (dropped) renderTranscript();
+}
+function renderTranscript() {
+  const host = $('messages');
+  host.replaceChildren();
+  if (!transcript.length) {
+    // The empty state is markup in the document, so a repaint that clears the
+    // list has to put it back -- otherwise a fresh chat and a wiped chat both
+    // stare at a blank panel instead of asking what is on your mind.
+    const empty = document.createElement('div'); empty.className = 'empty';
+    const ask = document.createElement('strong'); ask.textContent = 'What’s on your mind?';
+    const hint = document.createElement('p'); hint.textContent = 'Start talking, or write a message below.';
+    empty.append(ask, hint); host.append(empty);
+    return;
+  }
+  for (const turn of transcript) {
+    message('user', turn.q, turn.original ?? null);
+    message('assistant', turn.a, null, {tools: turn.tools, sources: turn.sources});
+  }
+}
+function renderTurnCount() {
+  const turns = transcript.length;
+  const where = !saving ? 'not saved in this browser'
+    : turns ? 'saved in this browser' : 'nothing saved yet';
+  const remembered = turns > SEND_TURNS ? `Qwen is holding the last ${SEND_TURNS}` : '';
+  $('turns').textContent = [turns ? `${turns} ${turns === 1 ? 'turn' : 'turns'}` : 'No conversation yet',
+                            where, remembered].filter(Boolean).join(' \u00b7 ');
+}
+function startFreshChat() {
+  conversationId = newConversationId();
+  transcript = [];
+  history = [];
+  saving = true;
+  renderTranscript();
+  renderTurnCount();
+  writeStoredChat(true);
+}
+function restoreChat() {
+  const stored = readStoredChat();
+  if (!stored) { startFreshChat(); return 0; }
+  conversationId = stored.id;
+  transcript = stored.turns.slice(-STORE_TURNS);
+  history = historyFrom(transcript);
+  renderTranscript();
+  if (transcript.length < stored.turns.length) writeStoredChat();   // store what is shown
+  renderTurnCount();
+  return transcript.length;
+}
+try {
+  localStorage.setItem('voice-chat-probe', '1');
+  localStorage.removeItem('voice-chat-probe');
+} catch (_) { saving = false; }
+window.addEventListener('storage', event => {
+  // Another tab cleared or replaced the conversation.  Adopting its transcript
+  // mid-reply would be its own bug, so this tab simply stops writing rather than
+  // typing over a conversation it no longer owns.
+  if (event.key !== null && event.key !== CHAT_KEY) return;
+  const owner = readStoredChat();
+  if (!owner || owner.id !== conversationId) { saving = false; renderTurnCount(); }
+});
+
 function message(role, text, original = null, evidence = null) {
   $('messages').querySelector('.empty')?.remove();
   const item = document.createElement('div'); item.className = `message ${role}`;
@@ -571,7 +750,7 @@ async function runTurn(input, forced = false, voicedMs = null) {
   clearCapture(); player.pause(); busy = true;
   const id = ++epoch, controller = new AbortController(); abort = controller;
   const check = () => {if(id !== epoch || controller.signal.aborted) throw new DOMException('Stopped','AbortError');};
-  const before = history.slice(); let committed = false;
+  const before = history.slice(), was = transcript.slice(); let committed = false;
   try {
     let text = input, original = null;
     if (input instanceof Blob) {
@@ -646,12 +825,18 @@ async function runTurn(input, forced = false, voicedMs = null) {
       empty.keepSession = true;
       throw empty;
     }
-    history = [...pending,{role:'assistant',content:answer}];committed=true;
+    // One commit point for both memories.  `history` is derived from the
+    // transcript rather than maintained beside it, so the model can never be
+    // shown a turn the browser would lose on refresh, or forget one it kept.
+    const turn = turnFrom(text, answer, original, reply);
+    if (turn) transcript = [...transcript, turn].slice(-STORE_TURNS);
+    history = historyFrom(transcript);
+    committed = true;
     message('assistant',answer,null,{tools:reply.tools,sources:reply.sources});
     // A request_directory call happened during that generation, so the card the
     // user needs to see is one poll overdue.  Fetch it now, not in four seconds.
     refreshApprovals();
-    $('turns').textContent=`${history.length/2} ${history.length===2?'turn':'turns'} · Just this tab`;
+    writeStoredChat();   // after the bubbles, so a trim never strands a rendered turn
     setState('synthesizing','Your reply is becoming speech\u2026');
     await speakReply(answer, controller.signal, () => {
       stopThinkingAloud();        // the reply is in hand: it never waits behind the acknowledgment
@@ -661,7 +846,7 @@ async function runTurn(input, forced = false, voicedMs = null) {
     if(active)listen();else setState('idle','Send another message, or start a voice conversation.');
   } catch(error) {
     if(id !== epoch) return;
-    if(!committed) history=before;
+    if(!committed){ history=before; transcript=was; }   // a refused reply leaves no trace
     stopThinkingAloud();
     // A refusal is not the end of a conversation.  Anything that merely declined
     // to answer keeps the microphone, so the next sentence needs no second click
@@ -726,7 +911,7 @@ window.addEventListener('keyup',event=>{if(spaceHeld && (event.code==='Space'||e
 window.addEventListener('blur',()=>{spaceHeld=false;});
 function speechSpeed(){const value=Number($('speed').value);return Number.isFinite(value)?Math.min(2,Math.max(.5,value)):1.2;}
 $('speed').oninput=()=>{const value=speechSpeed().toFixed(1);$('speed-value').value=value+'×';$('speed').setAttribute('aria-valuetext',value+' times');};
-$('new').onclick=()=>{stopSession('A fresh conversation. Start talking or type below.');setGlow(0);history=[];$('messages').replaceChildren();$('turns').textContent='Just this tab';player.removeAttribute('src');if(audioURL){URL.revokeObjectURL(audioURL);audioURL=null;}};
+$('new').onclick=()=>{stopSession('A fresh conversation. Start talking or type below.');setGlow(0);startFreshChat();player.removeAttribute('src');if(audioURL){URL.revokeObjectURL(audioURL);audioURL=null;}};
 $('compose').onsubmit=event=>{event.preventDefault();const text=$('text').value.trim();if(!text||busy||!ready)return;primeAudio();armGlow();$('text').value='';runTurn(text);};
 let languageList=[],autoLanguage='a',speechPreferences={voices:{}};
 try{const saved=JSON.parse(localStorage.getItem('voice-speech')||'null');if(saved && typeof saved==='object' && !Array.isArray(saved))speechPreferences={...saved,voices:saved.voices&&typeof saved.voices==='object'?saved.voices:{}};}catch(_){}
@@ -882,6 +1067,9 @@ function refreshApprovals() {
 // page whose whole job is the microphone and enough to wedge the browser suite.
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshApprovals(); });
 window.addEventListener('pagehide',()=>{stopSession();releaseAudioContext();});
+// Before the first fetch, so a reload cannot let a turn be sent against a
+// transcript the page has not rebuilt yet.
+const restoredTurns = restoreChat();
 (async()=>{
   try{
     const responses=await Promise.all(['/chat/health','/languages','/voices'].map(url=>fetch(url)));
@@ -896,5 +1084,6 @@ window.addEventListener('pagehide',()=>{stopSession();releaseAudioContext();});
       const url=new URL(location.href);url.protocol='https:';url.port=health.https_port;secureURL=url.href;$('start').textContent='Open secure conversation';
     }
     setState('idle',secureURL?'Open the secure page, accept this server’s certificate, then allow the microphone.':canRecord?'Your voice stays on your server. Start whenever you’re ready.':'This browser cannot record audio here. You can still type and hear replies.');
+    if(restoredTurns) setState('idle',`Picked up where you left off — ${restoredTurns} ${restoredTurns===1?'turn':'turns'} from this browser. Nothing was re-spoken.`);
   }catch(error){setState('error',error.message);}
 })();

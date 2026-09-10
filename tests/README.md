@@ -78,6 +78,7 @@ CUDA_VISIBLE_DEVICES="" $NODE tests/browser/voice_carry_browser.mjs
 CUDA_VISIBLE_DEVICES="" $NODE tests/browser/voice_controls_browser.mjs
 CUDA_VISIBLE_DEVICES="" $NODE tests/browser/voice_language_browser.mjs
 CUDA_VISIBLE_DEVICES="" $NODE tests/browser/stt_browser.mjs
+CUDA_VISIBLE_DEVICES="" $NODE tests/browser/voice_history_browser.mjs
 ```
 
 Each starts its own local server that serves the real `web/` files and stubs
@@ -97,9 +98,19 @@ the server's judgement is broken; a JavaScript copy of those rules would have
 kept passing through the bug it is testing for.  The assertion is the one the
 user asked for: the model receives `"I want to go to the museum."` as one turn.
 
-`--sabotage` variants exist for the chat, controls, tools and carry suites: they
-disable one handler (the Space key, automatic language choice, tool progress, or
-the carry-forward) and must fail exactly there.  `--live` points the same assertions at the deployed page.
+`voice_history_browser.mjs` is the suite for the page's other kind of memory:
+the bridge is stateless, so the transcript the browser holds *is* the model's
+context.  It reloads a real page and then reads the `/chat/completions` body,
+which is the only way to tell "the bubbles came back" apart from "the model got
+its context back" — those are different claims and the first one is nearly
+free to fake.  It also seeds storage by hand to prove a forged record cannot
+author an assistant turn, and opens a second tab to prove a *New chat* over
+there is not resurrected by a reply completing here.
+
+`--sabotage` variants exist for the chat, controls, tools, carry and history
+suites: they disable one handler (the Space key, automatic language choice, tool
+progress, the carry-forward, or the write-through of a committed turn) and must
+fail exactly there.  `--live` points the same assertions at the deployed page.
 
 `page_harness.mjs` is different again: it runs the studio page's script against
 a live `kserver` with a fake WebAudio that records what the page actually

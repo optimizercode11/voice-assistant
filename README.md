@@ -112,6 +112,35 @@ See [Architecture](ARCHITECTURE.md#turn-taking-and-barge-in) for these limits
 and the current WebAudio/settle defects; this checkout is **not yet verified
 for acoustic barge-in on real hardware**.
 
+## The conversation stays in your browser
+
+The bridge is stateless: every turn re-sends the whole transcript, so what Qwen
+remembers is exactly what the page holds.  That used to mean a refresh ended a
+conversation twice over — the bubbles went away *and* the model forgot what it
+had been told ten seconds ago, which is how a thread about one film came back
+with "I'm not sure what you mean by Carlton".  `/chat` now keeps the transcript
+in `localStorage` under `voice-chat` and rebuilds both halves from it, so a
+reload picks up where you left off and **re-speaks nothing**.
+
+- **Nothing is uploaded, and nothing is stored on the server.** The transcript
+  lives in the browser profile that spoke it.  **New chat** erases it; so does
+  clearing site data.
+- **Provenance survives the reload.** "Looked up · search_notes" and "From your
+  notes · film.md" stay attached to the reply that earned them.
+- **A refused reply leaves no trace.** An empty or failed turn is never written
+  down, so a reload cannot resurrect a question the model never answered.
+- **The counter tells the truth.** A long conversation stays readable on screen,
+  but only the last 40 turns are sent — the bridge refuses more than 100
+  messages — and the header says *"Qwen is holding the last 40"*.
+- **Two tabs do not overwrite each other.** A tab writes only into the
+  conversation it owns, so **New chat** in one tab is never resurrected by a
+  reply finishing in the other.  The tab that lost the key says *"not saved in
+  this browser"* and keeps working: losing storage costs a save, never a turn.
+
+`tests/browser/voice_history_browser.mjs` asserts each of those, including that
+a hand-edited storage record cannot author an assistant turn or push a message
+past the bridge's own 8000-character ceiling.
+
 ## Deploy and operate
 
 Two user services share the resident models on the GPU host:

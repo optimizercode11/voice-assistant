@@ -48,6 +48,13 @@ becomes audible; allow model latency between checks if it exceeds this budget.
    and use **Interrupt reply** or Space outside a text field/control. Confirm
    that manual interruption still returns to listening.
 
+**Reload the tab mid-conversation** before you finish.  The transcript comes
+back, nothing is re-spoken, and the next question is still answered *in
+context* — the header beside "Your conversation" says how many turns are saved
+in this browser and which window Qwen is holding.  A reload that restores the
+bubbles but sends an empty context is a failure, not a cosmetic pass: the bridge
+is stateless, so the page is the model’s memory.
+
 If `barge-note` says **“Unavailable: the reply is not routed through
 WebAudio.”** or **“Unavailable on this audio device: no echo cancellation.”**,
 record that refusal and exercise the button fallback; do not call voice

@@ -557,8 +557,14 @@ def main():
     with SpeechServer((config.host, config.port), config, registry=registry) as server:
         secure_server = None
         if tls is not None:
+            # The registry goes to both listeners.  The TLS one is the only
+            # listener a microphone can use at all, so handing it the locks but
+            # not the capabilities produced a page that looked deployed and
+            # answered with nothing -- and the plain-HTTP health endpoint, which
+            # is what a quick curl hits first, kept reporting every tool.
             secure_server = SpeechServer((config.host, config.https_port), config,
-                                         tls=tls, asr_lock=server.asr_lock, chat_lock=server.chat_lock)
+                                         tls=tls, asr_lock=server.asr_lock, chat_lock=server.chat_lock,
+                                         registry=registry)
             threading.Thread(target=secure_server.serve_forever, daemon=True).start()
             print(f"Secure recording on https://{config.host}:{config.https_port}", flush=True)
         print(f"Speech UI listening on http://{config.host}:{config.port}", flush=True)

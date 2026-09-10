@@ -1,0 +1,13 @@
+guarded-run: campaign=voice-tools-20260910 label=positive mode=cpu cpus=24-27
+command: sh -c python3\ tools/voicectl.py\ --config\ config/host.toml\ index\ build\ \&\&\ echo\ \"---\ doctor\ --probe\ ---\"\ \&\&\ python3\ tools/voicectl.py\ --config\ config/host.toml\ doctor\ --probe
+indexed 6 documents into 50 chunks in 0.019s at var/notes.sqlite
+--- doctor --probe ---
+tools (3): mcp__stack__health, now, search_notes
+  mcp__stack__health                 mcp:stack
+  now                                builtin
+  search_notes                       retrieval
+mcp:
+  stack            up    1 tools  restarts=0
+limits: rounds=2 per_call=10.0s turn=150.0s result_chars=6000
+warn: ffmpeg is not on PATH; the bridge cannot decode uploads
+doctor: ok

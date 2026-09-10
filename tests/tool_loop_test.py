@@ -279,7 +279,9 @@ class BridgeStartTests(unittest.TestCase):
     """
 
     @classmethod
+    @classmethod
     def setUpClass(cls):
+        import subprocess
         cls.temp = tempfile.TemporaryDirectory()
         cls.root = Path(cls.temp.name)
         cls.corpus = cls.root / 'notes'
@@ -288,6 +290,15 @@ class BridgeStartTests(unittest.TestCase):
         cls.upstream = ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
         cls.upstream.requests, cls.upstream.script, cls.upstream.started = [], [], threading.Event()
         threading.Thread(target=cls.upstream.serve_forever, daemon=True).start()
+        # A TLS listener is not an optional extra here: browsers refuse
+        # getUserMedia on an insecure origin, so the HTTPS port is the only one
+        # a real conversation ever uses.
+        cert, key = cls.root / 'cert.pem', cls.root / 'key.pem'
+        subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
+                        '-subj', '/CN=localhost', '-addext', 'subjectAltName=IP:127.0.0.1,DNS:localhost',
+                        '-keyout', str(key), '-out', str(cert)], check=True, capture_output=True)
+        cls.cert, cls.key = cert, key
+        cls.client_tls = ssl.create_default_context(cafile=str(cert))
 
     @classmethod
     def tearDownClass(cls):
@@ -305,9 +316,10 @@ class BridgeStartTests(unittest.TestCase):
 
     def bridge(self, config_path, expect_zero=True):
         import subprocess
-        port = socket_free_port()
+        port, secure_port = socket_free_port(), socket_free_port()
         command = [sys.executable, str(Path(__file__).resolve().parents[1] / 'tools' / 'speech_ui.py'),
                    '--host', '127.0.0.1', '--port', str(port),
+                   '--https-port', str(secure_port), '--tls-cert', str(self.cert), '--tls-key', str(self.key),
                    '--asr-url', 'http://127.0.0.1:1',           # never called by this test
                    '--llm-url', f'http://127.0.0.1:{self.upstream.server_port}',
                    '--page', str(Path('web/index.html').resolve()),
@@ -328,12 +340,12 @@ class BridgeStartTests(unittest.TestCase):
         try:
             if expect_zero:
                 self.assertEqual(child.poll(), None, f'bridge exited early: {lines}')
-            return child, port, lines
+            return child, port, secure_port, lines
         except Exception:
             child.terminate(); child.wait(timeout=5); raise
 
     def test_a_broken_capability_config_refuses_to_start(self):
-        child, port, lines = self.bridge(self.config('[fetch]\nenabled = true\n'), expect_zero=False)
+        child, port, secure_port, lines = self.bridge(self.config('[fetch]\nenabled = true\n'), expect_zero=False)
         self.assertEqual(child.wait(timeout=10), 2, lines)
         self.assertTrue(any('allow_hosts' in line for line in lines), lines)
 
@@ -355,7 +367,7 @@ timeout_seconds = 5
         import subprocess
         subprocess.run([sys.executable, str(Path(__file__).resolve().parents[1] / 'tools' / 'voicectl.py'),
                         '--config', str(path), 'index', 'build'], check=True, capture_output=True)
-        child, port, lines = self.bridge(path)
+        child, port, secure_port, lines = self.bridge(path)
         try:
             self.assertTrue(any('Tools offered' in line for line in lines), lines)
             offered = [line for line in lines if 'Tools offered' in line][0]
@@ -382,6 +394,29 @@ timeout_seconds = 5
             self.assertTrue(events[1]['ok'], events[1])
             self.assertEqual(events[-1]['text'], 'It is 12:34.')
             mcp_pid = listed['mcp'][0].get('pid')
+
+            # ...and the same over TLS, because that is the listener the
+            # microphone can actually use.  A registry handed only to the plain
+            # HTTP server passes every check above and still deploys an
+            # assistant with no tools.
+            secure = http.client.HTTPSConnection('127.0.0.1', secure_port, context=self.client_tls, timeout=15)
+            secure.request('GET', '/chat/health')
+            over_tls = json.loads(secure.getresponse().read())
+            self.assertTrue(over_tls['streaming'], 'the TLS listener must advertise the loop')
+            self.assertIn('search_notes', over_tls['tools'], over_tls)
+            self.assertIn('mcp__desk__get_time', over_tls['tools'], over_tls)
+            self.upstream.requests = []          # the script is indexed per turn
+            self.upstream.script = [calling([call('search_notes', {'query': 'which port'})]),
+                                    answered('Port 8092.')]
+            secure.request('POST', '/chat/completions',
+                           json.dumps({'messages': [{'role': 'user', 'content': 'what port?'}]}),
+                           {'Content-Type': 'application/json', 'Accept': 'application/x-ndjson'})
+            response = secure.getresponse()
+            events = [json.loads(line) for line in response.read().decode().splitlines() if line.strip()]
+            secure.close()
+            self.assertEqual([event['type'] for event in events], ['status', 'tool', 'answer'],
+                             'the tool loop must run on the listener the browser uses')
+            self.assertTrue(events[-1]['sources'], 'and must still cite over TLS')
         finally:
             child.terminate()
             self.assertEqual(child.wait(timeout=10), 0,

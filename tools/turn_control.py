@@ -94,19 +94,22 @@ def completeness(text: str) -> dict:
         return {"complete": False, "reason": "ends on a comma", "extra_silence_ms": EXTRA_HARD_MS,
                 "words": len(words)}
 
-    if ends_terminal:
-        return {"complete": True, "reason": "ends on terminal punctuation",
-                "extra_silence_ms": 0, "words": len(words)}
-
-    # ASR punctuation is not guaranteed, so most real endings land here.  A
-    # single content word that is not dangling is a complete answer; anything
-    # shorter than a phrase is not worth interrupting for.
+    # A single content word is judged on what it *is*, never on whether the ASR
+    # happened to put a stop after it.  qasr punctuates fragments: measured on
+    # the deployed stack, a 0.63 s clip of one syllable comes back as "I." and a
+    # lone "Carlton" comes back as "Carlton."  Trusting that period is exactly
+    # what let a one-word clip reach the model and be answered as a question.
     if len(content) == 1:
         if last in SELF_CONTAINED:
             return {"complete": True, "reason": "a self-contained one-word answer",
                     "extra_silence_ms": 0, "words": len(words)}
         return {"complete": False, "reason": "a single word is too little to judge",
                 "extra_silence_ms": EXTRA_SOFT_MS, "words": len(words)}
+
+    # Two or more content words: now a period is evidence of an ending.
+    if ends_terminal:
+        return {"complete": True, "reason": "ends on terminal punctuation",
+                "extra_silence_ms": 0, "words": len(words)}
 
     if len(content) <= 2 and not ends_terminal:
         return {"complete": False, "reason": "a two-word fragment with no ending",

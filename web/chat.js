@@ -14,6 +14,7 @@ setTheme(document.documentElement.dataset.theme==='light'?'light':'dark');
 let active = false, busy = false, ready = false, epoch = 0, abort = null;
 let stream = null, context = null, source = null, analyser = null, recorder = null, raf = 0;
 let history = [], voiceList = [], audioURL = null, secureURL = null, phase = 'idle', streaming = false;
+let fragmentHolds = 0;
 const canRecord = !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
 function setState(value, message) {
   phase = value; $('orb').dataset.state = value;
@@ -188,7 +189,7 @@ function listen() {
     if (!active || thisEpoch !== epoch) return;
     recorder = null; cancelAnimationFrame(raf); stream.getTracks().forEach(track=>{track.enabled=false;});
     if (!chunks.length || (voiced < 120 && !rec.sendNow)) {listen(); return;}
-    runTurn(new Blob(chunks,{type:rec.mimeType || 'audio/webm'}));
+    runTurn(new Blob(chunks,{type:rec.mimeType || 'audio/webm'}), rec.sendNow === true);
   };
   rec.start(250); busy = false; setState('listening','I’m listening. A short pause sends your message.');
   const samples = new Float32Array(analyser.fftSize);
@@ -238,7 +239,7 @@ async function playReply(blob, signal) {
     attempt();
   });
 }
-async function runTurn(input) {
+async function runTurn(input, forced = false) {
   clearCapture(); player.pause(); busy = true;
   const id = ++epoch, controller = new AbortController(); abort = controller;
   const check = () => {if(id !== epoch || controller.signal.aborted) throw new DOMException('Stopped','AbortError');};
@@ -247,9 +248,24 @@ async function runTurn(input) {
     let text = input, original = null;
     if (input instanceof Blob) {
       setState('transcribing','Turning your speech into text…');
-      text = (await responseJSON('/stt',input,controller.signal)).text.trim(); check();
-      if (!text) {busy=false;if(active)listen();else setState('idle','No speech was detected. Please try again.');return;}
+      const heard = await responseJSON('/stt',input,controller.signal);
+      text = String(heard.text || '').trim(); check();
+      if (!text) {fragmentHolds=0;busy=false;if(active)listen();else setState('idle','No speech was detected. Please try again.');return;}
       const corrected=correctSpeech(text);if(corrected!==text){original=text;text=corrected;}
+      // A one-word clip is not a question.  qasr punctuates fragments -- a 0.6 s
+      // clip of one syllable comes back as "I." -- so the transcript cannot be
+      // trusted to say when a turn is finished, and answering "I." produced a
+      // confident reply to a question nobody asked.  Hold it, stay open, and
+      // bound the holds: this may add patience, it may never wedge a turn.
+      const judged = heard.turn;
+      if (!forced && judged && judged.complete === false && judged.words <= 1
+          && (Number(heard.audio_seconds) || 0) < 1.5 && fragmentHolds < 2) {
+        fragmentHolds++; busy = false;
+        if (active) { listen(); setState('listening', `I only caught “${text}”. Keep talking, or press Send now.`); }
+        else setState('idle', `Only “${text}” was heard. Send a longer message.`);
+        return;
+      }
+      fragmentHolds = 0;
     }
     message('user',text,original); setState('thinking','Qwen is preparing a reply…');
     const pending = [...before,{role:'user',content:text}];

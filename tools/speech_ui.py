@@ -17,6 +17,7 @@ import ssl
 import voice_chat
 import agent_config
 import agent_tools
+import turn_control
 import subprocess
 import tempfile
 import threading
@@ -193,8 +194,12 @@ def transcribe_remote(config, wav_bytes, frames, disconnected):
     text, raw = result.get("text"), result.get("raw_text")
     if not isinstance(text, str) or not isinstance(raw, str):
         raise RequestError(502, "The ASR engine returned incomplete output.")
-    reply = {"text": transcript_text(text), "raw_text": raw,
-             "audio_seconds": frames / 24000, "chunks": int(result.get("chunks", 1))}
+    cleaned = transcript_text(text)
+    reply = {"text": cleaned, "raw_text": raw,
+             "audio_seconds": frames / 24000, "chunks": int(result.get("chunks", 1)),
+             # Is this actually a finished turn?  The browser owns the microphone
+             # and cannot tell "I" from a sentence, so the transcript says so.
+             "turn": turn_control.completeness(cleaned)}
     for key in ("engine", "frontend_ms", "frames"):     # diagnostics, not contract
         if key in result:
             reply[key] = result[key]
@@ -242,8 +247,10 @@ def transcribe(config, audio, directory, disconnected):
                     or len(chunk.get("tokens", [])) >= 256):
                 raise ValueError("invalid chunk or truncated output")
         raw = "".join(chunk["text"] for chunk in chunks)
-        return {"text": transcript_text(raw), "raw_text": raw,
-                "audio_seconds": frames / 24000, "chunks": len(chunks)}
+        cleaned = transcript_text(raw)
+        return {"text": cleaned, "raw_text": raw,
+                "audio_seconds": frames / 24000, "chunks": len(chunks),
+                "turn": turn_control.completeness(cleaned)}
     except (ValueError, TypeError, AttributeError) as error:
         raise RequestError(502, "The ASR engine returned incomplete or invalid output.") from error
 

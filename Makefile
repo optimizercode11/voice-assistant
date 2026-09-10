@@ -20,7 +20,7 @@ help:
 	                '  check         everything that runs offline' \
 	                '  inputs        the asset list a guarded start binds with --input'
 
-test: test-bridge test-chat test-retrieval test-tools test-mcp test-files test-loop
+test: test-bridge test-chat test-retrieval test-tools test-mcp test-files test-loop test-turn
 
 test-bridge:
 	@test -z "$${CUDA_VISIBLE_DEVICES-}" || { echo "rerun with CUDA_VISIBLE_DEVICES=''"; exit 2; }
@@ -45,6 +45,9 @@ test-mcp:
 # claim is that a symlink inside a root cannot read /etc/passwd.
 test-files:
 	$(CPU) $(PYTHON) -W error::ResourceWarning -u tests/mcp_files_test.py
+
+test-turn:
+	$(CPU) $(PYTHON) -u tests/turn_control_test.py
 
 test-loop:
 	$(CPU) $(PYTHON) -u tests/tool_loop_test.py
@@ -72,7 +75,7 @@ sabotage:
 	# result, a server cannot rename a tool mid-turn, and a file server's
 	# containment cannot be reduced to a plain join (that is the arm that
 	# leaks /etc/passwd through a symlink).
-	for suite in tool_loop_test mcp_test mcp_files_test; do \
+	for suite in tool_loop_test mcp_test mcp_files_test turn_control_test; do \
 	  if $(CPU) $(PYTHON) -u tests/$$suite.py --sabotage >/dev/null 2>&1; then \
 	    echo "SABOTAGE PASSED (this is the failure): $$suite.py --sabotage"; failures=$$((failures+1)); \
 	  else echo "ok  correctly refused: $$suite.py --sabotage"; fi; \

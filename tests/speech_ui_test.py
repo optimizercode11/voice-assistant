@@ -147,6 +147,30 @@ for i in range(count - (mode == "missing")):
         self.assertEqual(speech_ui.transcript_text('Speaker 2:Bonjour.\n Speaker 3:世界。'), 'Bonjour.\n世界。')
         self.assertEqual(speech_ui.transcript_text('The words Speaker 0: are a label.'), 'The words Speaker 0: are a label.')
 
+    def test_degenerate_asr_tail_is_folded_not_spoken(self):
+        """The engine sometimes decodes past the end of the utterance.
+
+        These strings are captured from the live qasr server against known
+        ground truth (PROVENANCE.md), not invented: the words before the run
+        are correct and the run is one token repeated.  Left in, the assistant
+        reads it aloud -- "ory.ory.ory.ory" -- which is what this guards.
+        """
+        captured = [
+            ('Let us do some museums and history museums tomorrow...............',
+             'Let us do some museums and history museums tomorrow.'),
+            ("Let's do some museums........ory.ory.ory.ory.ory.ory.ory.ory",
+             "Let's do some museums."),
+            ('The museum is open until nine in the evening,,, is why we always go then.......',
+             'The museum is open until nine in the evening, is why we always go then.'),
+        ]
+        for raw, wanted in captured:
+            self.assertEqual(speech_ui.transcript_text(raw), wanted, raw)
+        # Controls: repetition a person actually produced must survive, because
+        # "no no no" is content and a hallucinated tail is not.
+        for keep in ('No no no, that is not what I meant.', 'Haha that was funny.',
+                     'I said very very clearly, stop.', 'Yes.'):
+            self.assertEqual(speech_ui.transcript_text(keep), keep, keep)
+
     def test_resampling_and_complete_unicode_output(self):
         status, _, body = self.request("/stt", audio(3.5))
         self.assertEqual(status, 200, body)
@@ -254,7 +278,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.speaker_sabotage:
         speech_ui.transcript_text = lambda raw: raw
-        suite = unittest.TestSuite([BridgeTests("test_native_speaker_and_silence_markers")])
+        suite = unittest.TestSuite([BridgeTests("test_native_speaker_and_silence_markers"),
+                                    BridgeTests("test_degenerate_asr_tail_is_folded_not_spoken")])
     else:
         suite = unittest.TestSuite([BridgeTests("test_incomplete_truncated_and_failed_children")]) if args.negative else unittest.defaultTestLoader.loadTestsFromTestCase(BridgeTests)
     raise SystemExit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())

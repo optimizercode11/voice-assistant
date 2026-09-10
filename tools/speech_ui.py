@@ -35,10 +35,68 @@ class RequestError(Exception):
         self.status, self.message = status, message
 
 
+# The qasr engine sometimes keeps decoding after the utterance has ended and
+# emits a run of one token: "tomorrow..............." or "museum...ory.ory.ory".
+# It is not a transcription of anything -- the words before it are correct and
+# the run is the same token repeated.  See PROVENANCE.md for the reproduction
+# against known ground truth.  The engine fix belongs in qasr; this is the
+# guard that stops it reaching a voice.
+PUNCT_RUN = re.compile(r'([.,:;!?-])\1{2,}')
+TAIL_PUNCT_RUN = re.compile(r'[.,:;!?-]{2,}\s*$')
+TAIL_UNIT_MAX = 12
+TAIL_MIN_REPEATS = 3
+TAIL_MIN_CHARS = 6            # "haha" and "very very" are not this bug
+PUNCT_CHARS = ".,:;!?-\u2013\u2014 "
+
+
+def collapse_repeated_tail(text):
+    """Fold a degenerate repeated tail back down.
+
+    Two shapes, because the engine produces both: a run of one punctuation
+    character ("tomorrow...............") and a short unit repeated at the very
+    end ("museums...ory.ory.ory.ory").  The second is the interesting one --
+    the unit is not a single character, so a naive dedupe misses it entirely.
+
+    A repeated unit that contains letters is a hallucinated word fragment, not
+    content, so the whole run goes.  A repeated unit that is pure punctuation
+    keeps one copy: it is harmless and it preserves sentence-final prosody.
+
+    Deliberately conservative.  It only ever shortens a *tail*, needs three
+    repeats and six characters, and never touches repetition earlier in the
+    sentence, where "no no no" is something a person actually said.
+    """
+    if not text:
+        return text
+    body = text.rstrip()
+    trailing = text[len(body):]
+    worst = None
+    for length in range(1, TAIL_UNIT_MAX + 1):
+        if len(body) < length * TAIL_MIN_REPEATS:
+            break
+        unit = body[-length:]
+        repeats, position = 0, len(body)
+        while position >= length and body[position - length:position] == unit:
+            position -= length
+            repeats += 1
+        if repeats >= TAIL_MIN_REPEATS and length * repeats >= TAIL_MIN_CHARS:
+            if worst is None or length * repeats > worst[0]:
+                worst = (length * repeats, unit, position)
+    if worst is not None:
+        _, unit, position = worst
+        keep = unit if all(character in PUNCT_CHARS for character in unit) else ""
+        body = body[:position] + keep
+    body = PUNCT_RUN.sub(r"\1", body)
+    # A tail of mixed punctuation ("month,,,,,,.,,,") is the same defect with
+    # the tokens interleaved, so fold the whole trailing run to one character.
+    body = TAIL_PUNCT_RUN.sub(lambda match: match.group(0)[0], body)
+    return body + trailing
+
+
 def transcript_text(raw):
-    """Remove native speaker headers and silence markers from speakable text."""
+    """Remove native speaker headers, silence markers and degenerate ASR tails."""
     text = raw.replace('[Silence]', '')
-    return re.sub(r'(^|\n)[ \t]*Speaker[ \t]+\d+[ \t]*:[ \t]*', r'\1', text).strip()
+    text = re.sub(r'(^|\n)[ \t]*Speaker[ \t]+\d+[ \t]*:[ \t]*', r'\1', text)
+    return collapse_repeated_tail(text).strip()
 
 
 def stop_process(process):

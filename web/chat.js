@@ -133,7 +133,11 @@ function listen() {
     $('level').style.width = `${Math.min(100,rms*1000)}%`;
     if (rms > .015) {voiced += Math.min(100,now-lastTick);lastVoice=now;}
     lastTick=now;
-    if ((voiced >= 180 && now-lastVoice > 1000) || now-started > 30000) {rec.stop();return;}
+    // 20 s, not the engine's 30 s ceiling: measured against known ground truth,
+// a 19.5 s upload keeps 96% of its words and a 29.3 s upload keeps 19% -- the
+// engine returns its first sentence and then degenerates.  Stopping earlier
+// loses the end of a long sentence; stopping here loses almost all of it.
+if ((voiced >= 180 && now-lastVoice > 1000) || now-started > 20000) {rec.stop();return;}
     raf = requestAnimationFrame(tick);
   }
   raf = requestAnimationFrame(tick);

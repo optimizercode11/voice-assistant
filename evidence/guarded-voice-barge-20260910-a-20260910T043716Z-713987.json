@@ -1,0 +1,33 @@
+{
+  "campaign": "voice-barge-20260910-a",
+  "command": [
+    "systemctl",
+    "--user",
+    "--job-mode=ignore-dependencies",
+    "restart",
+    "voice-tools-bridge.service"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "24-27",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stage/voice-barge-20260910-a",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-10T04:37:16.449892970Z",
+  "git_head": "9e7fa4891fb8e215bb186d580d14036ced9ccce7",
+  "inputs": [],
+  "label": "restart",
+  "log": "/home/ambudsharma/qwen36/voice-stage/voice-barge-20260910-a/evidence/guarded-voice-barge-20260910-a-20260910T043716Z-713987.log",
+  "run_id": "voice-barge-20260910-a-20260910T043716Z-713987",
+  "schema_version": 2,
+  "source_fingerprint": "544d77803f3d0f257fb9f4d1ac6cc89c89f7ff99ef573d8dba9d36daa13e8967",
+  "started_utc": "2026-09-10T04:37:16.425810490Z",
+  "status": "PASS"
+}

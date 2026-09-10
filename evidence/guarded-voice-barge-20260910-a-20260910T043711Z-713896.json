@@ -1,0 +1,109 @@
+{
+  "campaign": "voice-barge-20260910-a",
+  "command": [
+    "bash",
+    "-c",
+    "\n    set -euo pipefail\n    live=\"$HOME/qwen36/voice-stack/voice-tools-20260910\"\n    test ! -e rollback\n    systemctl --user is-active voice-stack-gpu2.service\n    systemctl --user --job-mode=ignore-dependencies stop voice-tools-bridge.service\n    mkdir rollback\n    rsync -a \"$live/\" rollback/\n    touch rollback-complete\n    echo \"--- snapshot taken into stage/rollback/ ---\"\n    ls rollback/\n    echo \"--- promoting staged bytes ---\"\n    rsync -aR web tools deploy scripts config README.md ARCHITECTURE.md RUNBOOK.md \\\n      TOOLS.md PROVENANCE.md tests/README.md .guarded-run \"$live/\"\n    cd \"$live\"\n    echo \"--- rebuild the notes index from the promoted docs ---\"\n    python3 tools/voicectl.py --config config/host.toml index build\n    echo \"--- doctor on the promoted tree ---\"\n    python3 -u tools/voicectl.py --config config/host.toml doctor\n  "
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "24-27",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stage/voice-barge-20260910-a",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-10T04:37:11.887342941Z",
+  "git_head": "9e7fa4891fb8e215bb186d580d14036ced9ccce7",
+  "inputs": [
+    {
+      "bytes": 40875,
+      "exists": true,
+      "path": "web/chat.js",
+      "sha256": "bbe6265e2668145d609b24d018829d7a398df67322dc40ca1cd4923507427f15",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 13731,
+      "exists": true,
+      "path": "web/chat.html",
+      "sha256": "07d08a0645118f77dd118f70d26763d37e8920b431ef7a2373a630b5ee8b7e75",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 29030,
+      "exists": true,
+      "path": "web/index.html",
+      "sha256": "5292b9a2fbe09c13a6bf4cc3c0002b3b5defc14869a670a6105c3e9930ba98a0",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 37289,
+      "exists": true,
+      "path": "tools/speech_ui.py",
+      "sha256": "b457791e07bf1e11ed6b87658b06027adf18f6f4f0d5e01ab9873825f56a3a31",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 9086,
+      "exists": true,
+      "path": "tools/turn_control.py",
+      "sha256": "c0d0c598d5b7c9b7740d4d5a83f83bfa0e432767ec5ff922a2a4cf5b5dd51f7e",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 10255,
+      "exists": true,
+      "path": "tools/approvals.py",
+      "sha256": "012a281e61ab0d9008b6845106c46c140528f2512c75fabe4b4f173fda83fd76",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 29569,
+      "exists": true,
+      "path": "tools/mcp_files.py",
+      "sha256": "e63d4facc6714e76911f28132bb95843410c9bddc75165dbab1a9c9ab14def3c",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 26851,
+      "exists": true,
+      "path": "tools/agent_tools.py",
+      "sha256": "3d1c94ea27cc9dc9a046efbfe88bd0d0fa8a5379163797c9497cece41620dd08",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 13530,
+      "exists": true,
+      "path": "tools/agent_config.py",
+      "sha256": "8b7afba1d1607d322b6566f9dab0dc239a472d9bd4f4beb4c714824f3e734cdf",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 7959,
+      "exists": true,
+      "path": "deploy/site_config.py",
+      "sha256": "876c967fa5402a3c8b1a5a8a4f5437dd2ae0d2de92f1aee54e02dbc57e0b7c46",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 4680,
+      "exists": true,
+      "path": "config/host.toml",
+      "sha256": "895fe78ed872f91cadc5c47bd89d8d7f233722e3fd69878c6f57d73a2087591d",
+      "verification": "current_local"
+    }
+  ],
+  "label": "install",
+  "log": "/home/ambudsharma/qwen36/voice-stage/voice-barge-20260910-a/evidence/guarded-voice-barge-20260910-a-20260910T043711Z-713896.log",
+  "run_id": "voice-barge-20260910-a-20260910T043711Z-713896",
+  "schema_version": 2,
+  "source_fingerprint": "544d77803f3d0f257fb9f4d1ac6cc89c89f7ff99ef573d8dba9d36daa13e8967",
+  "started_utc": "2026-09-10T04:37:11.609691920Z",
+  "status": "PASS"
+}

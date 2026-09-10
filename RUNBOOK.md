@@ -268,8 +268,9 @@ and TLS commands were also run exactly as printed above.
 
 ### 2. Stage through the shipped guard, in a new campaign directory
 
-`voice-barge-20260910-a` was unused at inspection. Choose a fresh campaign ID
-if it has since been used, and replace it consistently throughout these steps.
+`voice-barge-20260910-a` **has now been used** — it is the campaign that shipped
+barge-in on 2026-09-10, recorded at the end of this section. Choose a fresh
+campaign ID, and replace it consistently throughout these steps.
 This is the first host-writing step. `guarded-hostrun` performs mkdir, rsync,
 remote execution and evidence retrieval even for a check payload.
 
@@ -286,8 +287,18 @@ for path in web/* tools/*.py deploy/*.py deploy/*.sh deploy/*.service scripts/* 
 done
 CUDA_VISIBLE_DEVICES="" scripts/guarded-hostrun "${stage_args[@]}" -- bash -c '
   set -euo pipefail
+  find . -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
   printf "export GUARD_GIT_HEAD=%s\nexport GUARD_SOURCE_FP=%s\nexport VOICE_TOOLS_CAMPAIGN=voice-barge-20260910-a\n" "$GUARD_GIT_HEAD" "$GUARD_SOURCE_FP" > deploy/source.env
-  PYTHONDONTWRITEBYTECODE=1 python3 deploy/check_site.py --compare-live --require-assets
+  PYTHONDONTWRITEBYTECODE=1 python3 deploy/check_site.py --require-assets 2>&1 | tail -3
+  # var/ is deliberately never promoted, so a bare stage has no notes index and
+  # doctor correctly refuses the config. Build it *in the stage* first: that is
+  # what makes this a real smoke test of the new code against the new config.
+  PYTHONDONTWRITEBYTECODE=1 python3 tools/voicectl.py --config config/host.toml index build
+  PYTHONDONTWRITEBYTECODE=1 python3 -u tools/voicectl.py --config config/host.toml doctor
+  # Informational only: the live tree still carries the stale ASR profile until
+  # step 3 promotes deploy/site_config.py, so compare-live is expected to differ
+  # here and must not gate the stage.
+  PYTHONDONTWRITEBYTECODE=1 python3 deploy/check_site.py --compare-live 2>&1 | tail -2 || true
 '
 ```
 
@@ -300,6 +311,13 @@ The unused-path test was run read-only. The source-file loop binds HTML/JS
 and documentation explicitly: `scripts/worktree-fingerprint:22` does not
 include those extensions in its source fingerprint. Review the stage manifest
 and log under local `evidence/` before promotion.
+
+The payload's last two lines are the gate that matters and the one that was
+missing when this section was first run: `doctor` reads `config/host.toml`, and
+`var/` is deliberately never promoted, so a bare stage has no notes index and
+`doctor` refuses it. Building the index inside the stage is what turns "does the
+new code understand the new config" into a question that can actually be answered
+before anything on the host changes.
 
 ### 3. Stop only the CPU bridge, snapshot it, and copy the staged app
 
@@ -392,6 +410,61 @@ comparison. A rsync zero exit by itself is insufficient. Hard-refresh
 `https://192.168.228.113:8094/chat` so the tab loads the new JS, then perform
 the 30-second manual check. Preserve its result with the stage/install/restart
 evidence. A green site check does not prove microphone echo handling.
+
+### Executed: 2026-09-10, campaign `voice-barge-20260910-a`
+
+Steps 1–5 were run in order from head `9e7fa48`, source fingerprint
+`544d77803f3d0f257fb9f4d1ac6cc89c89f7ff99ef573d8dba9d36daa13e8967`. Every
+host-writing step went through the CPU guard on `--cpus 24-27 --nice 10`; no
+command in this campaign named a GPU.
+
+| Guard label | Result |
+|---|---|
+| `stage` | **FAIL** — `doctor: retrieval is enabled but var/notes.sqlite does not exist` |
+| `stage2` | PASS — 105 bound inputs exist, index 6 docs / 104 chunks, `doctor: ok`, 4 tools |
+| `install` | PASS — snapshot + `rollback-complete`, bytes promoted, index rebuilt, `doctor: ok` |
+| `restart` | PASS |
+
+The first failure was the runbook's fault, not the candidate's, and it is the
+reason the payload above now builds the index: a stage that has no `var/` can
+never satisfy a config whose retrieval is enabled. All four JSON/log pairs are
+retained under `evidence/`, the failure included.
+
+Offline gates that ran on these exact bytes before promotion: `make check`
+(10 CPU suites, 19/19 site checks), `make sabotage` (every arm correctly
+refused), `make sabotage-selftest` (6 arms demonstrated capable of failing),
+`make test-browser` (7 suites, chromium + webkit, including the new
+`voice_barge_browser` and `voice_carry_browser`).
+
+Post-check, read-only:
+
+- GPU stack **unchanged** — `MainPID=629273`, active since `03:29:25 UTC`,
+  identical to the step-1 baseline, and `https://127.0.0.1:8092/chat/health`
+  still `available: true`. The 30 GiB stack was never stopped.
+- Bridge fresh — `MainPID=714008` since `04:37:16 UTC`, `NRestarts=0`.
+- `https://127.0.0.1:8094/chat/health` — **10 tools** (was 9): `request_directory`
+  is now offered. Both MCP peers `ready` with 0 restarts. Retrieval
+  `ready: true, stale: false`, **104 chunks / 6 documents** (was 60 chunks from
+  the older docs).
+- Deployed bytes equal the certified bytes: `web/chat.js` is
+  `bbe6265e2668145d609b24d018829d7a398df67322dc40ca1cd4923507427f15` — the same
+  hash `tests/echo_path_test.mjs` prints when it extracts the gate — and
+  `web/chat.html` is `07d08a0645118f77dd118f70d26763d37e8920b431ef7a2373a630b5ee8b7e75`.
+- `rsync -aRnic` over `web tools deploy/site_config.py config` and the docs
+  reports no content differences, and `check_site.py --compare-live` on the live
+  tree now reports **PASS: 20 checks, 0 failures**; the same command was FAIL
+  before this campaign, on the stale ASR profile.
+
+Two things this deploy did **not** do:
+
+1. It did not run the 30-second manual microphone check below. Every gate above
+   is CPU-only and none of them can hear a room. That check is still owed.
+2. It did not promote `Makefile` — step 2 never stages it, so the deployed tree
+   keeps an older copy. Cosmetic: no runtime path reads it.
+
+The stage directory `~/qwen36/voice-stage/voice-barge-20260910-a/rollback/` is
+the **only** snapshot of the pre-barge-in CPU tree. Do not delete it until the
+manual check has passed.
 
 ### 6. Roll back this app update if copy, startup or acceptance fails
 

@@ -1,0 +1,35 @@
+guarded-run: campaign=voice-barge-20260910-a label=stage2 mode=cpu cpus=24-27
+command: bash -c $'\n  set -euo pipefail\n  find . -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true\n  printf "export GUARD_GIT_HEAD=%s\\nexport GUARD_SOURCE_FP=%s\\nexport VOICE_TOOLS_CAMPAIGN=%s\\n" \\\n    "$GUARD_GIT_HEAD" "$GUARD_SOURCE_FP" "voice-barge-20260910-a" > deploy/source.env\n  echo "--- staged tree identity ---"; head -3 deploy/source.env\n  echo "--- deployment profile against staged bytes ---"\n  PYTHONDONTWRITEBYTECODE=1 python3 deploy/check_site.py --require-assets 2>&1 | tail -3\n  echo "--- GATE: build the index the staged config points at (writes only inside the stage) ---"\n  PYTHONDONTWRITEBYTECODE=1 python3 tools/voicectl.py --config config/host.toml index build\n  echo "--- GATE: does the NEW code understand the config it is about to run with? ---"\n  PYTHONDONTWRITEBYTECODE=1 python3 -u tools/voicectl.py --config config/host.toml doctor\n  echo "--- informational: compare-live against the STALE live profile (expected to differ) ---"\n  if PYTHONDONTWRITEBYTECODE=1 python3 deploy/check_site.py --compare-live 2>&1 | tail -2; then\n    echo "compare-live: PASS"\n  else\n    echo "compare-live: differs (live deploy/site_config.py is the stale ASR profile this deploy replaces)"\n  fi\n  echo "--- informational: LIVE tree doctor, read-only, for before/after comparison ---"\n  ( cd "$HOME/qwen36/voice-stack/voice-tools-20260910" \\\n    && PYTHONDONTWRITEBYTECODE=1 python3 -u tools/voicectl.py --config config/host.toml doctor ) 2>&1 | tail -14\n'
+--- staged tree identity ---
+export GUARD_GIT_HEAD=9e7fa4891fb8e215bb186d580d14036ced9ccce7
+export GUARD_SOURCE_FP=544d77803f3d0f257fb9f4d1ac6cc89c89f7ff99ef573d8dba9d36daa13e8967
+export VOICE_TOOLS_CAMPAIGN=voice-barge-20260910-a
+--- deployment profile against staged bytes ---
+  ok   inputs bind deploy/voice_stack.py
+  ok   all 105 bound inputs exist on this machine
+== PASS: 20 checks, 0 failures ==
+--- GATE: build the index the staged config points at (writes only inside the stage) ---
+indexed 6 documents into 104 chunks in 0.021s at var/notes.sqlite
+--- GATE: does the NEW code understand the config it is about to run with? ---
+tools (4): fetch_url, now, request_directory, search_notes
+  fetch_url                          builtin
+  now                                builtin
+  request_directory                  builtin
+  search_notes                       retrieval
+limits: rounds=2 per_call=10.0s turn=150.0s result_chars=6000
+warn: fetch_url is enabled for en.wikipedia.org
+warn: ffmpeg is not on PATH; the bridge cannot decode uploads
+doctor: ok
+--- informational: compare-live against the STALE live profile (expected to differ) ---
+  ok   live and repo bind the same 86 inputs (+0 -0)
+== PASS: 20 checks, 0 failures ==
+compare-live: PASS
+--- informational: LIVE tree doctor, read-only, for before/after comparison ---
+tools (3): fetch_url, now, search_notes
+  fetch_url                          builtin
+  now                                builtin
+  search_notes                       retrieval
+limits: rounds=2 per_call=10.0s turn=150.0s result_chars=6000
+warn: fetch_url is enabled for en.wikipedia.org
+warn: ffmpeg is not on PATH; the bridge cannot decode uploads
+doctor: ok

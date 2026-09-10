@@ -250,4 +250,24 @@ delayed 10–40 ms into the microphone at a sweep of return losses.
 **Not certified:** no speaker-to-microphone test was run. A headless browser has
 no acoustic echo path, and the waveform test models the residual after
 cancellation rather than cancellation itself. `RUNBOOK.md` carries the 30-second
-manual check that this cannot replace. Nothing in this section is deployed.
+manual check that this cannot replace.
+
+### Deployed: campaign `voice-barge-20260910-a`, 2026-09-10
+
+Shipped to the CPU bridge on GPU-2 host `vllm` at 04:37 UTC, from head
+`9e7fa48` / source fingerprint `544d7780…`. The GPU stack was never touched:
+`voice-stack-gpu2.service` kept `MainPID=629273` and its `03:29:25 UTC` start
+timestamp across the whole campaign, which is the check that distinguishes a
+CPU-bridge ship from an accidental 30 GiB restart.
+
+The bridge went from 9 tools to 10 (`request_directory`) and the notes index
+from 60 to 104 chunks, because the promoted docs are four times the size of the
+ones the old index was built from. Deployed `web/chat.js` hashes to
+`bbe6265e…`, the same digest `tests/echo_path_test.mjs` prints for the source it
+extracts the gate from, so the bytes the waveform test certified are the bytes
+serving `https://192.168.228.113:8094/chat`.
+
+**Still not certified:** the manual speaker-to-microphone check. The claim on
+this page is that echo does not interrupt and a person does, measured offline;
+whether a real room with a real speaker agrees is unmeasured, and the
+`BARGE.echoGain = 0.5` threshold is the knob that check will adjudicate.

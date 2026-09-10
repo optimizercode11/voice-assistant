@@ -192,3 +192,62 @@ Verified offline: 29 tests in `tests/mcp_files_test.py` against a real
 subprocess peer, `make check` green, `make sabotage` refusing for the right
 reason.  The shipped `config/host.toml` exposes exactly one root -- the
 deployed tree, checked for credentials and key material -- not `$HOME`.
+
+## Letting the user interrupt the reply — 2026-09-10
+
+The request was "use WebRTC AEC3 so I can interrupt the model mid-response".
+AEC3 was already being *requested* — `getUserMedia` has passed
+`echoCancellation:true` since the first commit. The page muted the microphone
+for the whole reply, so there was nothing to cancel and nobody listening.
+
+Three defects came out of building the gate, none of them from reading the code:
+
+1. **`armGlow()` asked the media element for `createMediaElementSource`.** That
+   method belongs to `AudioContext`, so the capability check was one no browser
+   can pass: `typeof player.createMediaElementSource === 'undefined'` and
+   `typeof ctx.createMediaElementSource === 'function'`, measured in headless
+   Chromium. The graph was therefore never built, which silently cost three
+   things at once — the orb glow while the assistant speaks, the echo reference
+   the gate needs, and barge-in itself.
+   *The test that hid it:* `voice_barge_browser.mjs` asserted the page refuses
+   barge-in with "the reply is not routed through WebAudio" and explained the
+   refusal as a headless-browser limitation. Headless Chromium reaches
+   `AudioContext.state === 'running'` normally. The suite was grading the bug as
+   correct behaviour, which is what a test for the wrong property buys.
+   It now asserts the opposite: a device that cancels keeps a live microphone
+   **and** moves the glow meter during playback, and a device that reports no
+   cancellation is refused with the microphone muted.
+2. **`listen()` read `playbackEndedAt` as a flag.** It is a timestamp. Asking
+   only whether it is non-zero charged the 350 ms AEC settle window to every
+   clip forever after the first reply, instead of to the one clip that follows
+   a reply. The window is now computed from elapsed time.
+3. **Two sabotage arms were green for the wrong reason.** `make sabotage` reads
+   exit 0 as "the mutation escaped" and non-zero as "correctly refused".
+   `barge_gate_test.mjs --sabotage` caught its sabotage — four FAIL lines — and
+   then exited 0, so the target reported the echo floor as decorative. The same
+   inverted convention sat in four browser suites, where the "sabotage escaped"
+   branch exited 1 and would have been read as a refusal. Every arm now carries
+   a `--dead-sabotage` self-check: apply a no-op mutation through the real
+   sabotage path and require the run to finish its assertions and exit 0. That
+   is the only way to tell an arm that caught a regression from an arm whose
+   anchor stopped matching the source. `make sabotage-selftest` runs them all.
+
+### Measured, offline, against a waveform
+
+`tests/echo_path_test.mjs` extracts the gate, the watcher, the clock and the
+hold from `web/chat.js` verbatim and drives them with the committed reply
+delayed 10–40 ms into the microphone at a sweep of return losses.
+
+| | |
+|---|---|
+| held interruptions from echo | none through `g = 0.5` (= `BARGE.echoGain`), across 31 delays and a spectrally smoothed path |
+| first held interruption | `g = 0.6`, i.e. the AEC3-failure case, earliest at 928 ms |
+| positive gate frames | begin at `g = 0.2`; the 220 ms hold rejects them |
+| near-end speech over echo | interrupts at 224 ms in all 186 combinations |
+| AGC pump on the reply tail | 0 trips with the settle window; 1 trip at +240 ms with `settleMs = 0` |
+| device reporting no AEC | refused before the microphone is enabled; the identical uncancelled waveform does interrupt when armed |
+
+**Not certified:** no speaker-to-microphone test was run. A headless browser has
+no acoustic echo path, and the waveform test models the residual after
+cancellation rather than cancellation itself. `RUNBOOK.md` carries the 30-second
+manual check that this cannot replace. Nothing in this section is deployed.

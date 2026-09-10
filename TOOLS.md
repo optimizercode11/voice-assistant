@@ -57,9 +57,11 @@ cannot understand is a refusal to start, not a warning: `[limitts]`,
 `enabled = "yes"`, or `fetch` enabled with an empty allow-list all stop the
 process rather than guess.  `VOICE_TOOLS_CONFIG` names the file by environment.
 
-At the deployment, `site_config.py:TOOLS_CONFIG` stays empty until someone names
-a file there — so a deploy cannot accidentally start offering tools that
-`PROVENANCE.md` never certified.
+The original GPU-stack bridge at `:8092` uses `site_config.py:TOOLS_CONFIG`,
+which defaults to empty. The separate tools bridge at `:8094` explicitly loads
+`config/host.toml` through `deploy/start-tools-bridge.sh`. Its capabilities are
+therefore on even while the original bridge's `TOOLS_CONFIG` is empty. The
+[runbook](RUNBOOK.md) ships this config with the app and rebuilds its notes index.
 
 ## Tool calling
 
@@ -91,10 +93,9 @@ have nothing to speak.
 
 ## RAG
 
-`tools/retrieval.py` — SQLite **FTS5**, so real BM25 with no numpy, no model
-download, no network.  `/mnt` has 5 GB free and neither machine has numpy; an
-embedding stack is not available here, and "which paragraph of *my* notes says
-the port" is a lexical question anyway.
+`tools/retrieval.py` uses SQLite **FTS5**: BM25 with no numpy, model download
+or network access. “Which paragraph of my notes says the port” is a lexical
+query over the configured documents.
 
 - Ingest: `.txt` `.md` `.jsonl` `.ndjson` `.csv` `.tsv`, ~1200-char chunks with
   200-char overlap, split on paragraph breaks, markdown headings carried with
@@ -176,6 +177,25 @@ every escape shape above.  `make sabotage` removes the post-resolution
 containment check and **must** fail: with it gone, `read_file("escape")`
 returns `/etc/passwd`, which is the proof the check is load-bearing.
 
+### Asking for another directory
+
+The current `config/host.toml` enables `[approvals]` and gives the file server
+`--roots-file var/approvals.json`. This adds `request_directory`: the model can
+ask for a directory, but a new request remains pending until the user clicks
+**Approve** on the page. Speaking “yes”, including during an interruption,
+does not grant access. The card shows the canonical path, file count and
+credential-like filenames; **Decline** and revocation are also available.
+`tools/approvals.py` enforces path refusals, and `tools/mcp_files.py` rechecks
+runtime roots on each call. Revoking a runtime grant does not remove a root
+permanently configured with `--root`.
+
+`var/approvals.json` is runtime state. The in-place bridge deployment in
+`RUNBOOK.md` preserves it; a fresh campaign working directory has no inherited
+grants. On the read-only 2026-09-10 host inspection, `/chat/health` listed nine
+tools without `request_directory`, so shipping the current host config also
+adds this request-and-click surface. That is separate from barge-in's local
+audio gate; no new model tool is needed to stop playback.
+
 ## `fetch_url`
 
 Off unless `enabled = true` **and** `allow_hosts` is non-empty — an empty
@@ -221,9 +241,9 @@ discarded, so a hung MCP tool costs the turn its patience and nothing else.
 
 ## What is deliberately not here
 
-- **No write-capable builtins.**  No file writes, no shell, no device control.
-  Anything that can *do* something arrives as an MCP server you named, with an
-  allow-list.
+- **No builtins that edit project files, run a shell or control devices.**
+  `request_directory` does persist a pending access request in the configured
+  approvals file; a new grant still requires the page's approval action.
 - **No embeddings, no vector store, no reranker.**  Not available offline here,
   and it would be a dependency rather than a capability.
 - **No autonomous multi-turn agents.**  One user turn, a bounded number of

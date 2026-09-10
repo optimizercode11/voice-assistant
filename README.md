@@ -1,8 +1,8 @@
 # voice-assistant — a live speech-to-speech conversation with Qwen
 
 Point a browser at it, press **Start conversation**, talk, and the answer comes
-back as speech.  Nothing is typed unless you want it to be, and nothing leaves
-your own server.
+back as speech. Nothing is typed unless you want it to be. Voice processing
+runs on your own server; optional tools can reach configured external sources.
 
 This is the application layer only.  The three models it orchestrates are
 separate engines in `/mnt/inference-engine`; this repo holds the microphone-to-
@@ -48,9 +48,9 @@ scripts/   the guarded-run / guardrail-check harness this repo is certified with
 ## Run the tests (no GPU, no model, no network)
 
 ```bash
-make check                                                 # 71 contracts, offline
-make sabotage                                              # the paired negatives; each must FAIL
-make test-browser                                          # 5 suites × chromium+webkit
+CUDA_VISIBLE_DEVICES="" make check                          # offline contracts
+CUDA_VISIBLE_DEVICES="" make sabotage                       # paired negatives must FAIL
+CUDA_VISIBLE_DEVICES="" make test-browser                   # chromium + webkit
 ```
 
 Or one at a time:
@@ -62,29 +62,62 @@ CUDA_VISIBLE_DEVICES="" python3 tests/agent_tools_test.py   # 20 registry + conf
 CUDA_VISIBLE_DEVICES="" python3 tests/retrieval_test.py     # 11 RAG contracts
 CUDA_VISIBLE_DEVICES="" python3 tests/mcp_test.py           # 12 MCP contracts, real stdio peer
 CUDA_VISIBLE_DEVICES="" python3 tests/tool_loop_test.py     # 12 loop contracts over real TLS
-python3 deploy/check_site.py                                # deployment profile
+CUDA_VISIBLE_DEVICES="" python3 deploy/check_site.py         # deployment profile
 ```
 
 Nothing above touches a GPU, a model or the network — the LLM upstreams are
 scripted fakes and the MCP peer is `tests/fixtures/fake_mcp_server.py`.  The
 browser suites need a Playwright install and Node ≥ 20; see `tests/README.md`.
 
+## Interrupting a reply
+
+**Interrupt reply** (or Space outside a text field/control) stops a busy turn
+and resumes listening during a voice conversation. **Interrupt replies by
+speaking** is checked by default: when available, the page reopens the microphone
+during playback and uses the browser's echo cancellation plus a sustained
+speech gate to decide when to interrupt. Turning that checkbox off restores
+the mode that mutes the microphone throughout a reply; end and restart the
+conversation after changing it.
+
+The browser supplies echo cancellation (AEC3 on browser paths using libwebrtc);
+the page adds a comparison between microphone energy and the reply's waveform.
+It requests `autoGainControl: false` when barge-in is wanted, because automatic
+gain can lift residual echo above that gate. Devices reporting anything other
+than `echoCancellation === true`, including some Bluetooth and raw Linux
+capture paths, are refused. `barge-note` says **“Unavailable on this audio
+device: no echo cancellation.”** A missing playback reference instead says
+**“Unavailable: the reply is not routed through WebAudio.”** Device names alone
+do not establish support.
+
+Voice interruption is limited to `phase === 'speaking'` in `web/chat.js`
+(`startBargeWatch`); talking during `thinking` or `synthesizing` does not cancel
+the turn. The same file sets `BARGE.settleMs = 350`, `BARGE.holdMs = 220`,
+`BARGE.floor = 0.020`, and the scalar echo estimate `BARGE.echoGain = 0.5`.
+The first clip after playback pays a settle window. Fragment carry stops at
+`fragmentHolds < 3`: a fourth unfinished clip still dispatches a partial.
+See [Architecture](ARCHITECTURE.md#turn-taking-and-barge-in) for these limits
+and the current WebAudio/settle defects; this checkout is **not yet verified
+for acoustic barge-in on real hardware**.
+
 ## Deploy and operate
 
-The stack runs as one user service on the GPU host:
+Two user services share the resident models on the GPU host:
 
 ```bash
-ssh vllm 'systemctl --user status voice-stack-gpu2'
+ssh vllm 'systemctl --user status voice-tools-bridge.service voice-stack-gpu2.service --no-pager -l'
 ```
 
-`RUNBOOK.md` covers install, restart, rollback, the evidence gates, and what to
-look at when the answer comes back silent.  `ARCHITECTURE.md` explains the
+[RUNBOOK.md](RUNBOOK.md) gives the ordered staging, snapshot, copy, CPU bridge
+restart, post-check and rollback commands, with the real read-only preflight
+output. It also contains the 30-second microphone/speaker acceptance check.
+`ARCHITECTURE.md` explains the
 request path and the limits that are deliberate rather than accidental.
 `TOOLS.md` covers tools, RAG and MCP — including what is off until you name it.
 
 ## Capabilities (tools, RAG, MCP)
 
-Off by default.  To see what a config would allow, and what is broken:
+Off in the generic configuration. The separate tools deployment explicitly
+loads `config/host.toml`. To see what a config would allow, and what is broken:
 
 ```bash
 python3 tools/voicectl.py --config config/assistant.toml doctor
@@ -96,7 +129,10 @@ bridge cannot fully understand is a refusal to start, not a warning.
 
 ## Current deployment
 
-Live at **https://192.168.228.113:8092/chat** on GPU 2 of `vllm`, installed at
-`vllm:~/qwen36/voice-stack/voice-restore-20260908/`.  `PROVENANCE.md` records
+The tools bridge is **https://192.168.228.113:8094/chat**, installed at
+`vllm:~/qwen36/voice-stack/voice-tools-20260910/`; it reuses GPU 2's models.
+The original stack remains **https://192.168.228.113:8092/chat**, installed at
+`vllm:~/qwen36/voice-stack/voice-restore-20260908/`. Updating this app means
+restarting only `voice-tools-bridge.service`. `PROVENANCE.md` records
 where every file in this repo came from, which campaign certified it, and how
 the copies here were verified against what is actually running.

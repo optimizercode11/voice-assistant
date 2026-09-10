@@ -141,9 +141,15 @@ async function armGlow() {
   if (glowArmed) return;
   try {
     const Audio = window.AudioContext || window.webkitAudioContext;
-    if (!Audio || !window.AnalyserNode || !player.createMediaElementSource) return;
+    if (!Audio || !window.AnalyserNode) return;
     if (!context || context.state === 'closed') context = new Audio();
     const ctx = context;
+    // createMediaElementSource is a method of the AudioContext, not of the media
+    // element, so this capability check is one no browser can pass.  Asking the
+    // element made armGlow return before building the graph, which silently
+    // killed three things at once: the glow while the assistant speaks, the
+    // echo reference barge-in needs, and barge-in itself.
+    if (typeof ctx.createMediaElementSource !== 'function') return;
     if (ctx.state === 'suspended') await ctx.resume();
     if (ctx.state !== 'running') return;
     glowArmed = true;
@@ -238,9 +244,13 @@ function listen() {
   rec.start(250); busy = false; setState('listening','I’m listening. A short pause sends your message.');
   // AEC3 is still re-converging right after a reply, and the tail of that reply
   // is the likeliest thing to be mistaken for your voice -- it is the assistant
-  // answering itself.  Charge one settle window to the first clip after playback,
-  // and only to that one, so an ordinary pause between two sentences is untouched.
-  let settleUntil = performance.now() + (playbackEndedAt ? BARGE.settleMs : 0);
+  // answering itself.  Charge the settle window only while the reply is actually
+  // still settling.  playbackEndedAt is a timestamp, not a flag: reading it as a
+  // flag made every later clip pay 350 ms of dead endpointing forever after the
+  // first reply, which is patience charged to turns that earned none.
+  const sincePlayback = playbackEndedAt ? performance.now() - playbackEndedAt : Infinity;
+  let settleUntil = sincePlayback < BARGE.settleMs
+    ? performance.now() + (BARGE.settleMs - sincePlayback) : 0;
   const samples = new Float32Array(analyser.fftSize);
   function tick() {
     if (recorder !== rec || rec.state !== 'recording') return;

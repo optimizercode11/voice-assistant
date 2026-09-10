@@ -8,19 +8,22 @@ CPU = CUDA_VISIBLE_DEVICES=""
 NODE   ?= /tmp/kokoro-playback-browser/node_modules/.bin/node
 PLAYWRIGHT ?= /tmp/kokoro-playback-browser/node_modules/playwright/index.mjs
 
-.PHONY: help test test-bridge test-chat test-tools test-retrieval test-mcp test-files test-approvals test-barge test-loop test-browser \
-        sabotage check check-site doctor fingerprint inputs
+.PHONY: help test test-bridge test-chat test-tools test-retrieval test-mcp test-files test-approvals \
+        test-barge test-echo test-loop test-browser \
+        sabotage sabotage-selftest check check-site doctor fingerprint inputs
 
 help:
 	@printf '%s\n' '  test          bridge, adapter, tools, RAG, MCP, loop (CPU, no model)' \
 	                '  test-browser  the five page suites, chromium + webkit' \
 	                '  sabotage      the paired negatives; each must FAIL' \
+	                '  sabotage-selftest  prove each sabotage arm is capable of failing' \
 	                '  doctor        what the model will be able to do, and what is broken' \
 	                '  check-site    does deploy/site_config.py still describe one real deployment?' \
 	                '  check         everything that runs offline' \
 	                '  inputs        the asset list a guarded start binds with --input'
 
-test: test-bridge test-chat test-retrieval test-tools test-mcp test-files test-approvals test-barge test-loop test-turn
+test: test-bridge test-chat test-retrieval test-tools test-mcp test-files test-approvals test-barge \
+      test-echo test-loop test-turn
 
 test-bridge:
 	@test -z "$${CUDA_VISIBLE_DEVICES-}" || { echo "rerun with CUDA_VISIBLE_DEVICES=''"; exit 2; }
@@ -60,6 +63,14 @@ test-approvals:
 # it is tested numerically against the real source instead.
 test-barge:
 	$(CPU) $(NODE) tests/barge_gate_test.mjs
+
+# Scalar triples prove the arithmetic; they do not prove the arithmetic survives
+# a real room.  This one drives the page's own watcher, clock and hold with a
+# waveform: the committed reply, delayed and scaled into the microphone the way
+# an acoustic path does, then a person talking over it.  It is the only offline
+# evidence that the gate separates an echo from an interruption.
+test-echo:
+	$(CPU) $(NODE) tests/echo_path_test.mjs
 
 test-loop:
 	$(CPU) $(PYTHON) -u tests/tool_loop_test.py
@@ -102,6 +113,9 @@ sabotage:
 	if $(CPU) $(NODE) tests/barge_gate_test.mjs --sabotage >/dev/null 2>&1; then \
 	  echo "SABOTAGE PASSED (this is the failure): the echo floor is decorative"; failures=$$((failures+1)); \
 	else echo "ok  correctly refused: barge_gate_test.mjs --sabotage"; fi; \
+	if $(CPU) $(NODE) tests/echo_path_test.mjs --sabotage >/dev/null 2>&1; then \
+	  echo "SABOTAGE PASSED (this is the failure): a waveform without playback cancels itself"; failures=$$((failures+1)); \
+	else echo "ok  correctly refused: echo_path_test.mjs --sabotage"; fi; \
 	if $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/voice_carry_browser.mjs --sabotage >/dev/null 2>&1; then \
 	  echo "SABOTAGE PASSED (this is the failure): the page drops a held fragment"; failures=$$((failures+1)); \
 	else echo "ok  correctly refused: voice_carry_browser.mjs --sabotage"; fi; \
@@ -109,6 +123,26 @@ sabotage:
 	  echo "SABOTAGE PASSED (this is the failure): keyboard handler"; failures=$$((failures+1)); \
 	else echo "ok  correctly refused: voice_controls_browser.mjs --sabotage"; fi; \
 	exit $$failures
+
+# Every arm above is a claim that a mutation is caught.  An arm whose anchor no
+# longer matches the source mutates nothing, and a mutation that changes nothing
+# passes -- which is indistinguishable from a caught regression unless the arm
+# can also demonstrate that it FAILS when it is not load-bearing.
+#
+# Each suite's --dead-sabotage applies a no-op mutation through the real sabotage
+# path and requires the run to exit 0 with its assertions finished.  Exit 0 here
+# means "this arm is capable of failing"; a non-zero exit means the arm is green
+# because it is broken, not because the code is good.
+sabotage-selftest:
+	@failures=0; \
+	for arm in tests/barge_gate_test.mjs tests/echo_path_test.mjs \
+	           tests/browser/voice_barge_browser.mjs tests/browser/voice_carry_browser.mjs \
+	           tests/browser/voice_tools_browser.mjs tests/browser/voice_controls_browser.mjs; do \
+	  if $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" $$arm --dead-sabotage >/dev/null 2>&1; then \
+	    echo "ok  arm can fail: $$arm"; \
+	  else echo "SELFTEST FAILED: $$arm is green without catching anything"; failures=$$((failures+1)); fi; \
+	done; \
+	[ $$failures -eq 0 ] || { echo "$$failures sabotage arm(s) cannot fail, so they prove nothing"; exit 1; }
 
 check-site:
 	$(CPU) $(PYTHON) -u deploy/check_site.py

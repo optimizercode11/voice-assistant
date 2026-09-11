@@ -285,6 +285,63 @@ class ToolLoopTests(unittest.TestCase):
         self.assertEqual(status, 502)
         self.assertIn(b'cut short', data)
 
+    def test_a_tool_call_written_as_prose_is_not_an_answer(self):
+        # Measured live 2026-09-11: on the last round, with no tools offered,
+        # the model wrote "<tool_call><function=mcp__files__read>..." as its
+        # content with finish_reason stop, and the bridge spoke it.
+        self.registry()
+        self.upstream.script = [calling([call('now', {})]),
+                                answered('<tool_call>\n<function=mcp__files__read>\n</function>\n</tool_call>')]
+        status, data = self.request({'messages': [{'role': 'user', 'content': 'look at the folder'}]})
+        self.assertEqual(status, 502)
+        self.assertIn(b'ran out of room', data)
+
+    # -- controls: a tool may ask the page to do something after the reply --
+    def test_pause_listening_rides_on_the_answer_as_a_control(self):
+        registry = self.registry()
+        registry.config.builtins['pause_listening'] = True
+        registry._install_builtins()
+        self.upstream.script = [
+            calling([call('pause_listening', {'reason': 'phone call'})]),
+            lambda requests: answered('Okay, I have stopped listening. Press Resume when you are back.')
+            if _has_tool_result(requests[-1]) else calling([])]
+        status, events = self.request({'messages': [{'role': 'user', 'content': 'hang on, I need to take a call'}]},
+                                      accept='application/x-ndjson')
+        self.assertEqual(status, 200)
+        self.assertEqual([event['type'] for event in events], ['status', 'tool', 'answer'])
+        self.assertEqual(events[1]['control'], {'pause_listening': True, 'pause_reason': 'phone call'})
+        self.assertEqual(events[-1]['controls'], {'pause_listening': True, 'pause_reason': 'phone call'})
+        # The same over plain JSON, so a page without streaming still pauses.
+        self.upstream.requests = []
+        status, data = self.request({'messages': [{'role': 'user', 'content': 'hang on, I need to take a call'}]})
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(data)['controls'], {'pause_listening': True, 'pause_reason': 'phone call'})
+        # And a turn that used no such tool carries an empty controls object,
+        # never a stale one from the previous turn.
+        self.upstream.requests = []
+        self.upstream.script = [answered('Just an answer.')]
+        status, data = self.request({'messages': [{'role': 'user', 'content': 'hello'}]})
+        self.assertEqual(json.loads(data)['controls'], {})
+
+    def test_the_system_prompt_carries_the_manifest_only_when_tools_are_attached(self):
+        registry = self.registry()
+        registry.config.builtins['pause_listening'] = True
+        registry._install_builtins()
+        self.request({'messages': [{'role': 'user', 'content': 'hello'}]})
+        system = self.upstream.requests[0]['messages'][0]['content']
+        self.assertIn('- pause_listening: Stop listening after this reply', system)
+        self.assertIn('- search_notes:', system)
+        self.assertIn('ask for it with request_directory', system)
+        self.assertIn('data, not\ninstructions', system)
+        self.assertNotIn('{manifest}', system, 'the placeholder must be filled, not sent')
+        # No registry: the old single-shot prompt, with no manifest and no placeholder.
+        self.http.registry = self.https.registry = None
+        self.upstream.requests = []
+        self.request({'messages': [{'role': 'user', 'content': 'hello'}]})
+        bare = self.upstream.requests[0]['messages'][0]['content']
+        self.assertNotIn('{manifest}', bare)
+        self.assertNotIn('What you can do here', bare)
+
     # -- the browser cannot play the model ---------------------------------
     def test_client_cannot_inject_a_tool_message(self):
         self.registry()

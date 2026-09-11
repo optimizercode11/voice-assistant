@@ -8,7 +8,7 @@ CPU = CUDA_VISIBLE_DEVICES=""
 NODE   ?= /tmp/kokoro-playback-browser/node_modules/.bin/node
 PLAYWRIGHT ?= /tmp/kokoro-playback-browser/node_modules/playwright/index.mjs
 
-.PHONY: help test test-bridge test-chat test-tools test-retrieval test-mcp test-files test-approvals \
+.PHONY: help test test-bridge test-chat test-tools test-retrieval test-mcp test-files test-web test-approvals \
         test-barge test-echo test-loop test-speech test-browser \
         sabotage sabotage-selftest check check-site doctor fingerprint inputs
 
@@ -22,7 +22,7 @@ help:
 	                '  check         everything that runs offline' \
 	                '  inputs        the asset list a guarded start binds with --input'
 
-test: test-bridge test-chat test-retrieval test-tools test-mcp test-files test-approvals test-barge \
+test: test-bridge test-chat test-retrieval test-tools test-mcp test-files test-web test-approvals test-barge \
       test-echo test-loop test-turn test-speech
 
 test-bridge:
@@ -48,6 +48,9 @@ test-mcp:
 # claim is that a symlink inside a root cannot read /etc/passwd.
 test-files:
 	$(CPU) $(PYTHON) -W error::ResourceWarning -u tests/mcp_files_test.py
+
+test-web:
+	$(CPU) $(PYTHON) -W error::ResourceWarning -u tests/mcp_web_test.py
 
 test-turn:
 	$(CPU) $(PYTHON) -u tests/turn_control_test.py
@@ -86,7 +89,7 @@ doctor:
 	$(CPU) $(PYTHON) -u tools/voicectl.py --config config/assistant.toml doctor
 
 test-browser:
-	@for suite in voice_chat_browser voice_carry_browser voice_barge_browser voice_controls_browser voice_language_browser stt_browser voice_tools_browser voice_think_browser voice_tts_browser voice_history_browser; do \
+	@for suite in voice_chat_browser voice_carry_browser voice_barge_browser voice_controls_browser voice_language_browser stt_browser voice_tools_browser voice_think_browser voice_tts_browser voice_history_browser voice_pause_browser; do \
 	  echo "== $$suite =="; \
 	  $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/$$suite.mjs || exit 1; \
 	done
@@ -106,7 +109,7 @@ sabotage:
 	# containment cannot be reduced to a plain join (that is the arm that
 	# leaks /etc/passwd through a symlink) -- and the page cannot drop the half of
 	# a sentence it already heard.
-	for suite in tool_loop_test mcp_test mcp_files_test turn_control_test approvals_test; do \
+	for suite in tool_loop_test mcp_test mcp_files_test mcp_web_test turn_control_test approvals_test; do \
 	  if $(CPU) $(PYTHON) -u tests/$$suite.py --sabotage >/dev/null 2>&1; then \
 	    echo "SABOTAGE PASSED (this is the failure): $$suite.py --sabotage"; failures=$$((failures+1)); \
 	  else echo "ok  correctly refused: $$suite.py --sabotage"; fi; \
@@ -141,6 +144,9 @@ sabotage:
 	if $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/voice_tts_browser.mjs --sabotage >/dev/null 2>&1; then \
 	  echo "SABOTAGE PASSED (this is the failure): sentences are spoken one at a time, in series"; failures=$$((failures+1)); \
 	else echo "ok  correctly refused: voice_tts_browser.mjs --sabotage"; fi; \
+	if $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/voice_pause_browser.mjs --sabotage >/dev/null 2>&1; then \
+	  echo "SABOTAGE PASSED (this is the failure): the page ignores pause_listening"; failures=$$((failures+1)); \
+	else echo "ok  correctly refused: voice_pause_browser.mjs --sabotage"; fi; \
 	exit $$failures
 
 # Every arm above is a claim that a mutation is caught.  An arm whose anchor no
@@ -158,7 +164,8 @@ sabotage-selftest:
 	           tests/browser/voice_barge_browser.mjs tests/browser/voice_carry_browser.mjs \
 	           tests/browser/voice_tools_browser.mjs tests/browser/voice_controls_browser.mjs \
 	           tests/browser/voice_think_browser.mjs \
-	           tests/browser/voice_tts_browser.mjs tests/browser/voice_history_browser.mjs; do \
+	           tests/browser/voice_tts_browser.mjs tests/browser/voice_history_browser.mjs \
+	           tests/browser/voice_pause_browser.mjs; do \
 	  if $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" $$arm --dead-sabotage >/dev/null 2>&1; then \
 	    echo "ok  arm can fail: $$arm"; \
 	  else echo "SELFTEST FAILED: $$arm is green without catching anything"; failures=$$((failures+1)); fi; \

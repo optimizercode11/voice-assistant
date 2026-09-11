@@ -430,6 +430,7 @@ def tool_roots(roots, args):
                       for name, real in roots.roots],
             "ignore": sorted(roots.ignore),
             "granted_notes": list(roots.granted_notes),
+            **({"note": ASK_HINT.strip()} if roots.roots_files else {}),
             "caps": {"max_read_bytes": roots.max_read_bytes, "max_lines": roots.max_lines,
                      "max_matches": roots.max_matches, "max_walk": roots.max_walk,
                      "max_output_chars": roots.max_output_chars}}
@@ -533,6 +534,27 @@ def _fit(roots: Roots, payload) -> str:
                                "path or page read_file with offset/limit"}, indent=1)
 
 
+ASK_HINT = (" If the user wants a folder that is not under these roots, ask them for it with "
+            "request_directory (absolute path) instead of retrying; they approve it on the page.")
+SCOPE_REFUSALS = ("absolute paths", "drive letters", "outside the configured root", "unknown root",
+                  "may not contain '..'")
+
+
+def _ask_hint(roots: Roots, message: str) -> str:
+    """Point a scope refusal at the way out.
+
+    Measured live (2026-09-11): told "look at /home/.../voice-stack", the model
+    called roots, then tried an absolute path, then invented a tool name, and
+    never reached request_directory.  A refusal that only says "no" leaves it
+    guessing; one that names the tool that CAN help ends the guessing.  Only
+    offered when a grants file is configured, because that is the deployment
+    where request_directory exists.
+    """
+    if not roots.roots_files or not any(marker in message for marker in SCOPE_REFUSALS):
+        return ""
+    return ASK_HINT
+
+
 def serve(roots: Roots) -> int:
     for raw in sys.stdin:
         raw = raw.strip()
@@ -573,7 +595,7 @@ def serve(roots: Roots) -> int:
                 payload = handler(roots, arguments)
                 _tool_result(identifier, _fit(roots, payload))
             except Refused as error:
-                _tool_result(identifier, f"tool error: {error}", True)
+                _tool_result(identifier, f"tool error: {error}{_ask_hint(roots, str(error))}", True)
             except (OSError, ValueError, TypeError) as error:
                 _tool_result(identifier, f"tool error: {type(error).__name__}: {error}", True)
         else:

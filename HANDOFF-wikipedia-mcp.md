@@ -1,7 +1,14 @@
 # Handoff: a Wikipedia fact-checking MCP server
 
-Status: **not started.** Everything below is measured on this deployment, not
-assumed. Two findings change the design; read them first.
+Status: **partly superseded, 2026-09-11.** `tools/mcp_web.py` (the `web` MCP
+server in `config/host.toml`, see TOOLS.md) now gives the model `search` with a
+Wikipedia-opensearch fallback — which resolves `Tarra Rum Pump` → `Ta Ra Rum
+Pum`, the regression in Finding 1 — and `read_page` for any public host. The
+capability manifest from "Related open work" also shipped (`Registry.manifest()`,
+`purpose` per MCP server). A Wikipedia-specific `resolve_entity`/`lookup_entity`
+pair is still unbuilt; build it only if a live measurement shows the general
+server missing what it would add. Everything below is measured on this
+deployment, not assumed. Two findings change the design; read them first.
 
 ## The problem
 

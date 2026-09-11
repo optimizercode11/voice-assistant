@@ -15,6 +15,12 @@ let active = false, busy = false, ready = false, epoch = 0, abort = null;
 let stream = null, context = null, source = null, analyser = null, recorder = null, raf = 0;
 let history = [], voiceList = [], audioURL = null, secureURL = null, phase = 'idle', streaming = false;
 let fragmentHolds = 0, heldText = '';
+// The one control a reply may carry: "stop listening after this".  It is set
+// only from a tool result the bridge aggregated into the answer, and it is
+// cleared only by a person -- the Resume button, the space bar, or ending the
+// conversation.  Nothing the model says later can clear it, because a paused
+// microphone hears nothing for the model to say it about.
+let paused = false, pauseReason = '';
 let bargeRaf = 0, bargeVoiced = 0, bargeLast = 0, playbackStartedAt = 0, playbackEndedAt = 0;
 // A reply is played as several clips (one per sentence).  For the barge-in gate
 // the whole reply is ONE playback: the settle window opens once, when the first
@@ -71,6 +77,7 @@ function setState(value, message) {
   $('end').hidden = !active && !busy;
   $('finish').hidden = value !== 'listening';
   $('interrupt').hidden = !busy;
+  $('resume-listening').hidden = !(paused && active && !busy);
   $('send').disabled = !ready || busy;
   $('language').disabled = busy; $('voice').disabled = busy;
   $('corrections').disabled=busy;$('corrections-enabled').disabled=busy;
@@ -496,6 +503,7 @@ function message(role, text, original = null, evidence = null) {
   if (evidence?.tools?.length) {
     const used = document.createElement('p'); used.className = 'toolnote';
     used.textContent = 'Looked up · ' + evidence.tools.map(tool =>
+      tool.name === 'pause_listening' ? 'paused listening' :
       `${tool.name.replace(/^mcp__[^_]+__/, '')}${tool.ok === false ? ' (did not work)' : ''} ${tool.ms}ms`).join(' · ');
     item.append(used);
   }
@@ -632,7 +640,7 @@ function primeAudio() {
 }
 function stopSession(note = 'Conversation ended. Start again whenever you like.') {
   stopBargeWatch(); stopThinkingAloud(); replySeam = false;
-  heldText = ''; fragmentHolds = 0;
+  heldText = ''; fragmentHolds = 0; paused = false; pauseReason = '';
   active = false; epoch++; abort?.abort(); abort = null; busy = false;
   clearCapture(); player.pause(); gapless.stop(); stopPlaybackGlow(); setGlow(0);
   if (stream) {stream.getTracks().forEach(track=>track.stop()); stream = null;}
@@ -676,8 +684,28 @@ async function responseProgress(url, body, signal, onEvent) {
   if (!answer) throw new Error('The reply ended before it finished. Please try again.');
   return answer;
 }
+// Every path that would reopen the microphone goes through listen(), so the
+// pause is enforced here and nowhere else: a reply that ended, an interrupted
+// reply, a refused reply, a replayed clip -- all of them ask to listen, and all
+// of them are told to hold instead.  The microphone track stays in the stream
+// (getUserMedia is not re-asked on resume) but is disabled, which is the same
+// muting the page already does during a reply.
+function holdListening() {
+  clearCapture(); player.pause(); busy = false;
+  if (stream) stream.getTracks().forEach(track=>{track.enabled=false;});
+  $('level').style.width = '0%'; setGlow(0);
+  const why = pauseReason ? ` (${pauseReason})` : '';
+  setState('paused', `Paused${why}. Qwen is not listening and will not take a turn. Press Resume listening, or Space, to continue; typing still works.`);
+}
+function resumeListening() {
+  if (!paused) return;
+  paused = false; pauseReason = '';
+  if (active && !busy) listen();
+  else setState(active ? phase : 'idle', 'Listening resumes after this reply.');
+}
 function listen() {
   if (!active || !stream) return;
+  if (paused) { holdListening(); return; }
   clearCapture(); player.pause(); stream.getTracks().forEach(track=>{track.enabled=true;});
   const mime = ['audio/webm;codecs=opus','audio/mp4','audio/webm','audio/ogg;codecs=opus'].find(value=>MediaRecorder.isTypeSupported(value));
   const rec = new MediaRecorder(stream,mime?{mimeType:mime}:{}); recorder = rec;
@@ -1228,7 +1256,7 @@ async function runTurn(input, forced = false, voicedMs = null) {
     let speaking = null, speechError = null;
     const spoken = () => {
       stopThinkingAloud();        // the reply is in hand: it never waits behind the acknowledgment
-      setState('speaking',active?'Press Space to interrupt and speak. Listening resumes after the reply.':'Press Space to stop the reply.');
+      setState('speaking',!active?'Press Space to stop the reply.':paused?'Listening pauses after this reply.':'Press Space to interrupt and speak. Listening resumes after the reply.');
     };
     const progress = event => {
       if (event.type === 'delta' && source) {
@@ -1278,6 +1306,15 @@ async function runTurn(input, forced = false, voicedMs = null) {
     if (turn) transcript = [...transcript, turn].slice(-STORE_TURNS);
     history = historyFrom(transcript);
     committed = true;
+    // The bridge aggregated a pause_listening tool call into the answer.  Arm
+    // it now, before the reply is spoken: whether the reply plays out, is
+    // interrupted by Space or by a voice in the room, every route back to the
+    // microphone goes through listen(), and listen() holds while `paused`.
+    // Only ever set here, and only from the bridge's own answer -- a saved
+    // transcript record cannot carry it (turnFrom keeps no controls).
+    if (reply.controls && reply.controls.pause_listening === true) {
+      paused = true; pauseReason = String(reply.controls.pause_reason || '').slice(0, 200);
+    }
     message('assistant',answer,null,{tools:reply.tools,sources:reply.sources});
     // A request_directory call happened during that generation, so the card the
     // user needs to see is one poll overdue.  Fetch it now, not in four seconds.
@@ -1350,6 +1387,7 @@ function interruptReply() {
 }
 $('interrupt').onclick=interruptReply;
 $('resume').onclick=()=>resumePlayback?.();
+$('resume-listening').onclick=resumeListening;
 let spaceHeld=false;
 window.addEventListener('keydown',event=>{
   if(event.code!=='Space' && event.key!==' ')return;
@@ -1357,7 +1395,11 @@ window.addEventListener('keydown',event=>{
   if(event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey ||
      target?.isContentEditable || target?.closest?.('input,textarea,select,button,a,summary,[role="button"],[role="textbox"]'))return;
   if(spaceHeld){event.preventDefault();return;}
-  if(event.repeat || !busy)return;
+  if(event.repeat)return;
+  // Space is the one key the page owns: it interrupts a reply, and while the
+  // microphone is paused it is the way back.  Both are human actions.
+  if(paused && active && !busy){event.preventDefault();spaceHeld=true;resumeListening();return;}
+  if(!busy)return;
   event.preventDefault();spaceHeld=true;interruptReply();
 });
 window.addEventListener('keyup',event=>{if(spaceHeld && (event.code==='Space'||event.key===' ')){event.preventDefault();spaceHeld=false;}});

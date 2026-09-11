@@ -528,7 +528,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.connection.settimeout(30)
                 if progress is not None:
                     progress.send({"type": "answer", "text": result["text"], "usage": result["usage"],
-                                   "tools": result["tools"], "sources": result["sources"]})
+                                   "tools": result["tools"], "sources": result["sources"],
+                                   "controls": result.get("controls") or {}})
                     progress.close()
                     return
                 return self.reply(200, result)

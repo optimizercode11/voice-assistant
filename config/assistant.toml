@@ -15,6 +15,7 @@ generation_seconds = 45     # one trip to the model
 
 [builtins]
 now = true                  # the current date and time
+pause_listening = true      # "stop listening for a bit": closes the microphone until Resume is pressed
 
 # ---------------------------------------------------------------------------
 # RAG: BM25 over your own files.  SQLite FTS5, no embeddings, no network.
@@ -46,6 +47,17 @@ schemes = ["https"]
 #   the child gets PATH/HOME/LANG plus whatever `env` you name -- nothing else.
 # Tools appear to the model as mcp__<name>__<tool>.
 # ---------------------------------------------------------------------------
+# Browsing the public web with tools/mcp_web.py (stdlib, read-only GET, private
+# address ranges refused, redirects re-checked, bounded).  `--doctor` prints the
+# policy.  Add --allow-host to confine it to named domains.
+# [[mcp.server]]
+# name = "web"
+# purpose = "search the public web and read a web page as text"
+# command = "python3"
+# args = ["tools/mcp_web.py", "--search", "ddg"]
+# timeout_seconds = 20
+# enabled = true
+
 # [[mcp.server]]
 # name = "filesystem"
 # command = "npx"

@@ -17,8 +17,12 @@ speech bridge  tools/speech_ui.py            HTTP :8091   HTTPS :8092 (microphon
         inside one POST /chat/completions, if tools are configured:
         Qwen ⇄ tools  ──┬── retrieval.py   SQLite FTS5 (BM25) over your own files
                         ├── mcp_client.py  stdio JSON-RPC to servers you named
-                        └── agent_tools.py now / fetch_url / the validator
-        …up to limits.rounds generations, then one speakable answer.
+                        │       mcp_files.py  read-only files under approved roots
+                        │       mcp_web.py    search + read_page, public hosts only
+                        └── agent_tools.py now / pause_listening / request_directory /
+                                           fetch_url / the validator / the manifest
+        …up to limits.rounds generations, then one speakable answer, plus
+        `controls` -- what a tool asked the PAGE to do (pause listening).
 ```
 
 The original service, `voice-stack-gpu2.service`, starts five processes in
@@ -46,6 +50,15 @@ Qwen state anything it liked out loud — a prompt injection with a Content-Type
 So `voice_chat.turn()` runs the entire loop inside a single request: the page
 sends only `user`/`assistant` text exactly as before, and receives *progress*
 events plus one answer.  Progress is display data and is never fed back.
+
+The one thing that crosses back the other way is a **control**: a tool may ask
+the *page* to do something after the reply — today only `pause_listening`.  A
+control rides on the tool row, the loop aggregates it into `controls` on the
+answer, and the page acts on it exactly once, at the end of the reply it
+belongs to.  It is safe in the direction it points: a control can only make the
+page hear *less*, it comes only from the bridge's own answer (a saved
+transcript cannot carry one), a failed call has it stripped at the source, and
+undoing it is a human action with no tool behind it.
 
 `tools/agent_tools.py` is the single choke point.  A builtin, a retrieval query
 and an MCP tool all reach the model as the same OpenAI tool object and all come

@@ -128,6 +128,49 @@ class RegistryTests(unittest.TestCase):
         self.addCleanup(registry.close)
         self.assertEqual(registry.names(), [])
 
+    # -- pause_listening: a control to the page, not an action on the server --
+    def test_pause_listening_is_a_control_on_the_answer_and_never_a_resume(self):
+        config = agent_config.load('')
+        config.builtins = {'now': True, 'pause_listening': True}
+        registry = agent_tools.Registry(config)
+        self.addCleanup(registry.close)
+        self.assertEqual(registry.names(), ['now', 'pause_listening'])
+        self.assertNotIn('resume_listening', registry.names(), 'only a person may reopen the microphone')
+        result = registry.execute('pause_listening', json.dumps({'reason': 'taking a call'}))
+        self.assertTrue(result.ok, result.error)
+        row = result.public()
+        self.assertEqual(row['control'], {'pause_listening': True, 'pause_reason': 'taking a call'})
+        self.assertIn('stopped listening', result.for_model())
+        self.assertIn('Resume', result.for_model())
+        # A failed call must not carry a control: the page acts on controls
+        # without looking at ok, so a refusal has to strip it at the source.
+        failed = agent_tools.ToolResult(False, '', error='no', meta={'name': 'pause_listening',
+                                                                      'control': {'pause_listening': True}})
+        self.assertNotIn('control', failed.public())
+        # The default config does not offer it: naming it is the only way on.
+        self.assertNotIn('pause_listening', agent_tools.Registry(agent_config.load('')).names())
+
+    def test_the_manifest_says_what_each_tool_is_for(self):
+        config = agent_config.load('')
+        config.builtins = {'now': True, 'pause_listening': True}
+        config.approvals.enabled = True
+        config.mcp = [agent_config.MCPServerConfig(name='web', command='x',
+                                                   purpose='search and read the public web')]
+        registry = agent_tools.Registry(config)
+        self.addCleanup(registry.close)
+        registry._add(agent_tools.Tool('mcp__web__search', 'Search.', {'type': 'object'}, lambda a, c: None,
+                                       'mcp:web'))
+        registry._add(agent_tools.Tool('mcp__web__read_page', 'Read.', {'type': 'object'}, lambda a, c: None,
+                                       'mcp:web'))
+        manifest = registry.manifest()
+        lines = manifest.splitlines()
+        self.assertTrue(all(line.startswith('- ') for line in lines), manifest)
+        self.assertIn('- pause_listening: Stop listening after this reply', manifest)
+        self.assertIn('- request_directory: Ask the user to approve one additional directory', manifest)
+        self.assertIn('- mcp__web__read_page, mcp__web__search: search and read the public web', manifest,
+                      'an MCP server is described by its operator-written purpose, not five raw names')
+        self.assertLess(len(manifest), 1200, 'the manifest is sent on every turn; keep it short')
+
     def test_unknown_tool_names_what_does_exist(self):
         registry = agent_tools.Registry(agent_config.load(''))
         self.addCleanup(registry.close)

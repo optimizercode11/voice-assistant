@@ -135,6 +135,12 @@ class ToolResult:
             row["error"] = self.error
         if "citations" in self.meta:
             row["citations"] = self.meta["citations"]
+        if self.ok and isinstance(self.meta.get("control"), dict) and self.meta["control"]:
+            # A control is a request to the PAGE, not to the model: "stop
+            # listening after this reply".  It rides on the tool row so the
+            # bridge can aggregate it into the answer without the loop knowing
+            # which tools exist.  Only a successful call may carry one.
+            row["control"] = dict(self.meta["control"])
         return row
 
 
@@ -162,6 +168,32 @@ def _now(arguments: dict, context: "Context") -> ToolResult:
     local = datetime.now().astimezone().isoformat(timespec="seconds")
     text = f"UTC {stamp}" if zone == "UTC" else f"local {local} (UTC {stamp})"
     return ToolResult(True, text, meta={"name": "now"})
+
+
+def _pause_listening(arguments: dict, context: "Context") -> ToolResult:
+    """Stop the page taking automatic turns after this reply.
+
+    Measured on the live bridge (2026-09-11): asked "stop listening for a bit",
+    the model said "I'll pause listening" and the page kept listening, because
+    saying it is all the model could do.  This makes it true.  The tool does
+    nothing on the server -- the microphone is in the browser -- it hands the
+    page a control on the answer and the page closes the loop.
+
+    Deliberately one-directional.  There is no resume_listening tool: a person
+    pauses the microphone precisely so that nothing said in the room reaches the
+    model, and a model that could re-open it on its own judgement would undo
+    that on the first ambiguous sentence.  Resuming is a click or the space
+    bar, on the page, by whoever is looking at it.
+    """
+    reason = str(arguments.get("reason") or "").strip()[:200]
+    return ToolResult(True,
+                      "Listening will pause as soon as this reply has been spoken. Tell the user in one "
+                      "short sentence that you have stopped listening and that they can press Resume "
+                      "listening on the page, or the space bar, when they want to continue. Do not ask a "
+                      "question, and do not promise to notice when they are back: you cannot hear "
+                      "anything until they resume.",
+                      meta={"name": "pause_listening",
+                            "control": {"pause_listening": True, "pause_reason": reason}})
 
 
 def _search_notes(arguments: dict, context: "Context") -> ToolResult:
@@ -350,6 +382,20 @@ class Registry:
                                   "question depends on today's date or the hour.",
                            {"type": "object", "properties": {"zone": {"type": "string", "enum": ["local", "UTC"]}},
                             "required": []}, _now, "builtin", 2.0))
+        if config.builtins.get("pause_listening", False):
+            # read_only=True is honest: nothing on the server changes.  The
+            # effect is on the page, and only ever in the direction of hearing
+            # less.
+            self._add(Tool("pause_listening",
+                           "Stop listening after this reply: the microphone closes and no further turns "
+                           "are taken until the user presses Resume on the page. Call this when the user "
+                           "asks you to stop listening, pause, hold on, wait, give them a minute, or says "
+                           "they need to take a call or talk to someone else. Never call it on your own "
+                           "initiative, and you cannot undo it: only the user can resume.",
+                           {"type": "object", "properties":
+                            {"reason": {"type": "string", "maxLength": 200,
+                                        "description": "Why, in the user's words, shown on the page"}},
+                            "required": []}, _pause_listening, "builtin", 2.0))
         if config.retrieval.enabled:
             self._add(Tool("search_notes", "Search the user's own indexed notes and documents with BM25. "
                                            "Use for anything about their project, machine, decisions or past "
@@ -370,10 +416,12 @@ class Registry:
             # list.  It never touches the folder being asked about, and the
             # status page should not claim this is a pure read.
             self._add(Tool("request_directory",
-                           "Ask the user to approve one additional directory for reading. Use when "
-                           "the file tools refuse because a folder is not in the allowed roots. This "
-                           "only files the request: access is granted by the user approving it on the "
-                           "page, never by this tool, so the reply always says NOT GRANTED.",
+                           "Ask the user to approve one additional directory for reading. Use it "
+                           "whenever the user asks about a folder that is not under one of the roots "
+                           "the file tools list (they refuse absolute paths and paths outside a root): "
+                           "call this with the absolute path instead of guessing or retrying. It only "
+                           "files the request: access is granted by the user approving it on the page, "
+                           "never by this tool, so the reply always says NOT GRANTED.",
                            {"type": "object", "properties":
                             {"path": {"type": "string", "minLength": 1, "maxLength": 500,
                                       "description": "Directory to read, absolute or relative to the assistant"},
@@ -413,6 +461,31 @@ class Registry:
 
     def names(self) -> list[str]:
         return sorted(self.tools)
+
+    def manifest(self) -> str:
+        """One line per capability, for the system prompt.
+
+        Tool.spec() sends the schemas, and that turned out not to be enough: on
+        the live bridge the model answered "look at that folder" by calling a
+        tool that does not exist and never found request_directory, because
+        nothing told it in planning terms what its tools are FOR.  The schemas
+        say how to call; this says when.  MCP servers get one line from the
+        operator's `purpose` in the config, so the model hears "web: search and
+        read pages on the public internet" rather than five raw tool names.
+        """
+        lines = []
+        by_server: dict[str, list[str]] = {}
+        for name in self.names():
+            tool = self.tools[name]
+            if tool.source.startswith("mcp:"):
+                by_server.setdefault(tool.source[4:], []).append(name)
+                continue
+            lines.append(f"- {name}: {_first_sentence(tool.description)}")
+        purposes = {entry.name: entry.purpose for entry in self.config.mcp}
+        for server, names in by_server.items():
+            purpose = purposes.get(server) or f"tools from the {server} server"
+            lines.append(f"- {', '.join(names)}: {purpose}")
+        return "\n".join(lines)
 
     def execute(self, name: str, arguments, deadline: float | None = None) -> ToolResult:
         started = time.monotonic()
@@ -468,6 +541,12 @@ class Registry:
                 "retrieval": retrieval.status(self.config.retrieval.sources, self.config.retrieval.index,
                                               self.config.retrieval.stale_after_seconds)
                            if self.config.retrieval.enabled else {"enabled": False}}
+
+
+def _first_sentence(text: str) -> str:
+    text = " ".join(str(text or "").split())
+    match = re.match(r"(.+?[.!?])(\s|$)", text)
+    return (match.group(1) if match else text)[:160]
 
 
 def _server_timeout(config: agent_config.AgentConfig, server: str) -> float:

@@ -294,6 +294,40 @@ class FileMCPProcessTests(unittest.TestCase):
         self.assertIn('.git', result.stdout)
         self.assertIn('not implemented', result.stdout)
 
+    def test_a_scope_refusal_points_at_request_directory_only_when_grants_exist(self):
+        # Measured live 2026-09-11: refused with "absolute paths are not
+        # accepted", the model tried an invented tool name and never reached
+        # request_directory.  With a grants file the refusal names the way out;
+        # without one there is no such tool, so it must not be promised.
+        tree = desk()
+        grants = Path(tempfile.mkdtemp(prefix='mcp-files-grants-')) / 'approvals.json'
+        grants.write_text('{"pending": [], "granted": []}')
+        with_grants = mcp_client.MCPServer('files', sys.executable,
+                                           [SERVER, '--root', str(tree), '--roots-file', str(grants)],
+                                           {}, 15.0, [], [])
+        without = mcp_client.MCPServer('files', sys.executable, [SERVER, '--root', str(tree)], {}, 15.0, [], [])
+        try:
+            tools = {tool.name: tool for tool in with_grants.start()}
+            for arguments in ({'path': '/etc'}, {'path': '../up'}, {'path': 'x', 'root': 'nope'}):
+                text, is_error = with_grants.call(tools['list_dir'], arguments)
+                self.assertTrue(is_error, arguments)
+                self.assertIn('request_directory', text, arguments)
+            text, _ = with_grants.call(tools['roots'], {})
+            self.assertIn('request_directory', json.loads(text)['note'])
+            # A refusal that is not about scope (a bad regex) stays a plain refusal.
+            text, is_error = with_grants.call(tools['grep'], {'pattern': '('})
+            self.assertTrue(is_error)
+            self.assertNotIn('request_directory', text)
+            plain = {tool.name: tool for tool in without.start()}
+            text, is_error = without.call(plain['list_dir'], {'path': '/etc'})
+            self.assertTrue(is_error)
+            self.assertNotIn('request_directory', text, 'no grants file, no such tool to point at')
+            text, _ = without.call(plain['roots'], {})
+            self.assertNotIn('note', json.loads(text))
+        finally:
+            with_grants.stop()
+            without.stop()
+
     def test_several_roots_must_be_named_by_the_caller(self):
         first, second = desk(), desk()
         instance = serve([first, second])

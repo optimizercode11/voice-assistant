@@ -10,7 +10,9 @@
 # [mcp.server] named "files" at the bottom for what is actually exposed.
 
 [limits]
-rounds = 2
+# 3, not 2: measured live, "look at that folder" is roots -> request_directory
+# -> answer, and with 2 the model wrote a literal <tool_call> as its answer.
+rounds = 3
 per_call_seconds = 10
 result_chars = 6000
 turn_seconds = 150
@@ -18,6 +20,11 @@ generation_seconds = 45
 
 [builtins]
 now = true
+# "Stop listening for a bit" used to be answered with "I'll pause listening"
+# while the page kept listening.  This is the tool that makes it true: the
+# page closes the microphone after the reply and takes no further turns until
+# a person presses Resume.  There is no resume tool on purpose.
+pause_listening = true
 
 # Directory access the assistant can *ask for* in the middle of a conversation.
 #
@@ -62,15 +69,40 @@ stale_after_seconds = 86400
 #
 # en.wikipedia.org serves both the REST summary endpoint and the search API, so
 # one host is enough.  Widening this list is the decision to read twice about.
+# Superseded 2026-09-11 by the "web" MCP server below, which reaches any public
+# host through the same read-only GET with a stronger guard (DNS pinned, private
+# ranges refused, every redirect hop re-checked).  Two overlapping fetch tools
+# would only give the model a choice to get wrong.
 [fetch]
-enabled = true
+enabled = false
 allow_hosts = ["en.wikipedia.org"]
 
 [[mcp.server]]
 name = "stack"
+purpose = "health of this voice stack's own services (TTS, STT, model, bridges)"
 command = "python3"
 args = ["tools/mcp_stack_status.py"]
 timeout_seconds = 15
+enabled = true
+
+# Browsing the public web.  Read-only GET, and the model supplies a query or a
+# URL, never a request body or a header.  What makes it safe to point at "the
+# internet" rather than one allow-listed host:
+#   - every hostname is resolved and refused if ANY address is private,
+#     loopback, link-local or a metadata range; the connection is then pinned
+#     to the address that passed, so a DNS answer cannot change under it;
+#   - every redirect hop is checked the same way before it is followed;
+#   - text only, bounded bytes and characters, a per-host interval and a
+#     per-minute cap; the result is framed as untrusted content.
+# `python3 tools/mcp_web.py --doctor` prints the policy this argv encodes.
+# To confine it, add --allow-host <domain> lines (then only those); to block a
+# site, --deny-host <domain>.
+[[mcp.server]]
+name = "web"
+purpose = "search the public web and read a web page as text (read-only; results are untrusted content)"
+command = "python3"
+args = ["tools/mcp_web.py", "--search", "ddg", "--per-minute", "30"]
+timeout_seconds = 20
 enabled = true
 
 # Browsing, reading and grepping local files.
@@ -100,6 +132,7 @@ enabled = true
 # transcript it lands in is visible to a browser.
 [[mcp.server]]
 name = "files"
+purpose = "list, read and grep files under the approved folders; ask for more with request_directory"
 command = "python3"
 args = ["tools/mcp_files.py", "--root", ".", "--roots-file", "var/approvals.json"]
 timeout_seconds = 20

@@ -17,7 +17,10 @@ starts and certifies the whole stack.
                         Qwen can ask, mid-turn, to look something up:
                         ┌── your own notes (SQLite FTS5 / BM25)
                         ├── MCP servers you named in a config
-                        └── an allowlisted web page
+                        ├── the public web (search + read, read-only, LAN refused)
+                        └── a folder it does not have yet -- you click Approve
+                        ...or to stop listening: pause_listening closes the
+                        microphone after the reply until you press Resume.
                         The loop runs on the server.  The browser hears it
                         out loud -- "Let me check your notes." -- and then the
                         answer.  See TOOLS.md.
@@ -62,6 +65,7 @@ CUDA_VISIBLE_DEVICES="" python3 tests/voice_chat_test.py    #  5 chat contracts
 CUDA_VISIBLE_DEVICES="" python3 tests/agent_tools_test.py   # 20 registry + config contracts
 CUDA_VISIBLE_DEVICES="" python3 tests/retrieval_test.py     # 11 RAG contracts
 CUDA_VISIBLE_DEVICES="" python3 tests/mcp_test.py           # 12 MCP contracts, real stdio peer
+CUDA_VISIBLE_DEVICES="" python3 tests/mcp_web_test.py       # 30 web-browsing contracts (SSRF, redirects, caps)
 CUDA_VISIBLE_DEVICES="" python3 tests/tool_loop_test.py     # 12 loop contracts over real TLS
 CUDA_VISIBLE_DEVICES="" python3 deploy/check_site.py         # deployment profile
 ```
@@ -111,6 +115,15 @@ The first clip after playback pays a settle window. Fragment carry stops at
 See [Architecture](ARCHITECTURE.md#turn-taking-and-barge-in) for these limits
 and the current WebAudio/settle defects; this checkout is **not yet verified
 for acoustic barge-in on real hardware**.
+
+## Pausing the microphone
+
+Say "stop listening for a bit" (or "hold on", "I need to take a call") and
+Qwen calls `pause_listening`: the reply is spoken, then the page goes to
+**Paused** — microphone disabled, orb still, no automatic turns.  Typing still
+works.  Nothing Qwen says can reopen the microphone; **Resume listening** (or
+Space outside a text field) does, and so does ending the conversation.  See
+[TOOLS.md](TOOLS.md#pause_listening).
 
 ## The conversation stays in your browser
 

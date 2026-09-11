@@ -82,6 +82,13 @@ Wikipedia opensearch 200. Bing/Brave/Mojeek answer 200 but serve a challenge pag
   PASS. Bridge PID 103298, 12 tools. Live probes: pause control delivered,
   folder request filed + declined, web search correct; parents question still
   unchecked (open), parent-of-root near-miss (open).
+- 09:36-09:47 UTC user report "Something went wrong" / "TTS is down": TTS was
+  up (109 KB WAV in 60 ms through the bridge; Chromium played it); the real
+  failure was the round budget (3) on a multi-step folder question -> 502
+  "ran out of room" -> page ended the session. Hotfix 2097863 shipped as
+  `voice-controls-20260911-b` (bridge PID 112567): last-round note to the
+  model, rounds 5, page keeps the session on a bridge refusal, "Stop." no
+  longer pauses. Both re-measured live: pass.
 - DONE. Superseded NEXT (kept for the record): ship per
   RUNBOOK §"Ship the current app to the CPU bridge" (restart only
   voice-tools-bridge.service); re-run `probe_tools.py` on :8094 and record

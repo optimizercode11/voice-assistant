@@ -1,0 +1,33 @@
+{
+  "campaign": "voice-controls-20260911-b",
+  "command": [
+    "systemctl",
+    "--user",
+    "--job-mode=ignore-dependencies",
+    "restart",
+    "voice-tools-bridge.service"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "24-27",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stage/voice-controls-20260911-b",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-11T09:47:46.337772603Z",
+  "git_head": "209786300cf4c3eaacbe390a62ce755610eb3def",
+  "inputs": [],
+  "label": "restart",
+  "log": "/home/ambudsharma/qwen36/voice-stage/voice-controls-20260911-b/evidence/guarded-voice-controls-20260911-b-20260911T094744Z-4052127.log",
+  "run_id": "voice-controls-20260911-b-20260911T094744Z-4052127",
+  "schema_version": 2,
+  "source_fingerprint": "a0d725fde7330ac875a3c51283cec8d6059ea7b004b5cf76676d4fa56880870b",
+  "started_utc": "2026-09-11T09:47:46.311483273Z",
+  "status": "PASS"
+}

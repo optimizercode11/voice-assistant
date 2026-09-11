@@ -552,6 +552,23 @@ scripts (see `PROVENANCE.md`): pause control delivered, folder request filed
 and declined, web search answered. Not performed: the speaker-to-microphone
 room check.
 
+### Executed: 2026-09-11, campaign `voice-controls-20260911-b` (hotfix)
+
+Steps 1-5 from head `2097863`, forty minutes after `-a`, for the "ran out of
+room" failure the user hit (see PROVENANCE.md).  Same guard, same CPU set;
+the `is-active` gate answered `active` this time.
+
+| Label | Result | Evidence |
+| --- | --- | --- |
+| `stage` | PASS, 20 checks, `rounds=5`, stack/web/files up | `guarded-...-20260911T094721Z-4050719` |
+| `install` | PASS, rollback snapshot + `rollback-complete`, index rebuilt | `guarded-...-20260911T094738Z-4051727` |
+| `restart` | PASS | `guarded-...-20260911T094744Z-4052127` |
+
+Bridge PID `112567` since `09:47:46 UTC`, served `chat.js`
+`58080700a026adc0ae8c7098d62e56fbaca29a5932f333321ab25b9989944672`,
+`--compare-live` PASS 20/20.  The multi-step folder probe and the "Stop." probe
+were re-run live and pass.
+
 ### 6. Roll back this app update if copy, startup or acceptance fails
 
 Use the *new* snapshot from step 3; do not rerun the old ASR campaign.

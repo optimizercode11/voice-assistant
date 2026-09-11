@@ -634,3 +634,37 @@ Measured on the live bridge right after (`probe_tools2.py`, `probe_tools3.py`):
 
 Not performed: a microphone-in-a-room check of the Paused state; the browser
 suite proves it in Chromium with a fake capture device.
+
+### Hotfix: running out of tool rounds ended the conversation (2026-09-11)
+
+Reported by the user minutes after the controls deploy as *"Something went
+wrong"* and *"TTS is down"*.  Measured: the bridge's `/tts` answered a 109 KB
+WAV in 60 ms and the user's own TTS calls were all 200, and the deployed page
+spoke and resumed listening in headless Chromium with no JS errors -- the
+engine was up.  The real failure reproduced live: "list the folder, open the
+README and the Makefile" spent round 1 naming the root (two roots exist once
+`/mnt` was approved from the page), round 2 listing, and the third and last
+generation had no tools, so the bridge returned "The model kept looking things
+up and ran out of room", which the page rendered as *Something went wrong* and
+then closed the microphone.  A bare "Stop." also called `pause_listening`.
+
+Head 2097863: the last tool result before the final generation carries a note
+that no more tool calls are possible; `MAX_TOOL_ROUNDS` 6 and host `rounds`
+5; the page keeps the session on a bridge refusal (status line carries the
+reason, listening resumes); `pause_listening`'s description says a bare
+stop/wait/hold on/quiet means stop talking.  `tool_loop` 20 green, `make
+check` 19/19, `voice_pause_browser.mjs` green with its sabotage arm red.
+
+Shipped as campaign `voice-controls-20260911-b`: stage, install and restart
+PASS under the guard (`evidence/guarded-voice-controls-20260911-b-*`).  Bridge
+PID 112567 since 09:47:46 UTC, NRestarts=0; the GPU stack kept PID 98338.
+Served `chat.js` `58080700a026adc0ae8c7098d62e56fbaca29a5932f333321ab25b9989944672`
+equals this checkout; `check_site.py --compare-live` PASS 20/20.  Live after:
+the same multi-step question ran roots → list_dir → find ×2 → list_dir ×4 and
+answered (4 tool rounds); "Stop." answered "Understood. I'll stop here." with
+no tool call.
+
+Note for the operator: the page's approval list now carries a grant for
+`/mnt` (20000+ files, truncated count), clicked at 09:40 UTC.  Everything under
+it is readable by the model and lands in transcripts; revoke it from the page
+if that was a test.

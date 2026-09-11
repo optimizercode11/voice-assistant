@@ -318,7 +318,10 @@ first**.  Three hops, nothing polls on any of them:
 Why this is safe in a design whose only other back-channel can *only make the
 page hear less*: a pushed update makes the page *say* more, never hear more.
 It comes from an operator-configured server, through the bridge's whitelist —
-one method, six fields, each clipped; an MCP server's ordinary log
+two methods (`…/update` and a `…/working` notice when a job starts), fixed
+fields, each clipped; the report travels on the update clipped to 4500
+characters and the page *shows* it, collapsed under the spoken line as plain
+text, never rendered as HTML and never spoken; an MCP server's ordinary log
 notification (`notifications/message`) with a `spoken` field is dropped, and
 `tests/events_test.py --sabotage` removes exactly that check and exactly one
 test goes red.  It is never fed to the model as a tool result.  Cross-origin

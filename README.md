@@ -127,6 +127,23 @@ works.  Nothing Qwen says can reopen the microphone; **Resume listening** (or
 Space outside a text field) does, and so does ending the conversation.  See
 [TOOLS.md](TOOLS.md#pause_listening).
 
+## Wake word
+
+Tick **Wake word only** in the settings (default phrase *Qwen*, editable) and
+the conversation starts **dormant**: the microphone is open, every clip is
+transcribed locally as before, but a clip is acted on only if it begins with
+the phrase — "Hey Qwen, what time is it?" is answered as "what time is it?",
+"What time is it?" alone is heard and dropped, and nothing is sent to the
+model or shown for it.  Saying just the name gets "Yes?" and the next clip is
+the question.  Once awake, clips are turns as usual until the **quiet
+period** (default 30 s, measured from the last real turn, not from every
+silent clip) passes with nothing said to it; then it waits for the name
+again and says so.  A near miss ("Hey Gwen") wakes it only after a call word
+such as *hey* or *okay*; bare "when" never does.  Typing and **Send now** are
+never gated.  `tests/browser/voice_wake_browser.mjs` drives this over the
+real microphone loop, and its sabotage arm treats every clip as addressed
+and must go red.
+
 ## The conversation stays in your browser
 
 The bridge is stateless: every turn re-sends the whole transcript, so what Qwen

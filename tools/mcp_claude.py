@@ -57,6 +57,7 @@ PROTOCOL = "2025-03-26"
 
 SPOKEN_MARK = "SPOKEN:"
 UPDATE_METHOD = "notifications/voice/update"
+WORKING_METHOD = "notifications/voice/working"
 MAX_INSTRUCTION = 4000
 MAX_SPOKEN_CHARS = 600            # a spoken line longer than this is not a spoken line
 MAX_DETAIL_CHARS_DEFAULT = 4500   # under the bridge's 6000-char result clip, with room for the envelope
@@ -288,7 +289,7 @@ class Session:
         del self.updates[:-MAX_KEPT_UPDATES]
         if self.notify is not None:
             try:
-                self.notify(self.updates[-1])
+                self.notify(self.updates[-1], self.max_detail)
                 self.updates[-1]["pushed"] = True
             except Exception as error:               # the wire failed; fall back to being asked
                 self.log(f"push failed: {error}")
@@ -315,6 +316,11 @@ class Session:
             self._finish(spoken=f"I could not hand that to Claude Code: {error}.", detail="", is_error=True)
             return
         self.in_flight, self.started_at = instruction, time.time()
+        if self.notify is not None:
+            try:
+                notify_working(instruction)
+            except Exception as error:
+                self.log(f"working notice failed: {error}")
 
     def send(self, instruction: str) -> dict:
         instruction = (instruction or "").strip()
@@ -377,14 +383,21 @@ def _write(message: dict) -> None:
         sys.stdout.flush()
 
 
-def notify_update(row: dict) -> None:
+def notify_update(row: dict, max_detail: int) -> None:
     """A JSON-RPC notification (no id) the bridge may forward to the page.
 
-    Everything the page needs to speak the update and nothing it must not:
-    the report stays behind `updates(detail=true)`.
+    The spoken line is what the page says; the report travels too, clipped,
+    for the page to SHOW under it -- a person reading wants the raw output,
+    the speaker must never get it.  The tool path is unchanged: `updates`
+    still hands the report over only when asked.
     """
-    _write({"jsonrpc": "2.0", "method": UPDATE_METHOD,
-            "params": {key: value for key, value in row.items() if key != "detail"}})
+    params = {key: value for key, value in row.items() if key != "detail"}
+    params["detail"] = _clip(row.get("detail") or "", max_detail)
+    _write({"jsonrpc": "2.0", "method": UPDATE_METHOD, "params": params})
+
+
+def notify_working(instruction: str) -> None:
+    _write({"jsonrpc": "2.0", "method": WORKING_METHOD, "params": {"instruction": _clip(instruction, 200)}})
 
 
 def _reply(identifier, result) -> None:

@@ -781,3 +781,76 @@ After the probe, `send`'s description under `--push` now tells the model the
 result will be spoken unprompted (the live reply still sent the user off to
 "ask for updates"); the server runs from codex's checkout, so the bridge sees
 the new description at its next connection, no deploy needed.
+
+### The raw report on the page, and a working notice (2026-09-11)
+
+Asked for: "is there a way to have the raw claude output also visible in the
+UI".  The report already existed behind `updates(detail=true)`; now the pushed
+update carries it too, clipped to 4500 characters by the server and again by
+the bridge whitelist, and the page shows it under the spoken line as a
+collapsed *Full report* -- plain text in a `<pre>`, never rendered as HTML,
+never handed to the speaker (the browser suite asserts no TTS request
+contains it).  A second notification, `notifications/voice/working`, is sent
+when a job is handed to the child, and the page shows a pending "Working on
+it: …" bubble that the result replaces; it is never spoken.  `send`'s tool
+description under `--push` now says the result will be spoken unprompted.
+
+Tests: `mcp_claude_test.py` 16 green (push arm expects working then update,
+with the report); `events_test.py` 8 green, sabotage arm reds exactly one
+(a sequencing artifact was found and fixed in the tests: a stream closed
+before the fake finished left its update in the backlog for the next test's
+stream); `voice_push_browser.mjs` green with the working bubble, the report,
+and the no-TTS assertion.
+
+Shipped as campaign `voice-claude-20260911-c`: stage / install / restart PASS
+under the guard with the engine health gate
+(`evidence/guarded-voice-claude-20260911-c-*`).  Bridge PID 25597 since
+19:32:11 UTC, NRestarts=0; `/chat/health` `events: true`, 14 tools; served
+`chat.js` `d65f6817cdf8a94a…` equals this checkout; `check_site.py
+--compare-live` PASS 20/20.  Live (`probe_events.py` and a second listener):
+the working notice arrived 1.8 s after the request, the model's reply said
+"you'll hear from it shortly", and the finished update arrived 23 s later
+carrying a 975-character report.
+
+### Wake word only, and dormancy after a quiet period (2026-09-11)
+
+Asked for mid-turn: "make the voice conversation be triggered by a keyword
+only; if there is silence for a while we should stop listening."  Built in
+the page, because the page already owns the endpointer and the clip: with
+**Wake word only** ticked (phrase and quiet period beside it, saved with the
+other speech preferences) the conversation starts *dormant*.  A clip is still
+recorded and transcribed locally, but after the carry logic and before
+anything is shown or sent, `afterWakeWord()` decides: not addressed -- dropped
+silently, status "Waiting for “Qwen”"; the name alone -- "Yes?" is spoken and
+the next clip is the question; name plus words -- the words go on without the
+name.  Awake, clips are turns as before.  A timer armed at each listen() and
+cancelled by clearCapture() measures the quiet period **from the last real
+turn** (a silent clip or a held fragment does not keep it awake: found by the
+browser suite, where the fake microphone never stops producing clips, and
+fixed before shipping); when it fires the page is dormant again and says so.
+Typing and Send now are never gated; ending the conversation clears it.
+
+The matcher accepts a near miss ("Gwen", "Quen", one edit) only after a call
+word such as *hey* or *okay*, so bare "when" (two edits from "qwen") never
+wakes it; a phrase may itself begin with a call word ("Hey Jarvis").  It is
+extracted verbatim from `web/chat.js` and checked as a pure function by
+`tests/browser/voice_wake_browser.mjs`, which then drives the real microphone
+loop: an unnamed clip dropped, a named question dispatched without the name,
+an unnamed clip taken while awake, dormancy after the quiet period, an unnamed
+clip dropped again.  Its sabotage arm makes every clip addressed and reds the
+first assertion.  `voice_controls_browser.mjs` needed one correction of its
+own: its "Space does not scroll" check took the scroll position before a
+Playwright click that itself scrolls the heading into view, and the taller
+settings column changed that geometry (169 vs 165 px); the position is now
+taken after the click and before the key, which is the claim it makes.
+
+Shipped as campaign `voice-claude-20260911-d` (page and docs; the bridge is
+unchanged): stage / install / restart PASS under the guard with the engine
+health gate (`evidence/guarded-voice-claude-20260911-d-*`).  Bridge PID
+26974 since 19:49:34 UTC, NRestarts=0; served `chat.js` `3f9aed342cd910e7…`
+equals this checkout and the served page carries the setting;
+`check_site.py --compare-live` PASS 20/20.  `make test` green; every browser
+suite green (the controls fix above, then the rest rerun individually).
+Not performed: a wake word spoken into a real microphone in a room -- the ASR
+spelling of the name is the one thing the fixture cannot measure, and the
+name-corrections box exists for whatever it turns out to hear.

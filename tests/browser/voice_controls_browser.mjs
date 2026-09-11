@@ -95,7 +95,10 @@ for(const [name,type] of (sabotage?[['chromium',chromium]]:[['chromium',chromium
    document.body.dispatchEvent(new KeyboardEvent('keydown',{code:'Space',key:' ',repeat:true,bubbles:true}));
  });
  assert.equal(await page.locator('#player').evaluate(a=>a.paused),false);
- const y=await page.evaluate(()=>scrollY);await space();
+ // space() clicks the heading first, and Playwright scrolls a clicked element
+ // into view, so the position is taken after the click and before the key:
+ // what is under test is the key, not the click.
+ await page.locator('h1').click();const y=await page.evaluate(()=>scrollY);await page.keyboard.press('Space');
  assert.equal(await page.locator('#player').evaluate(a=>a.paused),true,'Space interrupts the reply');
  assert.equal(await page.locator('#state').textContent(),'Ready');assert.equal(await page.evaluate(()=>scrollY),y);
  await page.locator('#speed').focus();for(let i=0;i<3;i++)await page.keyboard.press('ArrowRight');

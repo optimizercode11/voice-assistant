@@ -1,0 +1,14 @@
+guarded-run: campaign=voice-claude-20260911-d label=install mode=cpu cpus=24-27
+command: bash -c $'\n    set -euo pipefail\n    live="$HOME/qwen36/voice-stack/voice-tools-20260910"\n    test ! -e rollback\n    for p in 8080/health 8090/health 8095/health; do\n      code=$(curl -s -m 5 -o /dev/null -w "%{http_code}" "http://127.0.0.1:$p"); echo "engine $p -> $code"; test "$code" = 200\n    done\n    systemctl --user --job-mode=ignore-dependencies stop voice-tools-bridge.service\n    mkdir rollback\n    rsync -a "$live/" rollback/\n    touch rollback-complete\n    rsync -aR web tools deploy scripts config README.md ARCHITECTURE.md RUNBOOK.md TOOLS.md PROVENANCE.md tests/README.md .guarded-run "$live/"\n    cd "$live"\n    python3 tools/voicectl.py --config config/host.toml index build\n    python3 tools/voicectl.py --config config/host.toml doctor\n  '
+engine 8080/health -> 200
+engine 8090/health -> 200
+engine 8095/health -> 200
+indexed 6 documents into 198 chunks in 0.016s at var/notes.sqlite
+tools (4): now, pause_listening, request_directory, search_notes
+  now                                builtin
+  pause_listening                    builtin
+  request_directory                  builtin
+  search_notes                       retrieval
+limits: rounds=5 per_call=10.0s turn=150.0s result_chars=6000
+warn: ffmpeg is not on PATH; the bridge cannot decode uploads
+doctor: ok

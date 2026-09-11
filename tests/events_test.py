@@ -116,6 +116,13 @@ class EventStream:
         except (socket.timeout, TimeoutError):
             return None
 
+    def next_update(self):
+        """The next finished-turn event, skipping the working notice that precedes it."""
+        while True:
+            event = self.next_event()
+            if event is None or event['event'] == 'update':
+                return event
+
     def close(self):
         try:
             self.response.close()
@@ -201,6 +208,12 @@ class EventsTests(unittest.TestCase):
             status, reply = self.chat('ask claude to push me a note')
             self.assertEqual(status, 200, reply)
             self.assertEqual([tool['name'] for tool in reply['tools']], ['mcp__claude__send'])
+            notice = stream.next_event()
+            while notice is not None and notice['data'].get('instruction') != 'push me a note':
+                notice = stream.next_event()          # an earlier test's leftovers, if any
+            self.assertIsNotNone(notice, 'the page is told the agent has the job')
+            self.assertEqual(notice['event'], 'working')
+            self.assertEqual(notice['data']['instruction'], 'push me a note')
             event = stream.next_event()
             self.assertIsNotNone(event, 'the finished turn must arrive without anyone asking')
             self.assertEqual(event['event'], 'update')
@@ -208,9 +221,9 @@ class EventsTests(unittest.TestCase):
             self.assertEqual(event['data']['server'], 'claude')
             self.assertEqual(event['data']['instruction'], 'push me a note')
             self.assertFalse(event['data']['is_error'])
-            self.assertEqual(set(event['data']), {'type', 'server', 'spoken', 'instruction', 'is_error', 'seconds', 'activity', 'id'},
+            self.assertEqual(set(event['data']), {'type', 'server', 'spoken', 'instruction', 'is_error', 'seconds', 'activity', 'detail', 'id'},
                              'only the whitelisted fields cross')
-            self.assertNotIn('detail', json.dumps(event['data']))
+            self.assertEqual(event['data']['detail'], 'Echo: push me a note', 'the report rides along for the page to SHOW')
         finally:
             stream.close()
 
@@ -219,7 +232,7 @@ class EventsTests(unittest.TestCase):
         try:
             self.upstream.script = [send_call('second note'), answered('Asked.')]
             self.chat('again')
-            self.assertIsNotNone(stream.next_event())
+            self.assertIsNotNone(stream.next_update())
             # Now "any news?": the model calls updates and must be told there is none.
             self.upstream.requests = []
             self.upstream.script = [calling([{'id': 'call_2', 'type': 'function',
@@ -243,7 +256,7 @@ class EventsTests(unittest.TestCase):
         time.sleep(1.0)                                     # the fake finishes in well under this
         stream = EventStream(self.port, timeout=5)
         try:
-            event = stream.next_event()
+            event = stream.next_update()
             self.assertIsNotNone(event, 'a turn that finished with no page open is handed to the next page')
             self.assertEqual(event['data']['spoken'], 'You said nobody listening')
         finally:
@@ -277,7 +290,7 @@ class EventsTests(unittest.TestCase):
             self.upstream.script = [send_call('both of you'), answered('Asked.')]
             self.chat('tell both')
             for stream in (first, second):
-                event = stream.next_event()
+                event = stream.next_update()
                 self.assertIsNotNone(event)
                 self.assertEqual(event['data']['spoken'], 'You said both of you')
         finally:
@@ -304,7 +317,7 @@ class EventsTests(unittest.TestCase):
             # the bridge noticed the drop.  Either outcome is fine for the person
             # (the update reaches the next page or was already given to a live
             # one); what must not happen is the bridge wedging on a dead socket.
-            fresh.next_event()
+            fresh.next_update()
             status, health = self.get('/chat/health')
             self.assertEqual(status, 200, 'the bridge still answers after a subscriber vanished')
         finally:

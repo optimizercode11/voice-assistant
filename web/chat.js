@@ -25,6 +25,11 @@ let paused = false, pauseReason = '';
 // queue here until it is safe to speak: never over a reply, never over a
 // person mid-sentence, and never while the microphone is paused.
 let updateSource = null, pendingUpdates = [], updateTimer = 0, micLastVoiceAt = 0;
+// Wake word.  While `dormant` the microphone is open but a clip is acted on
+// only if it begins with the wake phrase; after the quiet period with no turn
+// the page goes dormant again on its own.  Only speech is gated: typing and
+// Send now are a person's explicit acts.
+let dormant = false, dormantTimer = 0, lastTurnAt = 0;   // lastTurnAt: the quiet clock runs from the last real turn
 let bargeRaf = 0, bargeVoiced = 0, bargeLast = 0, playbackStartedAt = 0, playbackEndedAt = 0;
 // A reply is played as several clips (one per sentence).  For the barge-in gate
 // the whole reply is ONE playback: the settle window opens once, when the first
@@ -507,6 +512,15 @@ function message(role, text, original = null, evidence = null) {
   if (evidence?.note) {
     const note = document.createElement('p'); note.className = 'toolnote'; note.textContent = evidence.note; item.append(note);
   }
+  // The coding agent's own report, verbatim, as text: a person reading wants
+  // the raw output, the speaker never gets it, and Markdown from a tool is
+  // not something this page renders as HTML.
+  if (evidence?.detail) {
+    const report = document.createElement('details'); report.className = 'report';
+    const summary = document.createElement('summary'); summary.textContent = 'Full report';
+    const pre = document.createElement('pre'); pre.textContent = evidence.detail;
+    report.append(summary, pre); item.append(report);
+  }
   if (evidence?.tools?.length) {
     const used = document.createElement('p'); used.className = 'toolnote';
     used.textContent = 'Looked up · ' + evidence.tools.map(tool =>
@@ -524,6 +538,7 @@ function message(role, text, original = null, evidence = null) {
 }
 function clearCapture() {
   cancelAnimationFrame(raf); raf = 0;
+  clearTimeout(dormantTimer); dormantTimer = 0;
   stopBargeWatch();
   if (recorder) { recorder.onstop = null; recorder.ondataavailable = null; if (recorder.state !== 'inactive') recorder.stop(); recorder = null; }
   if (stream) stream.getTracks().forEach(track => {track.enabled = false;});
@@ -647,7 +662,7 @@ function primeAudio() {
 }
 function stopSession(note = 'Conversation ended. Start again whenever you like.') {
   stopBargeWatch(); stopThinkingAloud(); replySeam = false;
-  heldText = ''; fragmentHolds = 0; paused = false; pauseReason = '';
+  heldText = ''; fragmentHolds = 0; paused = false; pauseReason = ''; dormant = false;
   active = false; epoch++; abort?.abort(); abort = null; busy = false;
   clearCapture(); player.pause(); gapless.stop(); stopPlaybackGlow(); setGlow(0);
   if (stream) {stream.getTracks().forEach(track=>track.stop()); stream = null;}
@@ -731,7 +746,18 @@ function listen() {
     if (!chunks.length || (voiced < 120 && !rec.sendNow)) {listen(); return;}
     runTurn(new Blob(chunks,{type:rec.mimeType || 'audio/webm'}), rec.sendNow === true, voiced);
   };
-  rec.start(250); busy = false; setState('listening','I’m listening. A short pause sends your message.');
+  rec.start(250); busy = false;
+  setState('listening', dormant ? `Waiting for “${wakePhrase()}”. Say it first, and I will answer.` : 'I’m listening. A short pause sends your message.');
+  // Awake and nothing happening: after the quiet period, go back to waiting
+  // for the name.  clearCapture() cancels this, so a turn that starts (even
+  // one that is then dropped or held) restarts the clock from the next listen().
+  clearTimeout(dormantTimer); dormantTimer = 0;
+  // Measured from the last turn, not from this listen(): a clip that turned out
+  // to be nothing (no speech, or a hold) must not keep the assistant awake.
+  if (wakeWanted() && !dormant) dormantTimer = setTimeout(() => {
+    dormantTimer = 0;
+    if (active && !busy && phase === 'listening' && wakeWanted()) { dormant = true; setState('listening', `Gone quiet. Say “${wakePhrase()}” to continue.`); }
+  }, Math.max(250, wakeQuietMs() - (performance.now() - lastTurnAt)));
   // AEC3 is still re-converging right after a reply, and the tail of that reply
   // is the likeliest thing to be mistaken for your voice -- it is the assistant
   // answering itself.  Charge the settle window only while the reply is actually
@@ -775,12 +801,24 @@ function listen() {
 function connectUpdates() {
   if (updateSource || typeof EventSource !== 'function') return;
   updateSource = new EventSource('/events');
+  updateSource.addEventListener('working', event => {
+    // The agent has the job.  Shown, not spoken: a person waiting wants to see
+    // that the instruction landed, not to be told so out loud.
+    let notice; try { notice = JSON.parse(event.data); } catch (_) { return; }
+    const instruction = typeof notice?.instruction === 'string' ? notice.instruction.trim().slice(0, 200) : '';
+    document.querySelector('.message.claude.pending')?.remove();
+    $('messages').querySelector('.empty')?.remove();
+    const item = document.createElement('div'); item.className = 'message claude pending';
+    const label = document.createElement('span'); label.className = 'role'; label.textContent = 'Claude Code';
+    const body = document.createElement('p'); body.textContent = instruction ? `Working on it: ${instruction}` : 'Working on it…';
+    item.append(label, body); $('messages').append(item); $('messages').scrollTop = $('messages').scrollHeight;
+  });
   updateSource.addEventListener('update', event => {
     let update; try { update = JSON.parse(event.data); } catch (_) { return; }
     const spoken = typeof update?.spoken === 'string' ? update.spoken.trim().slice(0, 600) : '';
     if (!spoken) return;
     const activity = update.activity && typeof update.activity === 'object' ? update.activity : {};
-    pendingUpdates.push({spoken, isError: update.is_error === true,
+    pendingUpdates.push({spoken, detail: typeof update.detail === 'string' ? update.detail.slice(0, 4500) : '', isError: update.is_error === true,
                          seconds: Number.isFinite(update.seconds) ? update.seconds : null,
                          commands: Number(activity.commands) || 0, filesEdited: Number(activity.files_edited) || 0});
     drainUpdates();
@@ -824,7 +862,8 @@ async function announceUpdate(update) {
   const id = ++epoch, controller = new AbortController(); abort = controller;
   const check = () => {if(id !== epoch || controller.signal.aborted) throw new DOMException('Stopped','AbortError');};
   try {
-    message('claude', update.spoken, null, {note: updateNote(update)});
+    document.querySelector('.message.claude.pending')?.remove();
+    message('claude', update.spoken, null, {note: updateNote(update), detail: update.detail});
     noteUpdateInHistory(update);
     saveConversation();
     setState('synthesizing', 'Claude Code has an update…');
@@ -927,6 +966,50 @@ const THINK_LINES = {
 };
 let thinkTimer = 0, thinkToken = 0, thinkSpoken = false, thinkPlaying = false;
 
+// ---------------------------------------------------------------- wake word
+function wakeWanted() { const box = $('wake-enabled'); return !!(box && box.checked); }
+function wakePhrase() { return String($('wake-word').value || '').trim().slice(0, 40) || 'Qwen'; }
+function wakeQuietMs() {
+  const seconds = Number($('wake-quiet').value);
+  return (Number.isFinite(seconds) && seconds >= 5 ? Math.min(600, seconds) : 30) * 1000;
+}
+const CALL_WORDS = new Set(['hey', 'hi', 'hello', 'ok', 'okay', 'yo']);
+function plainWord(token) { return token.toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu, ''); }
+function editDistance(a, b) {
+  const rows = Array.from({length: a.length + 1}, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) rows[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+    rows[i][j] = Math.min(rows[i - 1][j] + 1, rows[i][j - 1] + 1, rows[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return rows[a.length][b.length];
+}
+// WAKE-MATCH-BEGIN: extracted verbatim by tests/browser/voice_wake_browser.mjs.
+// The words after the wake phrase, or null when the clip did not start with it.
+// "Hey Qwen, what time is it?" -> "what time is it?"; "Qwen" -> ""; "What time is it?" -> null.
+// A near miss ("Gwen", "Quen") is accepted only after a call word: the ASR hears
+// the name imperfectly, but bare "when" must not wake it.
+function afterWakeWord(text, phrase) {
+  const tokens = String(text).trim().split(/\s+/).filter(Boolean);
+  const wanted = String(phrase).trim().split(/\s+/).map(plainWord).filter(Boolean);
+  if (!wanted.length) return null;
+  // The phrase may itself begin with a call word ("Hey Jarvis"), so try it
+  // where it stands first, then after up to two call words.
+  let skippable = 0;
+  while (skippable < tokens.length && skippable < 2 && CALL_WORDS.has(plainWord(tokens[skippable]))) skippable++;
+  for (let at = 0; at <= skippable; at++) {
+    const called = at > 0;
+    if (tokens.length - at < wanted.length) break;
+    let matched = true;
+    for (let index = 0; index < wanted.length && matched; index++) {
+      const heard = plainWord(tokens[at + index]), want = wanted[index];
+      if (heard === want) continue;
+      if (called && want.length >= 4 && editDistance(heard, want) <= 1) continue;
+      matched = false;
+    }
+    if (matched) return tokens.slice(at + wanted.length).join(' ').replace(/^[\s,.:;!?—-]+/, '').trim();
+  }
+  return null;
+}
+// WAKE-MATCH-END
 function thinkingAloudWanted() {
   const box = $('think-aloud');
   return !(box && box.checked === false);              // on unless switched off
@@ -1323,6 +1406,7 @@ async function runTurn(input, forced = false, voicedMs = null) {
       const judged = heard.turn, carried = heldText;
       if (!forced && judged?.hold && fragmentHolds < 3) {
         fragmentHolds++;
+        if (!dormant) lastTurnAt = performance.now();   // half a sentence is still a person talking to it
         heldText = (carried ? carried + ' ' : '') + text;
         busy = false;
         if (active) { listen(); setState('listening', `I heard “${heldText}”. Keep talking, or press Send now.`); }
@@ -1335,7 +1419,23 @@ async function runTurn(input, forced = false, voicedMs = null) {
       // punctuation; whatever closed the last clip is the transcript's own.
       if (carried) text = `${carried.replace(/[.!?\u2026]+\s*$/, '')} ${text}`.trim();
       fragmentHolds = 0; heldText = '';
+      if (wakeWanted() && active && !forced) {
+        const rest = afterWakeWord(text, wakePhrase());
+        if (dormant) {
+          // WAKE-GATE: not addressed to the assistant.  Heard, transcribed, dropped.
+          if (rest === null) { busy = false; listen(); setState('listening', `Waiting for “${wakePhrase()}”. Say it first, and I will answer.`); return; }
+          dormant = false; lastTurnAt = performance.now();
+          if (!rest) {
+            // Just the name: answer it, then listen for the actual question.
+            setState('synthesizing', 'Yes?');
+            await speakReply('Yes?', controller.signal, () => setState('speaking', 'Yes?')).catch(() => {});
+            check(); busy = false; listen(); setState('listening', 'Yes? I’m listening.'); return;
+          }
+          text = rest;
+        } else if (rest) text = rest;      // awake, and named anyway: the name is not part of the question
+      }
     }
+    lastTurnAt = performance.now();
     message('user',text,original); setState('thinking','Qwen is preparing a reply…');
     armThinkingAloud(id, controller.signal);
     const pending = [...before,{role:'user',content:text}];
@@ -1452,7 +1552,7 @@ async function runTurn(input, forced = false, voicedMs = null) {
 $('start').onclick = async () => {
   if(secureURL){location.assign(secureURL);return;}
   if(active || busy) return;
-  active=true;const id=++epoch;primeAudio();setState('listening','Allow microphone access to begin.');$('finish').hidden=true;
+  active=true;const id=++epoch;primeAudio();dormant=wakeWanted();lastTurnAt=performance.now();setState('listening','Allow microphone access to begin.');$('finish').hidden=true;
   try {
     const acquired=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:!bargeWanted()}});
     if(id!==epoch){acquired.getTracks().forEach(track=>track.stop());return;}
@@ -1516,6 +1616,9 @@ function saveSpeech(){
   speechPreferences.enabled=$('corrections-enabled').checked;
   speechPreferences.barge=$('barge-in').checked;
   speechPreferences.think=$('think-aloud').checked;
+  speechPreferences.wake=$('wake-enabled').checked;
+  speechPreferences.wakeWord=$('wake-word').value.slice(0,40);
+  speechPreferences.wakeQuiet=$('wake-quiet').value;
   try{localStorage.setItem('voice-speech',JSON.stringify(speechPreferences));}catch(_){}
 }
 function effectiveLanguage(){return $('language').value==='auto'?autoLanguage:$('language').value;}
@@ -1564,6 +1667,11 @@ if(typeof speechPreferences.barge==='boolean')$('barge-in').checked=speechPrefer
 $('barge-in').onchange=saveSpeech;
 if(typeof speechPreferences.think==='boolean')$('think-aloud').checked=speechPreferences.think;
 $('think-aloud').onchange=saveSpeech;
+if(typeof speechPreferences.wake==='boolean')$('wake-enabled').checked=speechPreferences.wake;
+if(typeof speechPreferences.wakeWord==='string'&&speechPreferences.wakeWord.trim())$('wake-word').value=speechPreferences.wakeWord.slice(0,40);
+if(typeof speechPreferences.wakeQuiet==='string'&&speechPreferences.wakeQuiet)$('wake-quiet').value=speechPreferences.wakeQuiet;
+$('wake-enabled').onchange=()=>{saveSpeech();if(!wakeWanted()&&dormant){dormant=false;if(active&&!busy)listen();}};
+$('wake-word').oninput=saveSpeech;$('wake-quiet').onchange=saveSpeech;
 correctionRules();
 // ------------------------------------------------------------- directory access
 // Qwen can ask for a folder; only this card can hand one over.  The flow is

@@ -224,16 +224,19 @@ class PushTests(unittest.TestCase):
         try:
             instance.call(tools['send'], {'instruction': 'code'})
             deadline = time.monotonic() + 10
-            while time.monotonic() < deadline and not heard:
+            while time.monotonic() < deadline and len(heard) < 2:
                 time.sleep(0.05)
-            self.assertEqual(len(heard), 1, 'exactly one notification per finished turn')
-            name, method, params = heard[0]
+            self.assertEqual([method for _, method, _ in heard],
+                             ['notifications/voice/working', 'notifications/voice/update'],
+                             'a working notice when the job starts, one update when it finishes')
+            self.assertEqual(heard[0][2], {'instruction': 'code'})
+            name, method, params = heard[1]
             self.assertEqual((name, method), ('claude', 'notifications/voice/update'))
             self.assertEqual(params['spoken'],
                              'I fixed the manifest bug in the chat module and the tests pass. Nothing else changed.')
             self.assertEqual(params['instruction'], 'code')
             self.assertEqual(params['activity']['files_edited'], 1)
-            self.assertNotIn('detail', params, 'the report never rides the notification')
+            self.assertIn('```python', params['detail'], 'the report rides the push, clipped, for the page to show')
             text, _ = self.instance_updates(instance, tools)
             asked = parse(text)
             self.assertFalse(asked['new'], 'a pushed update is delivered; asking again must not repeat it')

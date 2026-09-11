@@ -344,13 +344,18 @@ class Events:
     page, so only the fields the page needs cross, each clipped, from the one
     method the page understands.  Anything else a server says first is dropped.
 
-    A finished turn with no page open is kept (bounded) and handed to the next
+    Two methods cross: the finished turn (spoken line, counters, and the report
+    clipped -- the page shows the report and speaks the line), and a "working"
+    notice when a job starts, so the page can say the agent has it.  A finished
+    turn with no page open is kept (bounded) and handed to the next
     page that connects; one that was delivered to any page is not replayed, so
     a reload cannot re-speak the afternoon.
     """
     METHOD = "notifications/voice/update"
+    WORKING = "notifications/voice/working"
     BACKLOG = 20
     MAX_SPOKEN = 600
+    MAX_DETAIL = 4500          # shown under the spoken line, never spoken
 
     def __init__(self):
         self.lock = threading.Lock()
@@ -360,7 +365,13 @@ class Events:
         self.closed = False
 
     def on_notification(self, server: str, method: str, params) -> None:
-        if method != self.METHOD or not isinstance(params, dict):
+        if not isinstance(params, dict):
+            return
+        if method == self.WORKING:
+            self.publish({"type": "working", "server": str(server)[:40],
+                          "instruction": str(params.get("instruction") or "")[:200]})
+            return
+        if method != self.METHOD:
             return
         spoken = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", str(params.get("spoken") or "")).strip()
         if not spoken:
@@ -373,6 +384,7 @@ class Events:
             "instruction": str(params.get("instruction") or "")[:200],
             "is_error": bool(params.get("is_error")),
             "seconds": params.get("seconds") if isinstance(params.get("seconds"), (int, float)) else None,
+            "detail": re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", str(params.get("detail") or ""))[: self.MAX_DETAIL],
             "activity": {key: int(value) for key, value in activity.items()
                          if key in ("commands", "files_edited", "files_read", "other_tools")
                          and isinstance(value, int)},

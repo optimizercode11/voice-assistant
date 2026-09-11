@@ -27,7 +27,7 @@ const listeners=[];      // open /events responses
 let pushed=0;
 function push(update){
   pushed++;
-  const frame=`id: ${pushed}\nevent: update\ndata: ${JSON.stringify(update)}\n\n`;
+  const frame=`id: ${pushed}\nevent: ${update.type}\ndata: ${JSON.stringify(update)}\n\n`;
   for(const res of listeners) res.write(frame);
 }
 const server=http.createServer((req,res)=>{
@@ -86,14 +86,26 @@ try{
   const deadline=Date.now()+10000;while(!listeners.length&&Date.now()<deadline)await page.waitForTimeout(100);
   assert.equal(listeners.length,1,'the page must hold /events open without being asked');
 
-  // 1. Idle page, nobody talking: the update is shown as Claude Code and spoken.
-  push({type:'update',server:'claude',spoken:'The tests pass and two files changed.',instruction:'run the tests',is_error:false,seconds:42.5,activity:{commands:3,files_edited:2,files_read:1,other_tools:0}});
+  // 0. The job lands: a pending "working" bubble, shown and not spoken.
+  push({type:'working',server:'claude',instruction:'run the tests'});
+  await page.waitForFunction(()=>document.querySelectorAll('.message.claude.pending').length===1);
+  assert.match(await page.locator('.message.claude.pending p').textContent(),/Working on it: run the tests/);
+  assert.equal(tts.length,0,'a working notice is never spoken');
+  // 1. Idle page, nobody talking: the update replaces the pending bubble, is shown as Claude Code and spoken;
+  //    the raw report is there to read, collapsed, and never reaches the speaker.
+  const REPORT='## Result\n\n```sh\nmake test  # 14 passed\n```\n- `tools/x.py` changed';
+  push({type:'update',server:'claude',spoken:'The tests pass and two files changed.',instruction:'run the tests',is_error:false,seconds:42.5,activity:{commands:3,files_edited:2,files_read:1,other_tools:0},detail:REPORT});
   await page.waitForFunction(()=>document.querySelectorAll('.message.claude').length===1);
+  assert.equal(await page.locator('.message.claude.pending').count(),0,'the pending bubble is replaced by the result');
+  assert.equal(await page.locator('.message.claude details.report summary').textContent(),'Full report');
+  assert.equal(await page.locator('.message.claude details.report pre').textContent(),REPORT,'the report is shown verbatim as text');
+  assert.equal(await page.locator('.message.claude details.report pre code').count(),0,'never rendered as HTML');
   assert.equal(await page.locator('.message.claude .role').textContent(),'Claude Code');
   assert.equal(await page.locator('.message.claude p').first().textContent(),'The tests pass and two files changed.');
   assert.match(await page.locator('.message.claude .toolnote').textContent(),/Update from Claude Code · 43 s · 3 commands · 2 files edited/);
   await page.waitForFunction(()=>document.querySelector('#state').textContent==='Ready');
   assert.equal(tts.filter(text=>text.includes('The tests pass')).length,1,'the update went through the TTS path once');
+  assert.ok(tts.every(text=>!text.includes('make test')),'the report never reaches the speaker');
   assert.equal(posts.length,0,'speaking an update is not a turn: nothing was sent to the model');
 
   // 2. A live conversation.  Push while the reply is PLAYING: the update must
@@ -125,8 +137,10 @@ try{
   await page.waitForTimeout(3500);
   const spokenWhilePaused=tts.slice(ttsBeforePaused).some(text=>text.includes('on the phone'));
   const shownWhilePaused=(await page.locator('.message.claude').count())>claudeBefore;
+  // The decisive assertion, live in both arms: with the hold sabotaged the update
+  // is read aloud while Paused and this line goes red.
+  assert.equal(spokenWhilePaused,false,'paused means quiet: the update must wait');
   if(!sabotage){
-    assert.equal(spokenWhilePaused,false,'paused means quiet: the update must wait');
     assert.equal(shownWhilePaused,false);
     assert.equal(await page.locator('#state').textContent(),'Paused');
   }
@@ -136,10 +150,7 @@ try{
   assert.ok(tts.some(text=>text.includes('on the phone')),'the held update is spoken after Resume');
   await page.waitForFunction(()=>document.querySelector('#state').textContent==='Listening',null,{timeout:30000});
   assert.deepEqual(errors,[]);
-  if(sabotage){
-    assert.ok(mutations>0,'the page must load the sabotage replacement');
-    assert.equal(spokenWhilePaused||shownWhilePaused,true,'the sabotage did not change behaviour: the anchor is not load-bearing');
-  }
+  if(sabotage)assert.ok(mutations>0,'the page must load the sabotage replacement');
   console.log(assertionsComplete);
   if(sabotage){console.error('SABOTAGE PASSED (this is the failure): an update was spoken while the microphone was paused');process.exitCode=0;}
   else{fs.mkdirSync('evidence/browser',{recursive:true});

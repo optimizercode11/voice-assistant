@@ -1,0 +1,60 @@
+{
+  "campaign": "voice-claude-20260911-a",
+  "command": [
+    "bash",
+    "-c",
+    "\n    set -euo pipefail\n    live=\"$HOME/qwen36/voice-stack/voice-tools-20260910\"\n    test ! -e rollback\n    # The GPU unit reports failed since 16:19 UTC while its engines keep running\n    # as orphans (journal: \"remains running after unit stopped\"), so the runbook\n    # gate `systemctl --user is-active voice-stack-gpu2.service` cannot answer\n    # the question it asks.  Ask the engines directly instead.\n    for p in 8080/health 8090/health 8095/health; do\n      code=$(curl -s -m 5 -o /dev/null -w \"%{http_code}\" \"http://127.0.0.1:$p\"); echo \"engine $p -> $code\"\n      test \"$code\" = 200\n    done\n    systemctl --user --job-mode=ignore-dependencies stop voice-tools-bridge.service\n    mkdir rollback\n    rsync -a \"$live/\" rollback/\n    touch rollback-complete\n    rsync -aR web tools deploy scripts config README.md ARCHITECTURE.md RUNBOOK.md TOOLS.md PROVENANCE.md tests/README.md .guarded-run \"$live/\"\n    cd \"$live\"\n    python3 tools/voicectl.py --config config/host.toml index build\n    python3 tools/voicectl.py --config config/host.toml doctor\n  "
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "24-27",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stage/voice-claude-20260911-a",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-11T16:35:37.938885571Z",
+  "git_head": "6964030850e2adf18f9981eeef1b713c0ce4ec77",
+  "inputs": [
+    {
+      "bytes": 22045,
+      "exists": true,
+      "path": "tools/mcp_claude.py",
+      "sha256": "c997d6afc568296f5ba42ffe04de2e4cf8019318d1b341bc70166da93bab915d",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 8501,
+      "exists": true,
+      "path": "config/host.toml",
+      "sha256": "176bb130de7e87ab3813f29f470e207a1f00920ac91a3499a65bc659002b9ad7",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 37366,
+      "exists": true,
+      "path": "tools/speech_ui.py",
+      "sha256": "80392e7fa2101582e6e0b5b05d80e13f3fa8cc57586768501ae90e369e4b9ca5",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 25696,
+      "exists": true,
+      "path": "TOOLS.md",
+      "sha256": "c94802777e8314deded1722ff0b665f2fa4bb60132e646ff292b63f1a5f2e4c6",
+      "verification": "current_local"
+    }
+  ],
+  "label": "install",
+  "log": "/home/ambudsharma/qwen36/voice-stage/voice-claude-20260911-a/evidence/guarded-voice-claude-20260911-a-20260911T163537Z-20968.log",
+  "run_id": "voice-claude-20260911-a-20260911T163537Z-20968",
+  "schema_version": 2,
+  "source_fingerprint": "f3f29fa72883e56d376b95d147353483529202301c590ee77f88aba619e4bf9f",
+  "started_utc": "2026-09-11T16:35:37.440281969Z",
+  "status": "PASS"
+}

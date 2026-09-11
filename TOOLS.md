@@ -232,6 +232,57 @@ will not be one.  Menus (`nav`, `header`, `footer`, `aside`) lose their prose
 but keep their links: measured on a live Wikipedia article, the first 1200
 characters of body text were otherwise "Jump to content / Main menu / Donate…".
 
+### Guiding Claude Code by voice: `tools/mcp_claude.py`
+
+`send` and `updates` — stdlib only, one long-lived `claude -p --input-format
+stream-json --output-format stream-json` child per server process.  Shipped in
+`config/host.toml` as the MCP server named `claude` (2026-09-11).  The point is
+to talk to the coding agent the way you talk to the assistant: "ask Claude to
+run the tests", a minute later "any news?", and hear one or two sentences back.
+
+Three constraints shaped it, all of them already in this file:
+
+| Constraint | What the server does |
+|---|---|
+| A tool call gets ten seconds and a spoken turn sixty-five; a Claude Code turn takes minutes | **Nothing waits.** `send` queues the instruction, hands it to the child, and returns `working` at once. `updates` returns what has *finished* since it was last asked, plus live counters for the turn in flight (commands run, files edited, seconds so far). A second `send` while one is in flight is `queued`, delivered when the child is idle, in order. |
+| Kokoro reads Markdown badly, and the weakest summariser in the chain is the 27B model in 384 tokens from a 6000-char clip | **The spoken form is asked for at the source.** The session starts with a system-prompt appendix: end every reply with a `SPOKEN:` line — one to three plain sentences, no code, no paths, and any question that needs answering. `updates` returns that line; the Markdown above it is kept as `detail` and handed over only with `detail: true`. A reply without the line gets a best-effort plain rendering (code blocks dropped, markup stripped, clipped). `tests/mcp_claude_test.py --sabotage` applies the tempting "always include detail" refactor and exactly one test goes red. |
+| Speech recognition mishears; the local model paraphrases | **Verbatim, framed.** The tool asks the model for the user's words as said, and the server wraps them in a frame that names them as a speech transcript that may contain mishearings. Claude is told to ask, in the spoken line, before acting on an odd word. |
+
+What crosses back is only what the child wrote to its own stdout pipe, parsed
+by a thread; the server's stdout is the MCP wire and never carries a Claude
+event (a stray non-JSON line from the child is ignored, tested).  A child that
+dies mid-turn becomes an error update that says so, and the next `send`
+starts a fresh session.  SIGTERM to the server reaps the child.
+
+Permissions are **Claude Code's own** — bypass mode, by the operator's
+decision — and nothing here second-guesses them.  This is deliberately unlike
+every other server in this file: it is the one capability that acts on the
+world, and the judgement about *whether* to act belongs to the model doing the
+acting, not to a wrapper.  What the wrapper fixes is *where*: the session's
+working directory, `--add-dir`, model and permission mode are in the server's
+argv.
+
+**Deployment transport.**  The bridge runs on the GPU host; the repositories
+and the logged-in `claude` are on codex.  So the MCP child in `host.toml` is
+`ssh -T codex-claude`, stdio over ssh, with a single-purpose key that codex
+authorizes as `restrict,command="python3 …/mcp_claude.py --claude … --cwd …
+--add-dir /mnt"`: it can start that server and nothing else.  Changing the
+session's working directory or model means editing that `authorized_keys`
+line on codex, not this repository.  Consequently `voicectl doctor` on the GPU
+host proves the ssh hop and the server; it cannot pass `--doctor` through.  On
+codex:
+
+```bash
+python3 tools/mcp_claude.py --doctor --cwd ~ --add-dir /mnt   # the argv the key runs, resolved
+```
+
+Not here, on purpose: an `interrupt` tool (a queued `send` saying "stop" reaches
+the session after the current turn; cutting a turn short is a shell action on
+codex), unprompted spoken updates (the page has no push channel; a `Stop` hook
+plus a polled inbox is the planned second step), and a verbatim path that would
+let a tool result be spoken without the local model — measure how faithfully it
+relays `spoken` first.
+
 ## `fetch_url`
 
 Off unless `enabled = true` **and** `allow_hosts` is non-empty — an empty

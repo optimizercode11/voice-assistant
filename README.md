@@ -66,6 +66,7 @@ CUDA_VISIBLE_DEVICES="" python3 tests/agent_tools_test.py   # 20 registry + conf
 CUDA_VISIBLE_DEVICES="" python3 tests/retrieval_test.py     # 11 RAG contracts
 CUDA_VISIBLE_DEVICES="" python3 tests/mcp_test.py           # 12 MCP contracts, real stdio peer
 CUDA_VISIBLE_DEVICES="" python3 tests/mcp_web_test.py       # 30 web-browsing contracts (SSRF, redirects, caps)
+CUDA_VISIBLE_DEVICES="" python3 tests/mcp_claude_test.py    # 14 Claude Code contracts (send never waits; speech hears no code unasked)
 CUDA_VISIBLE_DEVICES="" python3 tests/tool_loop_test.py     # 12 loop contracts over real TLS
 CUDA_VISIBLE_DEVICES="" python3 deploy/check_site.py         # deployment profile
 ```

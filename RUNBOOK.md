@@ -12,6 +12,25 @@ documentation review (2026-09-10).** CPU checks do not certify acoustic barge-in
 | `voice-tools-bridge.service` | `voice-tools-20260910` | https://192.168.228.113:8094/chat | CPU bridge, tools/RAG/MCP; target of this procedure |
 | `voice-stack-gpu2.service` | `voice-restore-20260908` | https://192.168.228.113:8092/chat | Resident models on GPU 2 plus the original bridge; leave running |
 
+A third piece lives on **codex**, not on `vllm`: the Claude Code MCP server
+(`tools/mcp_claude.py`, shipped 2026-09-11 as the `claude` server in
+`config/host.toml`).  The bridge's MCP child is `ssh -T codex-claude`; the key
+behind that alias is authorized on codex with a forced command, so the
+server's argv (`--cwd`, `--add-dir`, `--claude`, permission mode) is in
+`codex:~/.ssh/authorized_keys`, not in this tree.  Promoting `tools/` to `vllm`
+copies the file but does not change what runs; to change the session's working
+directory or model, edit that `authorized_keys` line and let the bridge's next
+`send` spawn a fresh child.  `TOOLS.md`, "Guiding Claude Code by voice".
+
+Gate caveat (2026-09-11): `voice-stack-gpu2.service` reports `failed` while
+its engines run on as orphans (see `PROVENANCE.md`, "Guiding Claude Code by
+voice").  Until an operator sorts that unit out, the install step's
+`systemctl --user is-active voice-stack-gpu2.service` line answers `failed`
+for a stack that is actually serving; campaign `voice-claude-20260911-a`
+gated on `curl` to 8080/8090/8095 `/health` instead, and recorded it.  Do not
+`start` that unit to make the gate pass: it would try to spawn a second stack
+on GPU 2.
+
 Read `deploy/voice-tools-bridge.service:7` and `:14`: the tools unit has its
 own working directory and `Wants=voice-stack-gpu2.service`. We use
 `--job-mode=ignore-dependencies` for its lifecycle commands so an inactive

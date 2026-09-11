@@ -8,7 +8,7 @@ CPU = CUDA_VISIBLE_DEVICES=""
 NODE   ?= /tmp/kokoro-playback-browser/node_modules/.bin/node
 PLAYWRIGHT ?= /tmp/kokoro-playback-browser/node_modules/playwright/index.mjs
 
-.PHONY: help test test-bridge test-chat test-tools test-retrieval test-mcp test-files test-web test-approvals \
+.PHONY: help test test-bridge test-chat test-tools test-retrieval test-mcp test-files test-web test-claude test-approvals \
         test-barge test-echo test-loop test-speech test-browser \
         sabotage sabotage-selftest check check-site doctor fingerprint inputs
 
@@ -22,7 +22,7 @@ help:
 	                '  check         everything that runs offline' \
 	                '  inputs        the asset list a guarded start binds with --input'
 
-test: test-bridge test-chat test-retrieval test-tools test-mcp test-files test-web test-approvals test-barge \
+test: test-bridge test-chat test-retrieval test-tools test-mcp test-files test-web test-claude test-approvals test-barge \
       test-echo test-loop test-turn test-speech
 
 test-bridge:
@@ -51,6 +51,12 @@ test-files:
 
 test-web:
 	$(CPU) $(PYTHON) -W error::ResourceWarning -u tests/mcp_web_test.py
+
+# The Claude Code server is driven over a fake `claude` that speaks the CLI's
+# stream-json shapes.  The claim under test: `send` never waits, and the voice
+# path hears the spoken line only -- the Markdown report moves only when asked.
+test-claude:
+	$(CPU) $(PYTHON) -W error::ResourceWarning -u tests/mcp_claude_test.py
 
 test-turn:
 	$(CPU) $(PYTHON) -u tests/turn_control_test.py
@@ -109,7 +115,7 @@ sabotage:
 	# containment cannot be reduced to a plain join (that is the arm that
 	# leaks /etc/passwd through a symlink) -- and the page cannot drop the half of
 	# a sentence it already heard.
-	for suite in tool_loop_test mcp_test mcp_files_test mcp_web_test turn_control_test approvals_test; do \
+	for suite in tool_loop_test mcp_test mcp_files_test mcp_web_test mcp_claude_test turn_control_test approvals_test; do \
 	  if $(CPU) $(PYTHON) -u tests/$$suite.py --sabotage >/dev/null 2>&1; then \
 	    echo "SABOTAGE PASSED (this is the failure): $$suite.py --sabotage"; failures=$$((failures+1)); \
 	  else echo "ok  correctly refused: $$suite.py --sabotage"; fi; \

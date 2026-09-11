@@ -133,6 +133,34 @@ enabled = true
 # and read what it prints *before* restarting the bridge.  Do not point it at
 # $HOME or at "/": everything inside a root is readable by the model, and the
 # transcript it lands in is visible to a browser.
+# Guiding Claude Code by voice.
+#
+# `send` hands the user's words to a long-lived Claude Code session and returns
+# at once; `updates` says what it has finished since last asked, as a spoken
+# line that Claude itself wrote for the speech engine (the Markdown report
+# travels only when `detail` is asked for).  TOOLS.md, "Guiding Claude Code".
+#
+# TRANSPORT: the session runs on codex, where the repositories and the
+# logged-in `claude` are, not on this GPU host.  The MCP child here is `ssh`,
+# and stdio is the wire.  The key it uses (`~/.ssh/id_ed25519_voice_claude`,
+# alias `codex-claude` in ~/.ssh/config on this host) is authorized on codex
+# with `restrict,command="python3 .../tools/mcp_claude.py ..."`, so it can run
+# that one server and nothing else -- no shell, no forwarding, no pty.  The
+# server's own argv (working directory, permission mode, which `claude`) is
+# therefore fixed on codex, in ~/.ssh/authorized_keys, not here.
+#
+# PERMISSIONS are Claude Code's own, in bypass mode by the operator's decision
+# (2026-09-11): the model behind the session is trusted to ask before doing
+# anything hard to undo; nothing on this side second-guesses it.  The transcript
+# is passed verbatim inside a frame that says it came from speech recognition.
+[[mcp.server]]
+name = "claude"
+purpose = "hand a spoken instruction to Claude Code, the coding agent on the user's computer (send), and hear what it has done since (updates); use detail only when the user asks for specifics"
+command = "ssh"
+args = ["-T", "codex-claude"]
+timeout_seconds = 20
+enabled = true
+
 [[mcp.server]]
 name = "files"
 purpose = "list, read and grep files under the approved folders; ask for more with request_directory"

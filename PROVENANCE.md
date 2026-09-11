@@ -668,3 +668,63 @@ Note for the operator: the page's approval list now carries a grant for
 `/mnt` (20000+ files, truncated count), clicked at 09:40 UTC.  Everything under
 it is readable by the model and lands in transcripts; revoke it from the page
 if that was a test.
+
+### Guiding Claude Code by voice (2026-09-11)
+
+Asked for: "wire our voice assistant to Claude Code so I can verbally guide it
+and get updates", with Claude Code's own permissions trusted (bypass mode; no
+wrapper gate) and the summarisation question answered before building: the
+spoken form is asked for at the source, and the local model relays it.
+
+Head after this record: `tools/mcp_claude.py`, a stdlib stdio MCP server that
+owns one `claude -p --input-format stream-json --output-format stream-json`
+child.  `send` queues the transcript (verbatim, framed as speech recognition)
+and returns at once; `updates` returns the finished turns' `SPOKEN:` lines plus
+live counters, and the Markdown report only with `detail: true`.  Observed
+event shapes (Claude Code 2.1.268): `system/init`, `assistant` with text and
+`tool_use` blocks, one `result` per turn carrying `result`, `is_error`,
+`duration_ms`; a stream-json session stays alive across user messages.
+`tests/mcp_claude_test.py` 14 green over `tests/fixtures/fake_claude.py`; the
+sabotage arm ("always include detail") reds exactly
+`test_updates_carry_no_code_unless_asked`.  `make test` green.
+
+Transport: the bridge lives on the GPU host, the repositories and the logged-in
+`claude` on codex, and vllm had no key to codex.  A single-purpose key
+(`vllm:~/.ssh/id_ed25519_voice_claude`, alias `codex-claude`) is authorized on
+codex as `restrict,command="python3 /mnt/voice-assistant/tools/mcp_claude.py
+--claude ~/.local/bin/claude --cwd ~ --add-dir /mnt"`; `host.toml` runs
+`ssh -T codex-claude` as the MCP child.  Proven before staging: initialize +
+tools/list through the forced command from vllm, and a full send/updates round
+trip from the live tree's own `mcp_client.py` (spoken line back in 4 s, the
+client's `stop()` left no server or `claude` process on codex).
+
+Shipped as campaign `voice-claude-20260911-a`: `stage` PASS (20 checks, `doctor
+--probe` shows `claude up 2 tools` beside stack/web/files), `install` PASS with
+the rollback snapshot, `restart` PASS
+(`evidence/guarded-voice-claude-20260911-a-*`).  Bridge PID 21094 since
+16:35:55 UTC, NRestarts=0; `/tools` 14 entries including `mcp__claude__send`
+and `mcp__claude__updates`; `check_site.py --compare-live` PASS 20/20; served
+`chat.js` `58080700a026adc0…` equals this checkout (the page did not change).
+
+**Deviation recorded.**  `voice-stack-gpu2.service` has reported `failed`
+(result `resources`, restart counter 3) since 16:19:06 UTC, while its engines
+kept running as orphans (journal: "Unit process … remains running after unit
+stopped"; 8080, 8090, 8095 all answer 200; GPU 2 holds 28.7 GiB).  The runbook's
+install gate `systemctl --user is-active voice-stack-gpu2.service` therefore
+cannot answer the question it asks, and this campaign gated on the three
+engine health endpoints instead.  Nothing was done to that unit: a `start` now
+would try to spawn a second stack on GPU 2.  Left for the operator.
+
+Measured on the live bridge right after (`probe_claude.py`, three turns, one
+conversation, NDJSON):
+
+| Prompt | Tools called | Outcome |
+|---|---|---|
+| "Ask Claude Code to count how many git repositories are under slash m n t on my computer, and to tell me the name of the newest one." | `mcp__claude__send` (1 ms) | answer in 2.6 s: it has asked, it is working, ask when ready |
+| "Any news from Claude?" (25 s later) | `mcp__claude__updates` (0 ms) | answer in 2.5 s: 100 checkouts, 14 top-level, newest by commit "voice assistant", newest by creation "tiling-ready" -- a faithful relay of the `SPOKEN:` line |
+| "Give me the details of what it found." | `mcp__claude__updates` with `detail` | answer in 9.1 s: the counts, the nested-worktree explanation, three dated repositories -- the report, spoken, without code |
+
+Not done, on purpose: unprompted spoken updates (no push channel from bridge to
+page yet), an `interrupt` tool, and the verbatim-bypass path.  Measured reason
+the last one can wait: in the second turn the local model relayed the spoken
+line whole, in a single generation.

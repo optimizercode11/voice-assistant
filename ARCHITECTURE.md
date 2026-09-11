@@ -19,6 +19,8 @@ speech bridge  tools/speech_ui.py            HTTP :8091   HTTPS :8092 (microphon
                         ├── mcp_client.py  stdio JSON-RPC to servers you named
                         │       mcp_files.py  read-only files under approved roots
                         │       mcp_web.py    search + read_page, public hosts only
+                        │       mcp_claude.py send + updates, one Claude Code session
+                        │                     (over ssh to codex; TOOLS.md)
                         └── agent_tools.py now / pause_listening / request_directory /
                                            fetch_url / the validator / the manifest
         …up to limits.rounds generations, then one speakable answer, plus

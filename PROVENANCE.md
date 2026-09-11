@@ -558,5 +558,10 @@ PID 53262 / 07:37:54 UTC. Served `chat.js`
 `94caa8c20978a5a0a35cbf88b0c39615f2608233a2fe74d628e12aa2f730a695` equals this
 checkout; `check_site.py --compare-live` PASS 20/20. Measured on the live bridge
 right after: first prose delta 0.10 s after the question, full answer at 0.96 s
-(284 chars, 51 deltas). The 30-second manual microphone check is still owed.
+(284 chars, 51 deltas). The user reports (2026-09-11) that the microphone check for
+today's two bridge shipments was performed as a TTS-to-STT loopback -- the
+synthesized voice fed back into the speech-to-text path -- rather than with a
+live microphone; that is the same round trip the GPU stack's own start-up
+acceptance runs, and it exercises the speech path end to end but not a room's
+acoustics or the barge-in gate.
 

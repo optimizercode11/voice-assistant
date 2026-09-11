@@ -565,3 +565,17 @@ live microphone; that is the same round trip the GPU stack's own start-up
 acceptance runs, and it exercises the speech path end to end but not a room's
 acoustics or the barge-in gate.
 
+### Gapless clips (2026-09-11)
+
+After streamed speech shipped, the pauses between sentences were still reported
+as unnatural.  The remaining cost was structural: every clip boundary swapped
+the `<audio>` element's source, which is a media load, a decode and a restart
+(50-150 ms of dead air and an audible jolt), and the next group was taken a fixed
+500 ms before the seam, too late for a large group's synthesis.  Clips are now
+decoded on arrival and scheduled back to back on the AudioContext already built
+for the glow (`gapless` in `web/chat.js`), and the next group is taken when its
+estimated synthesis must start.  `voice_tts_browser.mjs` reports the scheduler
+was used (`speech stats {"gapless":3,"element":0}` in the streamed turn); the
+echo-path harness models the scheduler as idle, which is the element branch the
+watcher already had.
+

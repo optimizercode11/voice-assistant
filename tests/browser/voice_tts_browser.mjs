@@ -170,6 +170,9 @@ try{
    'every streamed word is spoken, in order, exactly once');
  assert.equal(await page.locator('.message.assistant').last().locator('p').first().textContent(),STREAMED,
    'the transcript shows the answer the bridge committed, not the stream');
+ const stats=await page.evaluate(()=>window.__speechStats);
+ console.log('speech stats',JSON.stringify(stats));
+ assert.ok(stats.gapless+stats.element>=said.length,'every streamed clip was played, gapless when the audio graph is running');
 
  assert.deepEqual(errors,[]);
  if(sabotage)assert.ok(true,'the page must load the sabotage replacement');

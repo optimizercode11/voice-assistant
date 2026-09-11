@@ -132,6 +132,9 @@ let bargeRaf = 0, bargeVoiced = 0, bargeLast = 0;
 let playbackStartedAt = io.epoch, playbackEndedAt = 0;
 const {stream, analyser, playbackAnalyser, player, performance,
        requestAnimationFrame, cancelAnimationFrame} = io;
+// The gapless scheduler (2026-09-11) is idle in this harness: the reply here is
+// the media element, exactly as the watcher's element branch sees it.
+const gapless = io.gapless ?? {playing: false};
 const $ = () => io.note;
 const bargeWanted = () => true;
 const originalGate = nearEndSpeech;

@@ -113,6 +113,15 @@ time-to-first-token instead of after the whole reply, and the TTS engine still
 batches the bulk of it.  What the stream said is reconciled against the answer
 at the end; the answer's unspoken remainder wins if they differ.
 
+The clips of one reply are played gaplessly (2026-09-11): each is decoded the
+moment its bytes arrive and scheduled on the reply's AudioContext to start at
+the sample where the previous one ends, instead of swapping the media element's
+source between them -- a media load, a decode and a restart at every seam, heard
+as a jolt between sentences.  The next group of text is taken early enough for
+its synthesis to land before the seam (about 3 ms per queued character plus
+400 ms of headroom against the audio still scheduled).  When the context is not
+running the element path is the fallback, one clip at a time.
+
 ## Turn-taking and barge-in
 
 `web/chat.js::listen()` records a clip until roughly 1 s of silence after

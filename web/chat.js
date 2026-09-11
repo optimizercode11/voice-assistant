@@ -539,7 +539,7 @@ function startPlaybackGlow() {
   stopPlaybackGlow();
   const bytes = new Uint8Array(playbackAnalyser.fftSize);
   const step = () => {
-    if (player.paused || player.ended) { glowRaf = 0; setGlow(0); return; }
+    if (!gapless.playing && (player.paused || player.ended)) { glowRaf = 0; setGlow(0); return; }
     playbackAnalyser.getByteTimeDomainData(bytes);
     setGlow(rmsOf(bytes.map ? Array.from(bytes, v => (v - 128) / 128) : bytes, 1) * 4.5);
     glowRaf = requestAnimationFrame(step);
@@ -588,6 +588,40 @@ function replaceAudio(blob) {
   if (audioURL) URL.revokeObjectURL(audioURL);
   audioURL = URL.createObjectURL(blob); player.src = audioURL;
 }
+// ------------------------------------------------ gapless playback (2026-09-11)
+// Swapping the <audio> element's src between the clips of one reply costs a
+// media load, a decode and a restart at every seam: 50-150 ms of dead air and
+// an audible jolt between sentences, which is what "the pauses sound
+// unnatural" meant.  With the reply's AudioContext already built for the glow,
+// each clip is decoded the moment its bytes arrive and scheduled to start at
+// the sample where the previous one ends.  The element path stays as the
+// fallback when the context is not running (no gesture yet, or refused).
+const gapless = {
+  playing: false, sources: new Set(), nextAt: 0, clips: 0,
+  available() { return !!(context && context.state === 'running' && playbackAnalyser); },
+  async decode(blob) { return context.decodeAudioData(await blob.arrayBuffer()); },
+  remainingMs() { return context ? Math.max(0, (this.nextAt - context.currentTime) * 1000) : 0; },
+  play(buffer, signal, onStart) {
+    return new Promise((resolve, reject) => {
+      const src = context.createBufferSource(); src.buffer = buffer;
+      src.connect(playbackAnalyser);
+      const now = context.currentTime;
+      const at = Math.max(now + 0.01, this.nextAt);
+      this.nextAt = at + buffer.duration;
+      this.sources.add(src); this.clips++;
+      let done = false;
+      const settle = () => { this.sources.delete(src); if (!this.sources.size) this.playing = false; signal?.removeEventListener('abort', cancel); };
+      const finish = () => { if (done) return; done = true; settle(); resolve(); };
+      const cancel = () => { if (done) return; done = true; try { src.stop(); } catch (_) {} settle(); reject(new DOMException('Stopped', 'AbortError')); };
+      src.onended = finish;
+      signal?.addEventListener('abort', cancel, {once: true});
+      src.start(at);
+      setTimeout(() => { if (!done) { this.playing = true; onStart?.(); } }, Math.max(0, (at - now) * 1000));
+    });
+  },
+  stop() { for (const src of this.sources) { try { src.stop(); } catch (_) {} } this.sources.clear(); this.playing = false; this.nextAt = 0; },
+};
+window.__speechStats = {gapless: 0, element: 0};   // read by the browser suites
 function primeAudio() {
   // Safari authorizes this same native media element in the initiating gesture.
   const wav = new ArrayBuffer(4844), d = new DataView(wav);
@@ -600,7 +634,7 @@ function stopSession(note = 'Conversation ended. Start again whenever you like.'
   stopBargeWatch(); stopThinkingAloud(); replySeam = false;
   heldText = ''; fragmentHolds = 0;
   active = false; epoch++; abort?.abort(); abort = null; busy = false;
-  clearCapture(); player.pause(); stopPlaybackGlow(); setGlow(0);
+  clearCapture(); player.pause(); gapless.stop(); stopPlaybackGlow(); setGlow(0);
   if (stream) {stream.getTracks().forEach(track=>track.stop()); stream = null;}
   source?.disconnect(); source = null; analyser = null;
   // The AudioContext deliberately survives: the reply's glow is wired with
@@ -742,7 +776,7 @@ function startBargeWatch() {
     analyser.getFloatTimeDomainData(samples);
     const mic = Math.sqrt(samples.reduce((sum, x) => sum + x * x, 0) / samples.length);
     let playback = 0;
-    if (bytes && !player.paused && !player.ended) {
+    if (bytes && (gapless.playing || (!player.paused && !player.ended))) {
       playbackAnalyser.getByteTimeDomainData(bytes);
       playback = rmsOf(Array.from(bytes, value => (value - 128) / 128), 1);
     }
@@ -1035,47 +1069,64 @@ async function speakStreamed(src, signal, onFirstClip) {
       .catch(error => { if (error.name !== 'AbortError') error.keepSession = true; throw error; });
   };
   let first = true, prevLen = 0;
+  const budget = () => first ? Infinity : Math.min(SPEECH_CHUNK.groupMax, Math.max(SPEECH_CHUNK.maxChars, prevLen * SPEECH_CHUNK.growth));
+  const queuedChars = () => src.queue.reduce((sum, piece) => sum + piece.length + 1, 0);
   const take = () => {
     if (!src.queue.length) return null;
     let group;
     if (first) { first = false; group = src.queue.shift(); }
     else {
-      const budget = Math.min(SPEECH_CHUNK.groupMax, Math.max(SPEECH_CHUNK.maxChars, prevLen * SPEECH_CHUNK.growth));
+      const cap = budget();
       group = '';
-      while (src.queue.length && (!group || group.length + 1 + src.queue[0].length <= budget))
+      while (src.queue.length && (!group || group.length + 1 + src.queue[0].length <= cap))
         group = group ? group + ' ' + src.queue.shift() : src.queue.shift();
     }
     prevLen = group.length; src.taken += (src.taken ? ' ' : '') + group;
     return group;
   };
-  const next = async () => { for (;;) { const g = take(); if (g) return g; if (src.closed) return null; await src.wait(signal); } };
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-  let group = await next();
+  // The next group is taken when its synthesis must start to land before the
+  // seam: ~3 ms per queued character plus a fixed 400 ms, measured against
+  // how much scheduled audio is left -- or at once when the text is complete
+  // or a whole group's worth has already arrived.
+  const nextGroup = async () => {
+    for (;;) {
+      const chars = queuedChars();
+      if (src.closed) return take();
+      if (first || chars >= budget() || gapless.remainingMs() <= 400 + 3 * chars) { const g = take(); if (g) return g; }
+      if (!src.queue.length && !src.closed) { await src.wait(signal); continue; }
+      await sleep(50);
+    }
+  };
+  const useGapless = gapless.available();
+  let group = await nextGroup();
   if (!group) return false;
-  let pending = clipFor(group), index = 0;
+  let index = 0;
+  let pending = clipFor(group).then(async audio => useGapless ? gapless.decode(audio) : audio);
   try {
     while (group) {
-      const audio = await pending;
+      const clip = await pending;
       if (signal.aborted) throw new DOMException('Stopped', 'AbortError');
-      if (!index) onFirstClip?.();
-      let startResolve; const started = new Promise(resolve => { startResolve = resolve; });
-      const playing = playReply(audio, signal, false, index === 0, startResolve);
-      // Take the next group late: what has arrived by ~0.5 s before this clip
-      // ends travels together, and its synthesis still lands before the seam.
-      const durationMs = Math.max(0, (audio.size - 44) / 2 / 24000 * 1000);
-      await Promise.race([started, playing]);
-      await Promise.race([sleep(Math.max(0, durationMs - 500)), playing]);
-      const following = next().then(g => g ? {g, clip: clipFor(g)} : null);
-      await playing;
-      const item = await following;
-      if (!item) break;
+      const started = () => {
+        if (!index) { onFirstClip?.(); playbackStartedAt = performance.now(); startPlaybackGlow(); startBargeWatch(); }
+        else if (!glowRaf) startPlaybackGlow();   // a late clip after a gap re-lights the orb
+      };
+      let playing;
+      if (useGapless) { window.__speechStats.gapless++; playing = gapless.play(clip, signal, started); }
+      else { window.__speechStats.element++; if (!index) onFirstClip?.(); playing = playReply(clip, signal, false, index === 0); }
+      const following = nextGroup().then(g => g ? {g, clip: clipFor(g).then(audio => useGapless ? gapless.decode(audio) : audio)} : null);
+      const item = await following;          // resolves as soon as the next group is taken and fetched...
+      if (!item) { await playing; break; }   // ...or when the text is finished
+      if (!useGapless) await playing;        // the element can only hold one clip
       group = item.g; pending = item.clip; index++;
+      if (useGapless) playing.catch(() => {});
     }
   } finally {
-    // The reply is over (or was cut): close the settle window and the gate now,
-    // since every clip was played as a continuation.
+    // Every clip was played as a continuation: close the settle window and the
+    // gate here, when the whole reply is over (or was cut).
     replySeam = false; playbackEndedAt = performance.now();
     stopPlaybackGlow(); stopBargeWatch(); setGlow(0);
+    if (useGapless) gapless.nextAt = 0;
   }
   return true;
 }
@@ -1293,7 +1344,7 @@ $('end').onclick=()=>stopSession();
 $('finish').onclick=()=>{if(recorder?.state==='recording'){recorder.sendNow=true;recorder.stop();}};
 function interruptReply() {
   if(!busy)return;
-  epoch++;abort?.abort();abort=null;busy=false;clearCapture();replySeam=false;player.pause();
+  epoch++;abort?.abort();abort=null;busy=false;clearCapture();replySeam=false;player.pause();gapless.stop();
   playbackEndedAt = performance.now();
   if(active)listen();else setState('idle','Reply interrupted. Send another message when ready.');
 }

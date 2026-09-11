@@ -579,3 +579,9 @@ was used (`speech stats {"gapless":3,"element":0}` in the streamed turn); the
 echo-path harness models the scheduler as idle, which is the element branch the
 watcher already had.
 
+Shipped to the CPU bridge as campaign `voice-gapless-20260911-a` from head dd64a29:
+stage, install and restart PASS under the guard. Bridge PID 62993 since 08:53:46 UTC,
+NRestarts=0; `voice-stack-gpu2.service` kept PID 53262 / 07:37:54 UTC. Served `chat.js`
+`e2f3f6b501c5e0841a19294dab87dec2a49e96f3140cab2ccb030dc733121999` equals this
+checkout; `check_site.py --compare-live` PASS 20/20.
+

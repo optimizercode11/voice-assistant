@@ -1,0 +1,67 @@
+{
+  "campaign": "voice-gapless-20260911-a",
+  "command": [
+    "bash",
+    "-c",
+    "\n        set -euo pipefail\n        live=\"$HOME/qwen36/voice-stack/voice-tools-20260910\"\n        test ! -e rollback\n        systemctl --user is-active voice-stack-gpu2.service\n        systemctl --user --job-mode=ignore-dependencies stop voice-tools-bridge.service\n        mkdir rollback\n        rsync -a \"$live/\" rollback/\n        touch rollback-complete\n        rsync -aR web tools deploy scripts config README.md ARCHITECTURE.md RUNBOOK.md TOOLS.md PROVENANCE.md tests/README.md .guarded-run \"$live/\"\n        cd \"$live\"\n        PYTHONDONTWRITEBYTECODE=1 python3 tools/voicectl.py --config config/host.toml index build\n        PYTHONDONTWRITEBYTECODE=1 python3 -u tools/voicectl.py --config config/host.toml doctor\n        sha256sum web/chat.js web/chat.html tools/turn_control.py\n      "
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "24-27",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stage/voice-gapless-20260911-a",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-11T08:53:46.121104241Z",
+  "git_head": "dd64a29da5ce234d6154cff6ae2af825ef4857f0",
+  "inputs": [
+    {
+      "bytes": 86083,
+      "exists": true,
+      "path": "web/chat.js",
+      "sha256": "e2f3f6b501c5e0841a19294dab87dec2a49e96f3140cab2ccb030dc733121999",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 15259,
+      "exists": true,
+      "path": "web/chat.html",
+      "sha256": "6a898c5488cc1750ec4417a39973c245d28cfc967eb5c8d57118cb320d7953cb",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 37289,
+      "exists": true,
+      "path": "tools/speech_ui.py",
+      "sha256": "b457791e07bf1e11ed6b87658b06027adf18f6f4f0d5e01ab9873825f56a3a31",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 9584,
+      "exists": true,
+      "path": "tools/turn_control.py",
+      "sha256": "99c198206031a87169389a82ce13d858e658eef3378606b5c103e6f8186bdc41",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 4680,
+      "exists": true,
+      "path": "config/host.toml",
+      "sha256": "895fe78ed872f91cadc5c47bd89d8d7f233722e3fd69878c6f57d73a2087591d",
+      "verification": "current_local"
+    }
+  ],
+  "label": "install",
+  "log": "/home/ambudsharma/qwen36/voice-stage/voice-gapless-20260911-a/evidence/guarded-voice-gapless-20260911-a-20260911T085345Z-62882.log",
+  "run_id": "voice-gapless-20260911-a-20260911T085345Z-62882",
+  "schema_version": 2,
+  "source_fingerprint": "c84308fe6ce93c39300da09e916965e7a231262d98cac9cc85ae4e50af104de5",
+  "started_utc": "2026-09-11T08:53:45.866394305Z",
+  "status": "PASS"
+}

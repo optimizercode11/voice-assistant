@@ -1,0 +1,2 @@
+guarded-run: campaign=voice-gapless-20260911-a label=restart mode=cpu cpus=24-27
+command: systemctl --user --job-mode=ignore-dependencies restart voice-tools-bridge.service

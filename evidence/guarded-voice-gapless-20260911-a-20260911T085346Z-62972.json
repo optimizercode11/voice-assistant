@@ -1,0 +1,33 @@
+{
+  "campaign": "voice-gapless-20260911-a",
+  "command": [
+    "systemctl",
+    "--user",
+    "--job-mode=ignore-dependencies",
+    "restart",
+    "voice-tools-bridge.service"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "24-27",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stage/voice-gapless-20260911-a",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-11T08:53:46.421012458Z",
+  "git_head": "dd64a29da5ce234d6154cff6ae2af825ef4857f0",
+  "inputs": [],
+  "label": "restart",
+  "log": "/home/ambudsharma/qwen36/voice-stage/voice-gapless-20260911-a/evidence/guarded-voice-gapless-20260911-a-20260911T085346Z-62972.log",
+  "run_id": "voice-gapless-20260911-a-20260911T085346Z-62972",
+  "schema_version": 2,
+  "source_fingerprint": "c84308fe6ce93c39300da09e916965e7a231262d98cac9cc85ae4e50af104de5",
+  "started_utc": "2026-09-11T08:53:46.401223418Z",
+  "status": "PASS"
+}

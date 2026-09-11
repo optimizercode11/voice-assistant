@@ -9,6 +9,11 @@
 .settings small{font-size:11px;line-height:1.45}.speech-corrections{grid-column:1/-1;font-size:12px;text-align:left}.speech-corrections summary{cursor:pointer}.speech-corrections label{margin-top:12px}.speech-corrections .check{display:flex;align-items:center;gap:8px}.speech-corrections textarea{width:100%;resize:vertical;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px;font-size:12px}.speech-corrections small{display:block;color:var(--muted);margin-top:8px}.message .transcript-note{font-size:12px;color:var(--muted);margin-top:8px}
 .message .toolnote,.message .sources{font-size:11px;color:var(--muted);margin:8px 0 0;padding-top:7px;border-top:1px dashed var(--line);letter-spacing:.2px}
 .message .sources{color:var(--green)}
+/* A third voice: what the coding agent said when it finished, pushed by the
+   bridge and spoken without being asked.  Marked so a reader can tell it from
+   Qwen at a glance. */
+.message.claude{padding:4px 0 4px 14px;border-left:3px solid var(--green)}
+.message.claude .role{color:var(--green)}
 /* The orb is the one place this page can admit what it is actually doing.
    --glow is written by chat.js once per animation frame from measured audio
    energy -- microphone RMS while listening, the reply's own waveform while

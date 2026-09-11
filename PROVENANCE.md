@@ -728,3 +728,56 @@ Not done, on purpose: unprompted spoken updates (no push channel from bridge to
 page yet), an `interrupt` tool, and the verbatim-bypass path.  Measured reason
 the last one can wait: in the second turn the local model relayed the spoken
 line whole, in a single generation.
+
+### The bridge speaks first: pushed Claude Code updates (2026-09-11)
+
+Asked for after the pull version shipped: "we need to have a push event, we
+cannot be having it be polled."  Three hops, none of them polling:
+`mcp_claude.py --push` writes `notifications/voice/update` (a JSON-RPC
+notification) up its stdio pipe the moment a turn finishes and counts it as
+delivered; `mcp_client.py` routes notifications to one subscriber
+(`MCPSession.subscribe`, `Registry.subscribe`); `speech_ui.py` gained `Events`
+and `GET /events`, a server-sent events stream that forwards exactly one
+method with six clipped fields, keeps a bounded backlog for a page that is
+not open yet, never replays a delivered update, refuses cross-origin
+listeners, and notices a closed tab within half a second (a dead subscriber
+still on the list would otherwise swallow an update meant for the backlog --
+found by `tests/events_test.py`, fixed before shipping).  `web/chat.js` holds
+`/events` open when `/chat/health` says `events: true`, shows an update as a
+third voice ("Claude Code"), speaks it through the reply's TTS path, appends a
+bracketed note to the last assistant turn so the model can refer to it, and
+speaks only when it is nobody's turn: not over a reply, not within a second
+of a voice on the microphone, never while paused (the update waits for
+Resume), and at the seam after a reply before the microphone reopens.
+
+Tests: `mcp_claude_test.py` 16 green (push arm added); `events_test.py` 8
+green over the real bridge process with two real MCP servers, its sabotage
+arm ("forward whatever the server notifies") reds exactly
+`test_only_the_update_method_is_spoken`; `voice_push_browser.mjs` green in
+Chromium, its sabotage arm (remove the pause hold) reports the failure and
+exits zero as `make sabotage` expects; `make test` and all twelve
+`make test-browser` suites green.
+
+Shipped as campaign `voice-claude-20260911-b`: `stage` PASS (`doctor --probe`:
+`claude up 2 tools`), `install` PASS with the rollback snapshot (engine health
+gate, as in campaign a; `voice-stack-gpu2.service` still `failed` with orphaned
+engines), `restart` PASS (`evidence/guarded-voice-claude-20260911-b-*`).
+Bridge PID 22795 since 17:01:12 UTC, NRestarts=0; `/chat/health` reports
+`events: true` and 14 tools; served `chat.js` `a0148a7296433cb4…` equals this
+checkout; `check_site.py --compare-live` PASS 20/20.  The forced command on
+codex now ends in `--push`, and the server process the restarted bridge holds
+carries it.
+
+Measured live (`probe_events.py`): `/events` answered 200 `text/event-stream`;
+"Ask Claude Code to tell me which git branch the voice assistant repository is
+on and whether the working tree is clean" was queued in 2.7 s via
+`mcp__claude__send`; the finished turn arrived on the open stream **16.2 s
+after the request, with nothing asking** -- main branch, five commits ahead,
+fifteen modified files (true: this record was not yet committed).  Not
+performed: hearing it through a real microphone in a room; the browser suite
+proves the page half with a fake capture device.
+
+After the probe, `send`'s description under `--push` now tells the model the
+result will be spoken unprompted (the live reply still sent the user off to
+"ask for updates"); the server runs from codex's checkout, so the bridge sees
+the new description at its next connection, no deploy needed.

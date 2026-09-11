@@ -21,6 +21,10 @@ let fragmentHolds = 0, heldText = '';
 // conversation.  Nothing the model says later can clear it, because a paused
 // microphone hears nothing for the model to say it about.
 let paused = false, pauseReason = '';
+// Updates the bridge pushes on its own (a finished Claude Code turn).  They
+// queue here until it is safe to speak: never over a reply, never over a
+// person mid-sentence, and never while the microphone is paused.
+let updateSource = null, pendingUpdates = [], updateTimer = 0, micLastVoiceAt = 0;
 let bargeRaf = 0, bargeVoiced = 0, bargeLast = 0, playbackStartedAt = 0, playbackEndedAt = 0;
 // A reply is played as several clips (one per sentence).  For the barge-in gate
 // the whole reply is ONE playback: the settle window opens once, when the first
@@ -495,11 +499,14 @@ window.addEventListener('storage', event => {
 function message(role, text, original = null, evidence = null) {
   $('messages').querySelector('.empty')?.remove();
   const item = document.createElement('div'); item.className = `message ${role}`;
-  const label = document.createElement('span'); label.className = 'role'; label.textContent = role === 'user' ? 'You' : 'Qwen';
+  const label = document.createElement('span'); label.className = 'role'; label.textContent = role === 'user' ? 'You' : role === 'claude' ? 'Claude Code' : 'Qwen';
   const body = document.createElement('p'); body.textContent = text; item.append(label, body); $('messages').append(item);
   if(original!==null){const note=document.createElement('p');note.className='transcript-note';note.textContent='Speech correction · STT heard: '+original;item.append(note);}
   // Provenance stays visible after the reply: "which of my notes said that" is
   // the question a person asks next, and it must not require asking again.
+  if (evidence?.note) {
+    const note = document.createElement('p'); note.className = 'toolnote'; note.textContent = evidence.note; item.append(note);
+  }
   if (evidence?.tools?.length) {
     const used = document.createElement('p'); used.className = 'toolnote';
     used.textContent = 'Looked up · ' + evidence.tools.map(tool =>
@@ -702,10 +709,15 @@ function resumeListening() {
   paused = false; pauseReason = '';
   if (active && !busy) listen();
   else setState(active ? phase : 'idle', 'Listening resumes after this reply.');
+  drainUpdates();   // whatever finished while the microphone was paused is spoken now, not never
 }
 function listen() {
   if (!active || !stream) return;
   if (paused) { holdListening(); return; }
+  // The seam after a reply, before the microphone reopens, is the one moment
+  // that is certainly nobody's turn: whatever Claude Code finished meanwhile
+  // is said here, and listening resumes after it.
+  if (pendingUpdates.length && performance.now() - micLastVoiceAt >= UPDATE_QUIET_MS) { clearTimeout(updateTimer); updateTimer = 0; announceUpdate(pendingUpdates.shift()); return; }
   clearCapture(); player.pause(); stream.getTracks().forEach(track=>{track.enabled=true;});
   const mime = ['audio/webm;codecs=opus','audio/mp4','audio/webm','audio/ogg;codecs=opus'].find(value=>MediaRecorder.isTypeSupported(value));
   const rec = new MediaRecorder(stream,mime?{mimeType:mime}:{}); recorder = rec;
@@ -737,7 +749,7 @@ function listen() {
     $('level').style.width = `${Math.min(100,rms*1000)}%`;
     setGlow(rms * 7);                       // same measurement, one shared meter
     if (now < settleUntil) {raf = requestAnimationFrame(tick); return;}
-    if (rms > .015) {voiced += Math.min(100,now-lastTick);lastVoice=now;}
+    if (rms > .015) {voiced += Math.min(100,now-lastTick);lastVoice=now;micLastVoiceAt=now;}
     lastTick=now;
     // 20 s, not the engine's 30 s ceiling: measured against known ground truth,
 // a 19.5 s upload keeps 96% of its words and a 29.3 s upload keeps 19% -- the
@@ -753,6 +765,81 @@ function listen() {
     raf = requestAnimationFrame(tick);
   }
   raf = requestAnimationFrame(tick);
+}
+// ---------------------------------------------------------------- pushed updates
+// The bridge speaks first exactly once per finished Claude Code turn, over
+// /events (server-sent events).  Nothing here polls: the connection is held
+// open by the browser, reconnected by the browser, and an update is spoken
+// through the same TTS path as a reply.  What is spoken is the line the coding
+// agent wrote for speech, so no code reaches the speaker.
+function connectUpdates() {
+  if (updateSource || typeof EventSource !== 'function') return;
+  updateSource = new EventSource('/events');
+  updateSource.addEventListener('update', event => {
+    let update; try { update = JSON.parse(event.data); } catch (_) { return; }
+    const spoken = typeof update?.spoken === 'string' ? update.spoken.trim().slice(0, 600) : '';
+    if (!spoken) return;
+    const activity = update.activity && typeof update.activity === 'object' ? update.activity : {};
+    pendingUpdates.push({spoken, isError: update.is_error === true,
+                         seconds: Number.isFinite(update.seconds) ? update.seconds : null,
+                         commands: Number(activity.commands) || 0, filesEdited: Number(activity.files_edited) || 0});
+    drainUpdates();
+  });
+}
+function updateNote(update) {
+  const bits = [update.isError ? 'Claude Code stopped' : 'Update from Claude Code'];
+  if (update.seconds !== null) bits.push(`${Math.round(update.seconds)} s`);
+  if (update.commands) bits.push(`${update.commands} command${update.commands === 1 ? '' : 's'}`);
+  if (update.filesEdited) bits.push(`${update.filesEdited} file${update.filesEdited === 1 ? '' : 's'} edited`);
+  return bits.join(' · ');
+}
+// When is it safe to speak?  Not over a reply or a turn in progress (busy), not
+// while the person is talking (the endpointer heard a voice within 1.5 s), and
+// never while the microphone is paused: paused means "be quiet", and the update
+// waits for Resume.  The retry timer exists only while something is pending.
+// Quiet for as long as the endpointer needs to call a turn finished: if the
+// microphone would have cut here, the person has stopped talking.
+const UPDATE_QUIET_MS = 1000;
+function drainUpdates() {
+  clearTimeout(updateTimer); updateTimer = 0;
+  if (!pendingUpdates.length) return;
+  if (paused) return;
+  const talking = active && phase === 'listening' && performance.now() - micLastVoiceAt < UPDATE_QUIET_MS;
+  if (busy || talking) { updateTimer = setTimeout(drainUpdates, 500); return; }
+  announceUpdate(pendingUpdates.shift());
+}
+function noteUpdateInHistory(update) {
+  // Qwen must know what Claude Code said, or "tell it to also do X" has no
+  // referent.  History alternates roles and a turn is q/a, so the update rides on
+  // the last assistant turn as a bracketed note; before any turn it is shown only.
+  const last = transcript.at(-1);
+  if (!last) return;
+  const note = `\n[Claude Code reported: ${update.spoken}]`;
+  if (last.a.length + note.length > MAX_MESSAGE) return;
+  transcript = [...transcript.slice(0, -1), {...last, a: last.a + note}];
+  history = historyFrom(transcript);
+}
+async function announceUpdate(update) {
+  clearCapture(); player.pause(); busy = true;
+  const id = ++epoch, controller = new AbortController(); abort = controller;
+  const check = () => {if(id !== epoch || controller.signal.aborted) throw new DOMException('Stopped','AbortError');};
+  try {
+    message('claude', update.spoken, null, {note: updateNote(update)});
+    noteUpdateInHistory(update);
+    saveConversation();
+    setState('synthesizing', 'Claude Code has an update…');
+    await speakReply(update.spoken, controller.signal,
+      () => setState('speaking', active ? 'Claude Code has an update. Press Space to interrupt; listening resumes after.' : 'Claude Code has an update.'));
+    check(); busy = false;
+    if (active) listen(); else setState('idle', 'Send another message, or start a voice conversation.');
+  } catch (error) {
+    if (id !== epoch) return;
+    busy = false;
+    if (active) listen(); else setState('idle', error.name === 'AbortError' ? 'Update interrupted.' : error.message);
+  } finally {
+    if (id === epoch) abort = null;
+    drainUpdates();
+  }
 }
 function bargeWanted() {
   const box = $('barge-in');
@@ -1574,7 +1661,7 @@ function refreshApprovals() {
 // and it kept a background request in flight forever, which is both a timer on a
 // page whose whole job is the microphone and enough to wedge the browser suite.
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshApprovals(); });
-window.addEventListener('pagehide',()=>{stopSession();releaseAudioContext();});
+window.addEventListener('pagehide',()=>{stopSession();releaseAudioContext();updateSource?.close();});
 // Before the first fetch, so a reload cannot let a turn be sent against a
 // transcript the page has not rebuilt yet.
 const restoredTurns = restoreChat();
@@ -1588,6 +1675,7 @@ const restoredTurns = restoreChat();
     languageList=languages.languages;autoLanguage=languages.default;
     $('language').replaceChildren();const automatic=document.createElement('option');automatic.value='auto';automatic.textContent='Auto: English / Hindi';$('language').append(automatic);for(const lang of languageList){const option=document.createElement('option');option.value=lang.code;option.textContent=lang.name;$('language').append(option);}$('language').value=[...$('language').options].some(x=>x.value===speechPreferences.language)?speechPreferences.language:'auto';
     voiceList=catalogue.voices;voices();ready=true;refreshApprovals();
+    if(health.events===true)connectUpdates();
     if(!canRecord && location.protocol==='http:' && Number.isInteger(health.https_port)){
       const url=new URL(location.href);url.protocol='https:';url.port=health.https_port;secureURL=url.href;$('start').textContent='Open secure conversation';
     }

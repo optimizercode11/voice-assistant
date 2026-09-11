@@ -12,6 +12,8 @@ speech bridge  tools/speech_ui.py            HTTP :8091   HTTPS :8092 (microphon
    ├── POST /chat/completions → q38_27_server :8080     (Qwen3.8-27B NVFP4)
    ├── POST /tts, GET /languages|/voices|/stats|/health → kserver :8090 (Kokoro-82M)
    ├── GET  /tools, /chat/health         → what this bridge will let the model do
+   ├── GET  /events                      → server-sent events: the one path on which the
+   │                                       bridge speaks first (a Claude Code turn finished)
    └── GET  /chat, /chat.js, /           → the pages themselves
 
         inside one POST /chat/completions, if tools are configured:
@@ -61,6 +63,16 @@ belongs to.  It is safe in the direction it points: a control can only make the
 page hear *less*, it comes only from the bridge's own answer (a saved
 transcript cannot carry one), a failed call has it stripped at the source, and
 undoing it is a human action with no tool behind it.
+
+Since 2026-09-11 there is a second back-channel, and it points the other way:
+a **pushed update** (`GET /events`, server-sent events) makes the page *say*
+more, never hear more.  An MCP server that finishes work in the background --
+the Claude Code session -- writes a JSON-RPC notification up its pipe, the
+bridge forwards one whitelisted method with clipped fields, and the page speaks
+it when it is nobody's turn: never over a reply, never over a person, never
+while paused.  It is not a tool result and is never fed to the model; what the
+model sees of it is a bracketed note the page appends to its last turn.
+`TOOLS.md`, "Updates that arrive on their own".
 
 `tools/agent_tools.py` is the single choke point.  A builtin, a retrieval query
 and an MCP tool all reach the model as the same OpenAI tool object and all come

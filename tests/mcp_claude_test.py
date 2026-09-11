@@ -209,6 +209,61 @@ class ClaudeServerTests(unittest.TestCase):
         self.assertEqual(state['detail'], '')
 
 
+class PushTests(unittest.TestCase):
+    """With --push a finished turn is a notification up the wire, and is then delivered, not unread."""
+
+    def start(self, push):
+        instance = server(args=['--push'] if push else [])
+        heard = []
+        instance.on_notification = lambda name, method, params: heard.append((name, method, params))
+        tools = {tool.name: tool for tool in instance.start()}
+        return instance, tools, heard
+
+    def test_a_finished_turn_is_notified_and_not_repeated(self):
+        instance, tools, heard = self.start(push=True)
+        try:
+            instance.call(tools['send'], {'instruction': 'code'})
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline and not heard:
+                time.sleep(0.05)
+            self.assertEqual(len(heard), 1, 'exactly one notification per finished turn')
+            name, method, params = heard[0]
+            self.assertEqual((name, method), ('claude', 'notifications/voice/update'))
+            self.assertEqual(params['spoken'],
+                             'I fixed the manifest bug in the chat module and the tests pass. Nothing else changed.')
+            self.assertEqual(params['instruction'], 'code')
+            self.assertEqual(params['activity']['files_edited'], 1)
+            self.assertNotIn('detail', params, 'the report never rides the notification')
+            text, _ = self.instance_updates(instance, tools)
+            asked = parse(text)
+            self.assertFalse(asked['new'], 'a pushed update is delivered; asking again must not repeat it')
+            self.assertEqual(asked['state'], 'idle')
+            text, _ = instance.call(tools['updates'], {'detail': True})
+            self.assertIn('```python', parse(text)['detail'], 'the report is still there for whoever asks')
+        finally:
+            instance.stop()
+
+    def test_without_push_nothing_is_notified_and_updates_still_works(self):
+        instance, tools, heard = self.start(push=False)
+        try:
+            instance.call(tools['send'], {'instruction': 'plain'})
+            done = wait_idle(instance, tools)
+            self.assertEqual(done['updates'][0]['spoken'], 'You said plain')
+            self.assertEqual(heard, [])
+        finally:
+            instance.stop()
+
+    @staticmethod
+    def instance_updates(instance, tools):
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            text, is_error = instance.call(tools['updates'], {})
+            if parse(text)['state'] != 'working':
+                return text, is_error
+            time.sleep(0.05)
+        raise AssertionError('never idle')
+
+
 class ProcessHygieneTests(unittest.TestCase):
     def test_child_stdout_noise_never_reaches_the_wire(self):
         instance = server(env={'FAKE_CLAUDE_STDOUT_NOISE': '1'})

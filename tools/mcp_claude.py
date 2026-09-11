@@ -26,6 +26,14 @@ WHAT CROSSES INTO THE SESSION
     Permissions are Claude Code's own (bypass by default, per the operator's
     decision); nothing in this file second-guesses them.
 
+HOW A FINISHED TURN REACHES THE PAGE WITHOUT BEING ASKED
+    With --push, the moment a turn finishes this process writes a JSON-RPC
+    *notification* (no id) on the MCP wire: `notifications/voice/update` with
+    the spoken line and the counters.  The bridge forwards it to the page over
+    a server-sent events stream and the page speaks it when it is safe to.
+    Nothing polls.  A pushed update counts as delivered, so a later `updates`
+    call does not repeat it; without --push, `updates` is the only path.
+
 WHAT IT NEVER DOES
     It never writes a Claude Code event to its own stdout: stdout is the MCP
     wire, and the child's stdout is a separate pipe read by a thread.  A stray
@@ -48,6 +56,7 @@ SERVER_INFO = {"name": "voice-claude-code", "version": "1.0"}
 PROTOCOL = "2025-03-26"
 
 SPOKEN_MARK = "SPOKEN:"
+UPDATE_METHOD = "notifications/voice/update"
 MAX_INSTRUCTION = 4000
 MAX_SPOKEN_CHARS = 600            # a spoken line longer than this is not a spoken line
 MAX_DETAIL_CHARS_DEFAULT = 4500   # under the bridge's 6000-char result clip, with room for the envelope
@@ -142,8 +151,13 @@ def split_reply(text: str) -> tuple[str, str]:
 class Session:
     """The child, its reader thread, and everything learned from its stdout."""
 
-    def __init__(self, claude: str, cwd: str, extra_args: list[str], max_detail: int, log):
+    def __init__(self, claude: str, cwd: str, extra_args: list[str], max_detail: int, log, notify=None):
         self.claude, self.cwd, self.extra_args, self.max_detail, self.log = claude, cwd, list(extra_args), max_detail, log
+        # With `notify` set, a finished turn is PUSHED to the bridge the moment it
+        # lands and does not wait to be asked for -- so it is delivered, not
+        # unread, and "any news?" afterwards is honestly told there is none.
+        # Without it (an older bridge, or --no-push) `updates` is the only path.
+        self.notify = notify
         self.lock = threading.Lock()
         self.process: subprocess.Popen | None = None
         self.reader: threading.Thread | None = None
@@ -272,7 +286,15 @@ class Session:
             "finished_at": time.time(),
         })
         del self.updates[:-MAX_KEPT_UPDATES]
-        self.unread = min(self.unread + 1, len(self.updates))
+        if self.notify is not None:
+            try:
+                self.notify(self.updates[-1])
+                self.updates[-1]["pushed"] = True
+            except Exception as error:               # the wire failed; fall back to being asked
+                self.log(f"push failed: {error}")
+                self.unread = min(self.unread + 1, len(self.updates))
+        else:
+            self.unread = min(self.unread + 1, len(self.updates))
         self.in_flight, self.started_at = None, None
         self.activity = self._fresh_activity()
 
@@ -346,9 +368,23 @@ class Session:
 
 
 # -- MCP wire -----------------------------------------------------------------
+_WIRE = threading.Lock()   # replies come from the main thread, notifications from the reader thread
+
+
 def _write(message: dict) -> None:
-    sys.stdout.write(json.dumps(message) + "\n")
-    sys.stdout.flush()
+    with _WIRE:
+        sys.stdout.write(json.dumps(message) + "\n")
+        sys.stdout.flush()
+
+
+def notify_update(row: dict) -> None:
+    """A JSON-RPC notification (no id) the bridge may forward to the page.
+
+    Everything the page needs to speak the update and nothing it must not:
+    the report stays behind `updates(detail=true)`.
+    """
+    _write({"jsonrpc": "2.0", "method": UPDATE_METHOD,
+            "params": {key: value for key, value in row.items() if key != "detail"}})
 
 
 def _reply(identifier, result) -> None:
@@ -403,6 +439,8 @@ def doctor(arguments, claude: str | None) -> int:
                                 "stream-json", "--verbose", "--append-system-prompt", "<appendix>"]
                                + build_extra_args(arguments)))
     print(f"detail clip: {arguments.max_detail_chars} chars; spoken line: `{SPOKEN_MARK}` asked for at the source")
+    print("updates: " + ("PUSHED to the bridge as " + UPDATE_METHOD + " the moment a turn finishes (and delivered, not unread)"
+                         if arguments.push else "returned only when `updates` is called (no --push)"))
     return 0 if claude and os.path.isdir(cwd) else 1
 
 
@@ -416,6 +454,8 @@ def main() -> int:
                         help="Claude Code permission mode (default bypassPermissions, the operator's call)")
     parser.add_argument("--add-dir", action="append", default=[], help="extra directory Claude may work in")
     parser.add_argument("--max-detail-chars", type=int, default=MAX_DETAIL_CHARS_DEFAULT)
+    parser.add_argument("--push", action="store_true",
+                        help="push each finished turn to the bridge as a notification instead of waiting to be asked")
     parser.add_argument("--doctor", action="store_true", help="print the policy this argv encodes and exit")
     arguments = parser.parse_args()
 
@@ -428,7 +468,15 @@ def main() -> int:
         sys.stderr.flush()
 
     session = Session(claude or "claude", os.path.abspath(arguments.cwd), build_extra_args(arguments),
-                      max(200, arguments.max_detail_chars), log)
+                      max(200, arguments.max_detail_chars), log, notify=notify_update if arguments.push else None)
+    tools = json.loads(json.dumps(TOOLS))
+    if arguments.push:
+        # The model should not send the person off to ask: the result will be
+        # spoken the moment it lands.
+        tools[0]["description"] = tools[0]["description"].replace(
+            "Use `updates` later to hear how it went.",
+            "Claude Code will speak up on its own the moment it finishes, so tell the user they will hear "
+            "from it; `updates` is only for asking how it is going meanwhile.")
 
     def shutdown(*_):
         session.stop()
@@ -452,7 +500,7 @@ def main() -> int:
             if method == "initialize":
                 _reply(identifier, {"protocolVersion": PROTOCOL, "capabilities": {"tools": {}}, "serverInfo": SERVER_INFO})
             elif method == "tools/list":
-                _reply(identifier, {"tools": TOOLS})
+                _reply(identifier, {"tools": tools})
             elif method == "tools/call":
                 params = message.get("params") or {}
                 name, args = params.get("name"), params.get("arguments") or {}

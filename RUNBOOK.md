@@ -16,11 +16,18 @@ A third piece lives on **codex**, not on `vllm`: the Claude Code MCP server
 (`tools/mcp_claude.py`, shipped 2026-09-11 as the `claude` server in
 `config/host.toml`).  The bridge's MCP child is `ssh -T codex-claude`; the key
 behind that alias is authorized on codex with a forced command, so the
-server's argv (`--cwd`, `--add-dir`, `--claude`, permission mode) is in
-`codex:~/.ssh/authorized_keys`, not in this tree.  Promoting `tools/` to `vllm`
-copies the file but does not change what runs; to change the session's working
-directory or model, edit that `authorized_keys` line and let the bridge's next
-`send` spawn a fresh child.  `TOOLS.md`, "Guiding Claude Code by voice".
+server's argv (`--cwd`, `--add-dir`, `--claude`, permission mode, `--push`) is
+in `codex:~/.ssh/authorized_keys`, not in this tree.  Promoting `tools/` to
+`vllm` copies the file but does not change what runs; to change the session's
+working directory or model, edit that `authorized_keys` line and let the
+bridge's next `send` spawn a fresh child.  Note the split: the *server* runs
+from codex's checkout of this repository, the *bridge* from the promoted tree
+on `vllm`, so a change to `tools/mcp_claude.py` is live on the next connection
+without a deploy, while a change to `tools/speech_ui.py` or the page needs
+this procedure.  `--push` (2026-09-11) is what makes a finished turn arrive on
+the page's `/events` stream without being asked; the bridge on `vllm` must be
+at or after campaign `voice-claude-20260911-b` to have that route.  `TOOLS.md`,
+"Guiding Claude Code by voice" and "Updates that arrive on their own".
 
 Gate caveat (2026-09-11): `voice-stack-gpu2.service` reports `failed` while
 its engines run on as orphans (see `PROVENANCE.md`, "Guiding Claude Code by

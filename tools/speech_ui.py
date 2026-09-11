@@ -8,6 +8,7 @@ import argparse
 import http.client
 import json
 import os
+import queue
 from pathlib import Path
 import re
 import shutil
@@ -329,6 +330,87 @@ class Progress:
             pass
 
 
+class Events:
+    """Server-sent events: the one path on which the bridge speaks FIRST.
+
+    Everything else the page hears is the reply to something the person said.
+    An MCP server that finishes work in the background (the Claude Code
+    session) has no reply to ride on, and polling was ruled out, so it sends a
+    JSON-RPC notification up its stdio pipe; the registry hands it here; every
+    page with `/events` open gets it at once.
+
+    What is forwarded is deliberately a whitelist.  A notification is not a
+    tool result -- it never reaches the model -- but it IS spoken aloud by the
+    page, so only the fields the page needs cross, each clipped, from the one
+    method the page understands.  Anything else a server says first is dropped.
+
+    A finished turn with no page open is kept (bounded) and handed to the next
+    page that connects; one that was delivered to any page is not replayed, so
+    a reload cannot re-speak the afternoon.
+    """
+    METHOD = "notifications/voice/update"
+    BACKLOG = 20
+    MAX_SPOKEN = 600
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.subscribers: list[queue.Queue] = []
+        self.backlog: list[dict] = []
+        self.seq = 0
+        self.closed = False
+
+    def on_notification(self, server: str, method: str, params) -> None:
+        if method != self.METHOD or not isinstance(params, dict):
+            return
+        spoken = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", str(params.get("spoken") or "")).strip()
+        if not spoken:
+            return
+        activity = params.get("activity") if isinstance(params.get("activity"), dict) else {}
+        event = {
+            "type": "update",
+            "server": str(server)[:40],
+            "spoken": spoken[: self.MAX_SPOKEN],
+            "instruction": str(params.get("instruction") or "")[:200],
+            "is_error": bool(params.get("is_error")),
+            "seconds": params.get("seconds") if isinstance(params.get("seconds"), (int, float)) else None,
+            "activity": {key: int(value) for key, value in activity.items()
+                         if key in ("commands", "files_edited", "files_read", "other_tools")
+                         and isinstance(value, int)},
+        }
+        self.publish(event)
+
+    def publish(self, event: dict) -> None:
+        with self.lock:
+            if self.closed:
+                return
+            self.seq += 1
+            event = {**event, "id": self.seq}
+            if self.subscribers:
+                for subscriber in self.subscribers:
+                    subscriber.put(event)
+            else:
+                self.backlog.append(event)
+                del self.backlog[:-self.BACKLOG]
+
+    def subscribe(self) -> tuple[queue.Queue, list[dict]]:
+        subscriber: queue.Queue = queue.Queue()
+        with self.lock:
+            self.subscribers.append(subscriber)
+            pending, self.backlog = self.backlog, []
+        return subscriber, pending
+
+    def unsubscribe(self, subscriber: queue.Queue) -> None:
+        with self.lock:
+            if subscriber in self.subscribers:
+                self.subscribers.remove(subscriber)
+
+    def close(self) -> None:
+        with self.lock:
+            self.closed = True
+            for subscriber in self.subscribers:
+                subscriber.put(None)
+
+
 def approvals_store(registry):
     """The directory-grant queue for this bridge, or None when it is switched off.
 
@@ -346,9 +428,10 @@ class SpeechServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, address, config, *, tls=None, asr_lock=None, chat_lock=None, registry=None):
+    def __init__(self, address, config, *, tls=None, asr_lock=None, chat_lock=None, registry=None, events=None):
         self.config = config
         self.registry = registry
+        self.events = events
         self.tls = tls
         self.chat_lock = chat_lock if chat_lock is not None else threading.Lock()
         self.asr_lock = asr_lock if asr_lock is not None else threading.Lock()
@@ -461,7 +544,8 @@ class Handler(BaseHTTPRequestHandler):
             health = {"available": bool(getattr(config, "llm_url", None)),
                       "https_port": getattr(config, "https_port", None),
                       "tools": registry.names() if registry is not None else [],
-                      "streaming": registry is not None}
+                      "streaming": registry is not None,
+                      "events": self.server.events is not None}
             if registry is not None:
                 status = registry.status()
                 health["tool_sources"] = {row["name"]: row["source"] for row in status["tools"]}
@@ -483,6 +567,13 @@ class Handler(BaseHTTPRequestHandler):
                                     "max_bytes": MAX_BYTES, "max_seconds": MAX_SECONDS})
         if self.command == "GET" and path == "/approvals":
             return self.approvals()
+        if self.command == "GET" and path == "/events":
+            # EventSource sends an Origin header only cross-origin, which is
+            # exactly the case to refuse: another site must not listen in on
+            # what the coding agent just did on this machine.
+            if not self.same_origin():
+                raise RequestError(403, "Use the speech UI on this server.")
+            return self.events_stream()
         if self.command == "GET" and path in {"/languages", "/voices", "/stats", "/health"}:
             return self.proxy()
         if self.command != "POST" or path not in {"/tts", "/stt", "/chat/completions", "/approvals"}:
@@ -550,6 +641,60 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(200, result)
         finally:
             self.server.asr_lock.release()
+
+    def events_stream(self):
+        events = self.server.events
+        if events is None:
+            raise RequestError(404, "Not found.")
+        subscriber, pending = events.subscribe()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Accel-Buffering", "no")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        # A closed tab must be noticed within a moment, not at the next
+        # keepalive: while a dead subscriber is still on the list it receives
+        # the update INSTEAD of the backlog, and the next page never hears it.
+        # So the socket goes nonblocking and is peeked between waits, exactly as
+        # the chat route does for a tab that stopped reading.
+        self.connection.setblocking(False)
+        last_keepalive = time.monotonic()
+        try:
+            self._sse_write(b"retry: 2000\n\n")
+            for event in pending:
+                self._sse(event)
+            while not events.closed:
+                try:
+                    event = subscriber.get(timeout=0.5)
+                except queue.Empty:
+                    if self.disconnected():
+                        break
+                    if time.monotonic() - last_keepalive > 15:
+                        self._sse_write(b": keepalive\n\n")
+                        last_keepalive = time.monotonic()
+                    continue
+                if event is None:
+                    break
+                self._sse(event)
+        except (OSError, ValueError):
+            pass                                             # the tab went away
+        finally:
+            events.unsubscribe(subscriber)
+            self.close_connection = True
+
+    def _sse_write(self, data: bytes) -> None:
+        connection = self.connection
+        try:
+            connection.settimeout(5)                         # a bounded blocking window, as in Progress
+            self.wfile.write(data)
+            self.wfile.flush()
+        finally:
+            connection.settimeout(0)
+
+    def _sse(self, event: dict) -> None:
+        payload = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
+        self._sse_write(f"id: {event.get('id', 0)}\nevent: {event.get('type', 'message')}\ndata: {payload}\n\n".encode("utf-8"))
 
     def approvals(self):
         """The directory-grant queue.  GET reads it; POST is a human's click on it.
@@ -715,7 +860,11 @@ def main():
         for note in registry.notes:
             print(f"tools: {note}", flush=True)
         print(f"Tools offered: {', '.join(registry.names()) or 'none'}", flush=True)
-    with SpeechServer((config.host, config.port), config, registry=registry) as server:
+    events = None
+    if registry is not None:
+        events = Events()
+        registry.subscribe(events.on_notification)
+    with SpeechServer((config.host, config.port), config, registry=registry, events=events) as server:
         secure_server = None
         if tls is not None:
             # The registry goes to both listeners.  The TLS one is the only
@@ -725,7 +874,7 @@ def main():
             # is what a quick curl hits first, kept reporting every tool.
             secure_server = SpeechServer((config.host, config.https_port), config,
                                          tls=tls, asr_lock=server.asr_lock, chat_lock=server.chat_lock,
-                                         registry=registry)
+                                         registry=registry, events=events)
             threading.Thread(target=secure_server.serve_forever, daemon=True).start()
             print(f"Secure recording on https://{config.host}:{config.https_port}", flush=True)
         print(f"Speech UI listening on http://{config.host}:{config.port}", flush=True)
@@ -748,6 +897,8 @@ def main():
             pass
         finally:
             signal.signal(signal.SIGTERM, installed)
+            if events is not None:
+                events.close()                    # every /events handler thread lets go
             if secure_server is not None:
                 secure_server.shutdown()
                 secure_server.server_close()

@@ -87,6 +87,10 @@ class MCPServer:
         self.state = "stopped"
         self.last_error = ""
         self.stderr_tail = ""
+        # A server may speak first: a JSON-RPC message with a `method` and no
+        # `id` is a notification.  Whoever subscribes gets (server, method,
+        # params) on the reader thread; an unsubscribed notification is dropped.
+        self.on_notification = None
 
     # -- lifecycle ---------------------------------------------------------
     def _spawn(self) -> None:
@@ -220,8 +224,16 @@ class MCPServer:
                     message = json.loads(line)
                 except ValueError:
                     continue                          # foreign chatter on stdout
-                if not isinstance(message, dict) or "id" not in message:
-                    continue                          # a notification: nothing to answer
+                if not isinstance(message, dict):
+                    continue
+                if "id" not in message:               # a notification: nothing to answer
+                    callback, method = self.on_notification, message.get("method")
+                    if callback is not None and isinstance(method, str):
+                        try:
+                            callback(self.name, method, message.get("params") or {})
+                        except Exception as error:    # a subscriber's bug must not kill the reader
+                            self.last_error = f"notification handler failed: {error}"
+                    continue
                 with self.lock:
                     entry = self.pending.pop(message["id"], None)
                 if entry is None:
@@ -322,6 +334,11 @@ class MCPSession:
                 failures.append({"server": server.name, "error": str(error),
                                  "seconds": round(time.monotonic() - started, 2)})
         return tools, failures
+
+    def subscribe(self, callback) -> None:
+        """Route every server's notifications to `callback(server, method, params)`."""
+        for server in self.servers:
+            server.on_notification = callback
 
     def find(self, tool_name: str) -> tuple[MCPServer, MCPTool] | None:
         for server in self.servers:

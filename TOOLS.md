@@ -278,10 +278,58 @@ python3 tools/mcp_claude.py --doctor --cwd ~ --add-dir /mnt   # the argv the key
 
 Not here, on purpose: an `interrupt` tool (a queued `send` saying "stop" reaches
 the session after the current turn; cutting a turn short is a shell action on
-codex), unprompted spoken updates (the page has no push channel; a `Stop` hook
-plus a polled inbox is the planned second step), and a verbatim path that would
-let a tool result be spoken without the local model — measure how faithfully it
-relays `spoken` first.
+codex), and a verbatim path that would let a *tool result* be spoken without
+the local model — measure how faithfully it relays `spoken` first.  (A pushed
+update is spoken without the model, but it is not a tool result: see below.)
+
+### Updates that arrive on their own: `/events`
+
+Asking "any news?" was the first version.  Polling was ruled out, so the
+second version is a push, and it is the **one path on which the bridge speaks
+first**.  Three hops, nothing polls on any of them:
+
+1. **Server → bridge.**  Started with `--push`, `mcp_claude.py` writes a
+   JSON-RPC *notification* (no `id`) on its stdio pipe the moment a turn
+   finishes: `notifications/voice/update` with the spoken line, the
+   instruction, the counters and `is_error`.  Never the report.  A pushed
+   update counts as delivered, so a later `updates` call honestly says there is
+   nothing new.  `mcp_client.py` now routes any server's notifications to one
+   subscriber (`MCPSession.subscribe`); unsubscribed notifications are dropped
+   as before.
+2. **Bridge → page.**  `GET /events` is a server-sent events stream
+   (`text/event-stream`, `event: update`, `id:`), held open by the browser and
+   reconnected by the browser.  `Events` in `speech_ui.py` fans a notification
+   out to every open stream.  A finished turn with no page open is kept
+   (bounded, 20) and handed to the *next* page that connects; one delivered to
+   any page is never replayed, so a reload cannot re-speak the afternoon.  A
+   closed tab is noticed within half a second, because a dead subscriber that
+   is still on the list would receive the update instead of the backlog.
+3. **Page.**  The page speaks the update through the same TTS path as a reply
+   and shows it as a third voice, *Claude Code*.  When it speaks is the whole
+   design: never over a reply or a turn in progress; never while the endpointer
+   heard a voice within the last second (the same window it uses to call a turn
+   finished); and **never while the microphone is paused** — paused means "be
+   quiet", and the update waits for Resume.  The seam after a reply, before the
+   microphone reopens, is the one moment that is certainly nobody's turn, and a
+   queued update is said there.  What Claude said is appended to the last
+   assistant turn as a bracketed note, so "tell it to also do X" has a referent
+   in the model's next prompt.
+
+Why this is safe in a design whose only other back-channel can *only make the
+page hear less*: a pushed update makes the page *say* more, never hear more.
+It comes from an operator-configured server, through the bridge's whitelist —
+one method, six fields, each clipped; an MCP server's ordinary log
+notification (`notifications/message`) with a `spoken` field is dropped, and
+`tests/events_test.py --sabotage` removes exactly that check and exactly one
+test goes red.  It is never fed to the model as a tool result.  Cross-origin
+`EventSource` connections send an `Origin` header and are refused, so another
+site on the LAN cannot listen to what the coding agent just did.
+
+Tests: `tests/events_test.py` (real bridge process, real MCP server over the
+fake `claude`, the sequence above end to end) and
+`tests/browser/voice_push_browser.mjs` (the real page: spoken when idle, waits
+for a reply, rides into history, holds while paused; its sabotage arm removes
+the pause hold and must go red).
 
 ## `fetch_url`
 

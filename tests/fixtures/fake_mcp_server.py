@@ -5,7 +5,8 @@ The client under test speaks a wire protocol, so the honest fixture is a
 process that also speaks it: newline-delimited JSON-RPC 2.0 on stdin/stdout.
 Modes let a test ask for the failure shapes that matter: a server that hangs,
 one that answers with a JSON-RPC error, one that renames its tools after
-listing them, and one that dies mid-call.
+listing them, one that dies mid-call, and one that speaks first with a log
+notification (`notifies`).
 """
 import json
 import sys
@@ -66,6 +67,13 @@ def main() -> int:
                 continue
             if mode == "bad_json":
                 sys.stdout.write("this is not json\n"); sys.stdout.flush(); continue
+            if mode == "notifies":
+                # A server that speaks first with a LOG LINE (the standard MCP
+                # logging notification), carrying a `spoken` field.  The bridge
+                # must not read a log line aloud.
+                send({"jsonrpc": "2.0", "method": "notifications/message",
+                      "params": {"level": "info", "logger": "fake-mcp", "spoken": "I am a log line, not an update",
+                                 "data": f"{name} was called"}})
             if name == "get_time":
                 zone = (message.get("params", {}).get("arguments") or {}).get("zone")
                 if zone not in {"UTC", "Asia/Kolkata"}:

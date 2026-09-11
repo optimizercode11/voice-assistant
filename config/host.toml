@@ -153,6 +153,12 @@ enabled = true
 # (2026-09-11): the model behind the session is trusted to ask before doing
 # anything hard to undo; nothing on this side second-guesses it.  The transcript
 # is passed verbatim inside a frame that says it came from speech recognition.
+#
+# PUSH: the forced command on codex ends in `--push`, so a finished turn comes
+# up this pipe as a JSON-RPC notification the moment it lands.  The bridge
+# forwards it to every open page over GET /events (server-sent events) and the
+# page speaks it when it is nobody's turn.  Nothing polls.  Without --push the
+# page hears about finished work only when someone asks.
 [[mcp.server]]
 name = "claude"
 purpose = "hand a spoken instruction to Claude Code, the coding agent on the user's computer (send), and hear what it has done since (updates); use detail only when the user asks for specifics"

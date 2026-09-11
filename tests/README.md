@@ -12,6 +12,8 @@ CUDA_VISIBLE_DEVICES="" python3 tests/agent_tools_test.py   # 20 tests   registr
 CUDA_VISIBLE_DEVICES="" python3 tests/retrieval_test.py     # 11 tests   FTS5 index, staleness, misses
 CUDA_VISIBLE_DEVICES="" python3 tests/mcp_test.py           # 12 tests   real stdio MCP peer
 CUDA_VISIBLE_DEVICES="" python3 tests/tool_loop_test.py     # 12 tests   the loop, over a real TLS bridge
+CUDA_VISIBLE_DEVICES="" python3 tests/mcp_claude_test.py    # 16 tests   Claude Code session server, over a fake `claude`
+CUDA_VISIBLE_DEVICES="" python3 tests/events_test.py        #  8 tests   /events: a finished turn pushed through the real bridge
 ```
 
 `mcp_test.py` is run under `-W error::ResourceWarning`: an MCP server is
@@ -44,6 +46,16 @@ quietly initialized a GPU is a lie about containment, not a faster test.  They
 need a real `ffmpeg` and `openssl` on PATH, and they run the real
 `tools/speech_ui.py` against fake ASR/Qwen processes, so what is under test is
 the bridge's actual error mapping and argument rules.
+
+`events_test.py` is the second suite that runs the bridge as a subprocess, and
+the only one that runs it with two real MCP servers: the Claude Code server
+over `tests/fixtures/fake_claude.py --push`, and `fake_mcp_server.py notifies`,
+which speaks first with a *log* notification carrying a `spoken` field.  The
+claim is that the page hears the first and never the second.  Its sabotage
+arm forwards whatever a server notifies, and exactly one test goes red.
+`tests/browser/voice_push_browser.mjs` is the page half: a real `/events`
+stream held open by the test server, updates pushed while idle, while a reply
+plays, and while paused; the sabotage arm removes the pause hold.
 
 Paired sabotage, which must FAIL:
 

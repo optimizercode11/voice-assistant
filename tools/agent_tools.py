@@ -457,6 +457,15 @@ class Registry:
         if self.session is not None:
             self.session.close()
 
+    def subscribe(self, callback) -> None:
+        """Hear MCP servers that speak first (`callback(server, method, params)`).
+
+        Notifications are not tool results: they never reach the model, and
+        the bridge decides what, if anything, the page hears of them.
+        """
+        if self.session is not None:
+            self.session.subscribe(callback)
+
     # -- the model-facing surface ------------------------------------------
     def specs(self) -> list[dict]:
         return [tool.spec() for tool in sorted(self.tools.values(), key=lambda item: item.name)][:agent_config.MAX_TOOLS]

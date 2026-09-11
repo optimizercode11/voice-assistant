@@ -91,7 +91,13 @@ def _judge(text: str) -> dict:
                 "words": len(words)}
 
     last = content[-1]
-    if last in DANGLING:
+    # A question mark outranks the word list (2026-09-11): "What are you
+    # doing?", "What are you up to?" and "Where are you from?" all end on a word
+    # that opens a clause in a statement, but a transcript that ends on "?" is a
+    # question the person finished asking.  Every one of those was held three
+    # times until the user pressed "Send now".  A full stop does NOT rescue the
+    # word list: the transcript puts one after fragments too (see below).
+    if last in DANGLING and not stripped.endswith("?"):
         return {"complete": False, "reason": f"ends on the open word {last!r}", "open": True,
                 "extra_silence_ms": EXTRA_HARD_MS, "words": len(words)}
 

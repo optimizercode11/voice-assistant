@@ -605,7 +605,10 @@ Neither the old installer backup nor the ASR backups were restore-tested here.
 | 503 STT unavailable | Inspect existing stack logs/health; an app update is not permission to restart the GPU service. |
 | Audio stops but next turn waits | The resident upstream may finish its bounded generation despite client cancellation. |
 | Tools service is up but new behavior is absent | Compare deployed file bytes, service start time, target port and browser cache. |
-| Conversation is gone after a reload | Regression. The transcript is saved in `localStorage` under `voice-chat`, and `web/chat.js` must write it at the same moment it commits a turn. `make test-browser` (`voice_history_browser`) is the gate. |
+| Conversation is gone after a reload | Regression. Conversations are saved in `localStorage` under `voice-chats` (index) and `voice-chat-<id>` (one per chat), and `web/chat.js` must write the open one at the same moment it commits a turn. `make test-browser` (`voice_history_browser`) is the gate. |
+| A chat is missing from the **Chats** list | The list keeps at most 60 chats / ~3 MB and evicts the oldest first; a chat deleted or evicted in another tab disappears here on the next storage event. A legacy `voice-chat` record is migrated once, on first load. |
+| Replies hesitate between sentences | Regression. The page sends the first sentence alone and the rest in a few growing requests (`SPEECH_CHUNK.growth`); one request per sentence costs a source swap per full stop and defeats the engine's batching. `make test-speech` and `voice_tts_browser` are the gates. |
+| Speaking over a multi-sentence reply does not interrupt it | Regression. The barge-in settle window opens once per reply, not per clip (`replySeam` in `web/chat.js`); `make test-echo` and `voice_barge_browser` are the gates. |
 
 The GPU stack's original startup certification is separate:
 `deploy/voice_stack.py` verifies pins/releases, starts its processes and runs

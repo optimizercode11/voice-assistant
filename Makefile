@@ -126,6 +126,9 @@ sabotage:
 	if $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/voice_carry_browser.mjs --sabotage >/dev/null 2>&1; then \
 	  echo "SABOTAGE PASSED (this is the failure): the page drops a held fragment"; failures=$$((failures+1)); \
 	else echo "ok  correctly refused: voice_carry_browser.mjs --sabotage"; fi; \
+	if $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/voice_history_browser.mjs --sabotage >/dev/null 2>&1; then \
+	  echo "SABOTAGE PASSED (this is the failure): the page drops a held fragment"; failures=$$((failures+1)); \
+	else echo "ok  correctly refused: voice_history_browser.mjs --sabotage"; fi; \
 	if $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/voice_controls_browser.mjs --sabotage >/dev/null 2>&1; then \
 	  echo "SABOTAGE PASSED (this is the failure): keyboard handler"; failures=$$((failures+1)); \
 	else echo "ok  correctly refused: voice_controls_browser.mjs --sabotage"; fi; \
@@ -138,9 +141,6 @@ sabotage:
 	if $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/voice_tts_browser.mjs --sabotage >/dev/null 2>&1; then \
 	  echo "SABOTAGE PASSED (this is the failure): sentences are spoken one at a time, in series"; failures=$$((failures+1)); \
 	else echo "ok  correctly refused: voice_tts_browser.mjs --sabotage"; fi; \
-	if $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/voice_history_browser.mjs --sabotage >/dev/null 2>&1; then \
-	  echo "SABOTAGE PASSED (this is the failure): the conversation was never written down"; failures=$$((failures+1)); \
-	else echo "ok  correctly refused: voice_history_browser.mjs --sabotage"; fi; \
 	exit $$failures
 
 # Every arm above is a claim that a mutation is caught.  An arm whose anchor no

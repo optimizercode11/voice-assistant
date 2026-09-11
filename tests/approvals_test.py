@@ -21,6 +21,8 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import atexit
+import shutil
 import tempfile
 import threading
 import types
@@ -59,6 +61,9 @@ if SABOTAGE:
 def workspace() -> Path:
     """A home-shaped tree: an ordinary project, a credential folder, a link out."""
     base = Path(tempfile.mkdtemp(prefix='approvals-'))
+    # 2026-09-11: 1311 of these (79 MB each) were found filling /tmp on the dev
+    # VM -- every sabotage/selftest run leaked one.  Remove it when the process ends.
+    atexit.register(shutil.rmtree, base, ignore_errors=True)
     (base / 'projects' / 'notes').mkdir(parents=True)
     (base / 'projects' / 'notes' / 'meeting.md').write_text('# meeting\n')
     (base / 'projects' / 'api_key.txt').write_text('sk-demo\n')

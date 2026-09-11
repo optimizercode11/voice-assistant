@@ -500,3 +500,26 @@ performed on real hardware, and nothing here says anything about a room. The
 transcript now persists in the browser profile, which is a change in where user
 data lives; the page footnote says so plainly, and **New chat** and clearing site
 data are the two ways it goes away.
+
+### Conversation list, barge-in across sentences, and the reply's seams (2026-09-11)
+
+Three defects reported from use, one day after the pipelined reply shipped.
+*"What are you doing?" always held*: the turn judge tested its open-word list
+before terminal punctuation, and `doing`/`to`/`from`/`for` are on that list, so
+common questions were held three times each until "Send now"; a question mark
+now outranks the list, a full stop still does not (`tests/turn_control_test.py`).
+*Interruption stopped working on multi-sentence replies*: every clip's `play`,
+`pause` and `ended` re-armed the 350 ms AEC settle window and restarted the
+voiced counter, so the gate was closed for most of a reply made of short
+sentences; the whole reply is now one playback for the gate (`replySeam`).
+*Hiccups between sentences*: one request per sentence meant one connection,
+one serialized G2P pass and one GPU step per sentence, and a source swap the ear
+hears at every full stop; the page now sends the first sentence alone and the
+rest as a few requests that grow geometrically against the previous clip's
+playback, so the engine batches the bulk and a reply has one or two seams.
+The conversation list that had been left uncommitted on 2026-09-10 crashed the
+page at load (it bound a button the page did not have); it is finished here —
+index plus per-chat keys, migration of the single-chat record, switching,
+deleting, deep links — and `voice_history_browser.mjs` grew from nine claims to
+eleven. Supersedes the ownership paragraph above: a tab writes into the chat it
+has open, and "New chat" no longer erases anything.

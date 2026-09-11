@@ -44,6 +44,19 @@ class MeasuredTranscripts(unittest.TestCase):
         self.assertTrue(judge('B the Ritz Carlton in Half Moon Bay..')['complete'])
         self.assertTrue(judge('How do I restart the stack?')['complete'])
 
+    def test_a_question_ending_on_an_open_word_is_still_a_question(self):
+        # Reported 2026-09-11: "What are you doing?" was held every time because
+        # "doing" is in the open-word list; the question mark must win.
+        for text in ('What are you doing?', 'What are you up to?', 'Where are you from?',
+                     'What is this for?'):
+            verdict = turn_control.completeness(text, 800)
+            self.assertTrue(verdict['complete'], f'{text!r} was judged unfinished')
+            self.assertFalse(verdict['hold'], f'{text!r} was held')
+        # A full stop does not rescue an open word: the transcript puts one
+        # after fragments as well, so "I want to." is still waited on.
+        for text in ('I want to.', 'I went to the.'):
+            self.assertTrue(turn_control.completeness(text, 800)['hold'], f'{text!r} dispatched')
+
     def test_breath_is_not_speech(self):
         for noise in ('um', 'um uh', '   ', ''):
             self.assertFalse(judge(noise)['complete'], f'{noise!r} would dispatch')

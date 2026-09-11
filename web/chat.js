@@ -16,6 +16,13 @@ let stream = null, context = null, source = null, analyser = null, recorder = nu
 let history = [], voiceList = [], audioURL = null, secureURL = null, phase = 'idle', streaming = false;
 let fragmentHolds = 0, heldText = '';
 let bargeRaf = 0, bargeVoiced = 0, bargeLast = 0, playbackStartedAt = 0, playbackEndedAt = 0;
+// A reply is played as several clips (one per sentence).  For the barge-in gate
+// the whole reply is ONE playback: the settle window opens once, when the first
+// clip starts, and closes once, when the last clip ends.  Bumping the
+// timestamps at every sentence seam re-closed the gate for 350 ms per sentence
+// and reset the voiced counter each time, which is what made interruption fail
+// on multi-sentence replies after the per-sentence pipeline landed (d753f87).
+let replySeam = false;   // true between the first clip's start and the last clip's end
 const canRecord = !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
 // ------------------------------------------------------------ barge-in (AEC3)
 // The browser's own echo canceller -- libwebrtc AEC3 -- is ALREADY requested:
@@ -71,35 +78,47 @@ function setState(value, message) {
 function shortPath(path) { const parts = String(path).split('/').filter(Boolean); return parts.slice(-2).join('/'); }
 // ------------------------------------------------------------- chat history
 // The bridge is stateless: every turn re-sends the whole transcript, so what
-// Qwen remembers is exactly what this page holds in `history`.  A refresh used
-// to throw the visible bubbles *and* that context away, which is how a
-// conversation about one film came back with "I'm not sure what you mean by
-// Carlton" -- the model had been amnesiaced mid-thread by a page reload.
-// Persisting is therefore not decoration, it is the model's memory.
+// Qwen remembers is exactly what this page holds in `history`.  Persisting is
+// therefore not decoration, it is the model's memory.
 //
-// Three limits are load-bearing rather than defensive:
+// One saved conversation is a scratchpad, not a history, so this browser now
+// keeps a *list* of them: an index key holds the metadata for every chat and
+// each chat gets its own key for its turns.  Separate keys are not tidiness --
+// rewriting every conversation on every turn is write amplification against a
+// synchronous, quota-limited store, and one oversized chat would then be able to
+// lose all of them.
+//
+// Four limits are load-bearing rather than defensive:
 //   * tools/voice_chat.py parse_messages refuses a request carrying more than
-//     101 messages -- measured against the deployed bridge, 101 is a 200 and 102
-//     is a 400 -- so the transcript that is *sent* is capped at SEND_TURNS.
-//     An older part of the conversation stays readable on screen, it just stops
-//     being replayed, and the counter says which of the two Qwen is holding.
-//   * localStorage is a few MB per origin and one reply may be 8000 characters,
-//     so what is *stored* is bounded by bytes, oldest turns rolling off first.
-//     `transcript` is kept equal to what actually made it to storage, so the
-//     page never shows a turn that a refresh would lose.
-//   * another tab may start a fresh conversation while this one is open.  A tab
-//     writes only into the conversation it owns, so "New chat" over there is
-//     never silently resurrected by a reply completing over here.
+//     101 messages -- measured on the deployed bridge: 101 is a 200, 102 is a
+//     400 -- so the transcript that is *sent* is capped at SEND_TURNS while the
+//     whole conversation stays readable, and the counter says which is which.
+//   * one reply may be 8000 characters (measured: 8000 is a 200, 8001 is a 400),
+//     so a single chat is bounded in bytes, oldest turns rolling off first.
+//   * localStorage is a few MB per origin, so the *whole list* is bounded too --
+//     by count and by bytes -- and eviction never touches the chat on screen.
+//   * storage is attacker-writable, so every record is read with the same
+//     suspicion as a request body: half turns, forged roles and over-long
+//     messages are dropped or clipped, never repaired.
 // Storage failing may never cost a turn: the conversation carries on in memory
 // and the counter admits out loud that it is not being saved.
-const CHAT_KEY = 'voice-chat';
+const CHAT_INDEX = 'voice-chats';        // metadata for every chat, newest first
+const CHAT_PREFIX = 'voice-chat-';       // voice-chat-<id> holds one conversation
+const LEGACY_KEY = 'voice-chat';         // the single-conversation build, migrated below
 const SEND_TURNS = 40;      // 81 messages at the cap, inside the bridge's 101
 const STORE_TURNS = 200;
-const STORE_BYTES = 1200000;
+const STORE_BYTES = 1200000;   // one conversation
+const TOTAL_BYTES = 3000000;   // every conversation together
+const MAX_CHATS = 60;
+const MAX_TITLE = 90;
 const MAX_MESSAGE = 8000;   // measured: 8000 chars is a 200, 8001 is a 400
-let transcript = [];        // every turn this browser still holds, oldest first
+const INDEX_BYTES_LIMIT = 200000;   // the index itself, so one setItem can never fail on it
+let transcript = [];        // the chat on screen, oldest turn first
 let conversationId = '';
-let saving = true;          // false once storage is unavailable or another tab owns the key
+let conversationTitle = '';
+let conversationAt = 0;
+let saving = true;          // false once storage is unavailable
+let chatsOpen = false;
 function newConversationId() {
   try { if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID(); } catch (_) {}
   return `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -137,39 +156,127 @@ function messagesOf(turn) {
   return [{role: 'user', content: turn.q}, {role: 'assistant', content: turn.a}];
 }
 function historyFrom(turns) { return turns.slice(-SEND_TURNS).flatMap(messagesOf); }
-function readStoredChat() {
-  try {
-    const raw = localStorage.getItem(CHAT_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || typeof parsed.id !== 'string'
-        || !Array.isArray(parsed.turns)) return null;
-    return {id: parsed.id, turns: parsed.turns.map(usableTurn).filter(Boolean)};
-  } catch (_) { return null; }
+function chatKey(id) { return CHAT_PREFIX + id; }
+function titleFor(turns) {
+  // The first thing the person actually said, not a summary: a summary would be
+  // a second model call, and would be wrong in a way nobody can argue with.
+  const first = turns.find(turn => turn && turn.q);
+  if (!first) return 'New conversation';
+  const flat = first.q.replace(/\s+/g, ' ').trim();
+  return flat.length > MAX_TITLE ? flat.slice(0, MAX_TITLE - 1) + '\u2026' : flat;
 }
-function writeStoredChat(claim = false) {
+function whenIs(millis) {
+  const stamp = Number(millis);
+  if (!Number.isFinite(stamp) || stamp <= 0) return 'unknown time';
+  const minutes = Math.floor((Date.now() - stamp) / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} day${days === 1 ? '' : 's'} ago`;
+  try { return new Date(stamp).toLocaleDateString(); } catch (_) { return 'a while ago'; }
+}
+function parseRecord(raw, expectId) {
+  if (typeof raw !== 'string' || !raw) return null;
+  let parsed = null;
+  try { parsed = JSON.parse(raw); } catch (_) { return null; }
+  if (!parsed || typeof parsed !== 'object' || typeof parsed.id !== 'string') return null;
+  if (expectId && parsed.id !== expectId) return null;
+  if (!Array.isArray(parsed.turns)) return null;
+  const turns = parsed.turns.map(usableTurn).filter(Boolean);
+  return {id: parsed.id, turns,
+          title: typeof parsed.title === 'string' && parsed.title.trim() ? parsed.title.slice(0, MAX_TITLE) : titleFor(turns),
+          at: Number(parsed.at) || 0};
+}
+function readConversation(id) {
+  if (typeof id !== 'string' || !id) return null;
+  try { return parseRecord(localStorage.getItem(chatKey(id)), id); } catch (_) { return null; }
+}
+function readIndex(verify = false) {
+  // The index is a cache of what the keys say.  An orphan (key gone: evicted or
+  // deleted in another tab) is dropped by checking the key exists; the record
+  // itself is only re-parsed when `verify` is set (rendering the list), because
+  // parsing every stored chat on every saved turn is the write amplification
+  // separate keys exist to avoid.  Opening a chat parses it anyway.
+  let parsed = null;
+  try { parsed = JSON.parse(localStorage.getItem(CHAT_INDEX) || 'null'); } catch (_) { return []; }
+  const list = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.chats) ? parsed.chats : null);
+  if (!list) return [];
+  const seen = new Set();
+  const entries = [];
+  for (const item of list) {
+    const id = item && typeof item.id === 'string' ? item.id : '';
+    if (!id || seen.has(id) || id === LEGACY_KEY) continue;
+    const raw = (() => { try { return localStorage.getItem(chatKey(id)); } catch (_) { return null; } })();
+    if (raw === null) continue;                                  // orphan
+    seen.add(id);
+    if (verify) {
+      const record = parseRecord(raw, id);
+      if (!record) { seen.delete(id); continue; }                // unreadable
+      entries.push({id, title: record.title, at: record.at, turns: record.turns.length,
+                    bytes: byteLength(raw)});
+      continue;
+    }
+    const title = typeof item.title === 'string' ? item.title.slice(0, MAX_TITLE) : '';
+    entries.push({id, title, at: Number(item.at) || 0,
+                  turns: Math.max(0, Number(item.turns) || 0), bytes: raw.length});
+  }
+  return entries;
+}
+function writeIndex(entries) {
+  let list = entries.slice(0, MAX_CHATS);
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const payload = JSON.stringify({v: 2, chats: list});
+    if (byteLength(payload) > INDEX_BYTES_LIMIT && list.length > 1) { list = list.slice(0, -1); continue; }
+    try { localStorage.setItem(CHAT_INDEX, payload); return true; }
+    catch (_) { if (list.length > 1) { list = list.slice(0, -1); continue; } return false; }
+  }
+  return false;
+}
+function evict(order) {
+  // `order` is index entries, newest first, and the chat on screen is always
+  // last-resort protected: an eviction that deletes the conversation you are
+  // looking at is worse than one that deletes a chat you have not opened in a
+  // month.  Evicted turns go with the entry, or the list lies about what it has.
+  const keep = [];
+  let total = 0;
+  for (const entry of order) {
+    if (entry.id === conversationId) { keep.unshift(entry); total += entry.bytes || 0; continue; }
+    if (keep.length >= MAX_CHATS - 1) { localStorage.removeItem(chatKey(entry.id)); continue; }
+    if (total + (entry.bytes || 0) > TOTAL_BYTES && keep.some(item => item.id !== conversationId)) {
+      localStorage.removeItem(chatKey(entry.id)); continue;
+    }
+    total += entry.bytes || 0;
+    keep.push(entry);
+  }
+  return keep;
+}
+function saveConversation() {
   if (!saving) return false;
   let turns = transcript.slice(-STORE_TURNS);
+  let wrote = false;
+  // The title is the first thing the person said and stays that even after the
+  // oldest turns roll off; `at` is the last activity, which is what "newest
+  // first" and "3 min ago" both mean.
+  if (!conversationTitle) conversationTitle = titleFor(transcript);
+  conversationAt = Date.now();
   for (let attempt = 0; attempt < 8; attempt++) {
-    const payload = JSON.stringify({v: 1, id: conversationId, at: Date.now(), turns});
+    const payload = JSON.stringify({v: 2, id: conversationId, title: conversationTitle,
+                                    at: conversationAt, turns});
     const bytes = byteLength(payload);
     if (bytes > STORE_BYTES && turns.length > 1) {
       // Drop a *proportional* slice, not one turn: a record far over budget has
       // to converge inside the retry budget, or the loop exits without writing
-      // and the counter is still claiming "saved".
+      // anything while the counter still claims "saved".
       const keep = Math.ceil(turns.length * (STORE_BYTES / bytes));
       turns = turns.slice(turns.length - Math.max(1, Math.min(turns.length - 1, keep)));
       continue;
     }
     try {
-      // "New chat" is an explicit instruction to take the key over, so it writes
-      // whatever is in there.  An ordinary turn may only ever write into the
-      // conversation it owns.
-      const owner = claim ? null : readStoredChat();
-      if (owner && owner.id !== conversationId) { saving = false; break; }   // another tab took over
-      localStorage.setItem(CHAT_KEY, payload);
-      adoptTranscript(turns);
-      return true;
+      localStorage.setItem(chatKey(conversationId), payload);
+      wrote = true;
+      break;
     } catch (error) {
       // QuotaExceeded is the ordinary case: a full origin or a private window.
       if (turns.length > 1) { turns = turns.slice(Math.ceil(turns.length / 2)); continue; }
@@ -178,8 +285,21 @@ function writeStoredChat(claim = false) {
     }
   }
   adoptTranscript(turns);
-  renderTurnCount();
-  return false;
+  if (!wrote) { renderTurnCount(); return false; }
+  const entry = {id: conversationId, title: conversationTitle, at: conversationAt,
+                 turns: turns.length, bytes: byteLength(localStorage.getItem(chatKey(conversationId)) || '')};
+  writeIndex(evict([entry, ...readIndex().filter(item => item.id !== conversationId)]));
+  const wanted = `#/chat/${encodeURIComponent(conversationId)}`;
+  if (location.hash !== wanted) replaceHash(wanted);   // a saved chat is addressable
+  if (chatsOpen) renderChatList();
+  return true;
+}
+function deleteConversation(id) {
+  if (typeof id !== 'string' || !id) return false;
+  try { localStorage.removeItem(chatKey(id)); } catch (_) { return false; }
+  writeIndex(readIndex().filter(item => item.id !== id));
+  if (chatsOpen) renderChatList();
+  return true;
 }
 function adoptTranscript(turns) {
   // The single place `transcript` shrinks.  Anything still on screen must be
@@ -198,7 +318,7 @@ function renderTranscript() {
     // list has to put it back -- otherwise a fresh chat and a wiped chat both
     // stare at a blank panel instead of asking what is on your mind.
     const empty = document.createElement('div'); empty.className = 'empty';
-    const ask = document.createElement('strong'); ask.textContent = 'What’s on your mind?';
+    const ask = document.createElement('strong'); ask.textContent = 'What\u2019s on your mind?';
     const hint = document.createElement('p'); hint.textContent = 'Start talking, or write a message below.';
     empty.append(ask, hint); host.append(empty);
     return;
@@ -216,37 +336,153 @@ function renderTurnCount() {
   $('turns').textContent = [turns ? `${turns} ${turns === 1 ? 'turn' : 'turns'}` : 'No conversation yet',
                             where, remembered].filter(Boolean).join(' \u00b7 ');
 }
-function startFreshChat() {
-  conversationId = newConversationId();
-  transcript = [];
-  history = [];
-  saving = true;
-  renderTranscript();
-  renderTurnCount();
-  writeStoredChat(true);
+function chatRow(entry) {
+  const row = document.createElement('div'); row.className = 'chat-entry'; row.dataset.id = entry.id;
+  const open = document.createElement('button');
+  open.type = 'button'; open.className = 'chat-open';
+  open.append(document.createElement('span'));
+  open.firstChild.textContent = entry.title || 'Untitled conversation';
+  open.title = entry.title || 'Untitled conversation';
+  if (entry.id === conversationId) open.setAttribute('aria-current', 'true');
+  open.onclick = () => openChat(entry.id);
+  const meta = document.createElement('span'); meta.className = 'chat-meta';
+  meta.textContent = `${entry.turns} ${entry.turns === 1 ? 'turn' : 'turns'} \u00b7 ${whenIs(entry.at)}`;
+  const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'chat-remove';
+  remove.textContent = '\u00d7';
+  remove.setAttribute('aria-label', `Delete this conversation: ${entry.title || 'untitled'}`);
+  remove.onclick = () => {
+    // Deleting the chat you are looking at has to land somewhere, so it starts a
+    // fresh one instead of leaving a panel full of bubbles that no longer exist.
+    if (!window.confirm(`Delete this conversation?\n\n${entry.title || 'Untitled'}\n\nIt is gone from this browser and cannot be recovered.`)) return;
+    deleteConversation(entry.id);
+    if (entry.id === conversationId) startFreshChat(); else setState('idle', 'Conversation deleted.');
+  };
+  row.append(open, meta, remove);
+  return row;
 }
-function restoreChat() {
-  const stored = readStoredChat();
-  if (!stored) { startFreshChat(); return 0; }
+function renderChatList() {
+  const card = $('chats'), toggle = $('chats-toggle');
+  if (!card || !toggle) return;
+  const entries = readIndex(true);
+  toggle.textContent = `Chats (${entries.length})`;
+  card.hidden = !chatsOpen;
+  if (!chatsOpen) return;
+  card.replaceChildren();
+  if (!entries.length) {
+    const none = document.createElement('p'); none.className = 'chat-none';
+    none.textContent = 'No saved conversations yet.';
+    card.append(none);
+    return;
+  }
+  for (const entry of entries) card.append(chatRow(entry));
+}
+function setChatsOpen(open) {
+  chatsOpen = open === undefined ? !chatsOpen : open === true;
+  $('chats-toggle')?.setAttribute('aria-expanded', String(chatsOpen));
+  renderChatList();
+}
+function chatIdFromHash() {
+  const match = /^#\/chat\/(.+)$/.exec(location.hash || '');
+  return match ? decodeURIComponent(match[1]) : '';
+}
+function openChat(id) {
+  const stored = readConversation(id);
+  if (!stored) {
+    // The index is a cache, so a missing key means it was evicted or deleted in
+    // another tab.  Say so and repair the list rather than showing nothing.
+    writeIndex(readIndex());
+    renderChatList();
+    setState('idle', 'That conversation is no longer in this browser.');
+    return 0;
+  }
+  if (busy) interruptReply();   // never swap the transcript out from under a live turn
+  heldText = ''; fragmentHolds = 0;   // a half-heard sentence belongs to the chat it was said in
+  saving = true;                      // storage may have been full for the last chat, not this one
   conversationId = stored.id;
+  conversationTitle = stored.title;
+  conversationAt = stored.at;
   transcript = stored.turns.slice(-STORE_TURNS);
   history = historyFrom(transcript);
   renderTranscript();
-  if (transcript.length < stored.turns.length) writeStoredChat();   // store what is shown
   renderTurnCount();
+  if (chatsOpen) renderChatList();
+  if (transcript.length < stored.turns.length) saveConversation();   // store what is shown
+  const wanted = `#/chat/${encodeURIComponent(stored.id)}`;
+  if (location.hash !== wanted) replaceHash(wanted);
+  renderChatList();
   return transcript.length;
 }
+function replaceHash(hash) {
+  // Replacing rather than assigning means browsing back through chats does not
+  // stack up an entry for every click.  `history` is this page's message array,
+  // so the browser's own object has to be named in full.
+  try { window.history.replaceState(null, '', hash || location.pathname + location.search); }
+  catch (_) { if (hash) location.hash = hash; }
+}
+function startFreshChat() {
+  // A fresh chat is only an id until its first turn is committed: nothing is
+  // written, so pressing "New chat" twice cannot fill the list with blanks, and
+  // the old conversation stays in the list untouched.
+  if (transcript.length || !conversationId) {
+    conversationId = newConversationId();
+    conversationTitle = '';
+    conversationAt = 0;
+    transcript = [];
+    history = [];
+  }
+  saving = true;
+  heldText = ''; fragmentHolds = 0;
+  renderTranscript();
+  renderTurnCount();
+  renderChatList();
+  replaceHash('');
+}
+function migrateLegacy() {
+  // The previous build kept exactly one conversation under `voice-chat`.  A
+  // reader must not lose it to the upgrade, and must not get it twice, so the
+  // key is removed in the same breath as the new record is written.
+  let raw = null;
+  try { raw = localStorage.getItem(LEGACY_KEY); } catch (_) { return false; }
+  if (raw === null) return false;
+  const record = parseRecord(raw);
+  try { localStorage.removeItem(LEGACY_KEY); } catch (_) {}
+  if (!record || !record.turns.length) return false;
+  const id = newConversationId();
+  const turns = record.turns.slice(-STORE_TURNS);
+  const at = record.at || Date.now();
+  const payload = JSON.stringify({v: 2, id, title: titleFor(turns), at, turns});
+  try { localStorage.setItem(chatKey(id), payload); } catch (_) { return false; }
+  writeIndex(evict([{id, title: titleFor(turns), at, turns: turns.length, bytes: byteLength(payload)},
+                    ...readIndex().filter(item => item.id !== id)]));
+  return id;
+}
+function restoreChat() {
+  const migrated = migrateLegacy();
+  const wanted = chatIdFromHash();
+  if (wanted && readConversation(wanted)) return openChat(wanted);
+  if (migrated && readConversation(migrated)) return openChat(migrated);
+  const first = readIndex().find(entry => readConversation(entry.id));
+  if (first) return openChat(first.id);
+  startFreshChat();
+  return 0;
+}
+window.addEventListener('hashchange', () => {
+  // Back/forward and pasted links land on the chat they name; an unknown or
+  // empty fragment leaves the conversation on screen alone.
+  const wanted = chatIdFromHash();
+  if (wanted && wanted !== conversationId && readConversation(wanted)) openChat(wanted);
+});
 try {
   localStorage.setItem('voice-chat-probe', '1');
   localStorage.removeItem('voice-chat-probe');
 } catch (_) { saving = false; }
 window.addEventListener('storage', event => {
-  // Another tab cleared or replaced the conversation.  Adopting its transcript
-  // mid-reply would be its own bug, so this tab simply stops writing rather than
-  // typing over a conversation it no longer owns.
-  if (event.key !== null && event.key !== CHAT_KEY) return;
-  const owner = readStoredChat();
-  if (!owner || owner.id !== conversationId) { saving = false; renderTurnCount(); }
+  // Another tab wrote, deleted or evicted something.  Adopting its transcript
+  // mid-reply would be its own bug, so this tab refreshes the *list* only and
+  // keeps working on the conversation it has on screen.
+  if (event.key !== null && event.key !== CHAT_INDEX && !String(event.key).startsWith(CHAT_PREFIX)) return;
+  if (chatsOpen) renderChatList();
+  if (event.key === null) { saving = false; renderTurnCount(); }   // storage cleared entirely
 });
 
 function message(role, text, original = null, evidence = null) {
@@ -361,7 +597,7 @@ function primeAudio() {
   replaceAudio(new Blob([wav],{type:'audio/wav'})); player.play().catch(()=>{});
 }
 function stopSession(note = 'Conversation ended. Start again whenever you like.') {
-  stopBargeWatch(); stopThinkingAloud();
+  stopBargeWatch(); stopThinkingAloud(); replySeam = false;
   heldText = ''; fragmentHolds = 0;
   active = false; epoch++; abort?.abort(); abort = null; busy = false;
   clearCapture(); player.pause(); stopPlaybackGlow(); setGlow(0);
@@ -472,6 +708,9 @@ function stopBargeWatch() {
   bargeRaf = 0; bargeVoiced = 0;
 }
 function startBargeWatch() {
+  // Already watching and still speaking: keep the loop and its voiced counter.
+  // Restarting per clip discarded an interruption that spanned a sentence seam.
+  if (bargeRaf && phase === 'speaking') return true;
   stopBargeWatch();
   if (!active || !analyser || !bargeWanted()) return false;
   if (!playbackAnalyser) {
@@ -609,7 +848,9 @@ function mentionThinking(text, id, signal) {
     })
     .catch(() => {});
 }
-async function playReply(blob, signal, final = true) {
+async function playReply(blob, signal, final = true, first = true) {
+  // A continuation clip must not reopen the settle window (see replySeam).
+  replySeam = !first;
   replaceAudio(blob);
   await new Promise((resolve,reject)=>{
     let settled = false;
@@ -619,6 +860,7 @@ async function playReply(blob, signal, final = true) {
       // the glow and the interruption gate stay up.  Tearing them down per clip
       // would blink the orb out and disarm barge-in at every comma.
       if (final) { stopPlaybackGlow(); stopBargeWatch(); setGlow(0); }
+      if (final || signal.aborted) replySeam = false;
       player.removeEventListener('ended',ended);player.removeEventListener('error',failed);signal.removeEventListener('abort',cancelled);
       if(resumePlayback===attempt)resumePlayback=null;
       $('resume').hidden=true;
@@ -629,7 +871,7 @@ async function playReply(blob, signal, final = true) {
     const attempt = () => {
       if(settled || signal.aborted)return;
       $('resume').hidden=true;
-      player.play().then(()=>{if(!settled && !player.paused){startPlaybackGlow();startBargeWatch();}},error=>{
+      player.play().then(()=>{replySeam = !final;if(!settled && !player.paused){startPlaybackGlow();startBargeWatch();}},error=>{
         if(settled || signal.aborted)return;
         if(error.name!=='NotAllowedError'){failed();return;}
         if(!final){startBargeWatch();return;}   // re-entrant: attempt() is already the retry path
@@ -652,13 +894,18 @@ async function playReply(blob, signal, final = true) {
 // are already on the screen.  That gap is what people call "slow TTS": the
 // engine is not slow, the page asked for too much at once.
 //
-// Sentences are the natural seam.  The page issues one request per sentence,
-// starts the first immediately and keeps the next couple in flight, so the
-// first word is audible after ~0.1 s and the remainder is synthesized while the
-// voice is already busy saying the first part.  The seams land where a speaker
-// would breathe anyway.
+// The first sentence is its own request so the first word is audible after
+// ~0.1 s.  What follows is NOT one request per sentence (2026-09-11): every
+// request is a fresh connection, a serialized G2P pass and its own GPU step, and
+// every clip boundary is a source swap the ear hears as a 50-150 ms hiccup, so a
+// reply cut into sentences cost 3-4x the synthesis and a stutter at every full
+// stop.  Instead the remainder is grouped into a few requests that grow
+// geometrically: a clip only has to be synthesized while the previous one is
+// being spoken, and speech is ~25x slower than synthesis, so each group may be
+// `growth` times the one before it.  The engine batches the sentences inside
+// one request itself.
 // SPEECH-CHUNK-BEGIN
-const SPEECH_CHUNK = {minChars: 24, maxChars: 420, prefetch: 2};
+const SPEECH_CHUNK = {minChars: 24, maxChars: 420, prefetch: 2, growth: 8, groupMax: 4000};
 
 function speechChunks(text) {
   // Only words can be spoken.  A number or an object reaching here is a bug
@@ -697,7 +944,21 @@ function speechChunks(text) {
     if (piece.length < SPEECH_CHUNK.minChars && chunks.length) chunks[chunks.length - 1] += ' ' + piece;
     else chunks.push(piece);
   }
-  return chunks.filter(Boolean);
+  const pieces = chunks.filter(Boolean);
+  if (pieces.length < 2) return pieces;
+  // Group everything after the first bite.  Group k may hold up to `growth`
+  // times the characters of group k-1 (never less than one run-on ceiling,
+  // never more than groupMax), which keeps its synthesis inside the previous
+  // clip's playback and leaves one or two seams instead of one per sentence.
+  const groups = [pieces[0]];
+  for (const piece of pieces.slice(1)) {
+    const k = groups.length - 1;
+    const budget = k === 0 ? 0
+      : Math.min(SPEECH_CHUNK.groupMax, Math.max(SPEECH_CHUNK.maxChars, groups[k - 1].length * SPEECH_CHUNK.growth));
+    if (k === 0 || groups[k].length + 1 + piece.length > budget) groups.push(piece);
+    else groups[k] += ' ' + piece;
+  }
+  return groups;
 }
 // SPEECH-CHUNK-END
 
@@ -743,7 +1004,7 @@ async function speakReply(answer, signal, onFirstClip) {
     // The acknowledgment gets exactly as much air as the first sentence took to
     // synthesize, and is cut at the last moment before real speech begins.
     if (!index) onFirstClip?.();
-    await playReply(audio, signal, index === parts.length - 1);
+    await playReply(audio, signal, index === parts.length - 1, index === 0);
   }
 }
 async function runTurn(input, forced = false, voicedMs = null) {
@@ -837,7 +1098,7 @@ async function runTurn(input, forced = false, voicedMs = null) {
     // A request_directory call happened during that generation, so the card the
     // user needs to see is one poll overdue.  Fetch it now, not in four seconds.
     refreshApprovals();
-    writeStoredChat();   // after the bubbles, so a trim never strands a rendered turn
+    saveConversation();   // after the bubbles, so a trim never strands a rendered turn
     setState('synthesizing','Your reply is becoming speech\u2026');
     await speakReply(answer, controller.signal, () => {
       stopThinkingAloud();        // the reply is in hand: it never waits behind the acknowledgment
@@ -879,20 +1140,20 @@ $('start').onclick = async () => {
   } catch(error){if(id===epoch)stopSession(error.name==='NotAllowedError'?'Microphone permission was denied. Allow access in your browser, or type below.':error.message);}
 };
 player.addEventListener('play',()=>{
-  playbackStartedAt = performance.now();
+  if (!replySeam) playbackStartedAt = performance.now();
   // Replaying an older reply through the native controls must also mute capture.
   if(active && stream && phase==='listening'){
     clearCapture();busy=true;setState('speaking','Playing your reply. Interrupt to speak again.');
     player.addEventListener('ended',()=>{if(active && phase==='speaking'){busy=false;listen();}},{once:true});
   }
 });
-player.addEventListener('pause',()=>{playbackEndedAt = performance.now();});
-player.addEventListener('ended',()=>{playbackEndedAt = performance.now();});
+player.addEventListener('pause',()=>{if (!replySeam) playbackEndedAt = performance.now();});
+player.addEventListener('ended',()=>{if (!replySeam) playbackEndedAt = performance.now();});
 $('end').onclick=()=>stopSession();
 $('finish').onclick=()=>{if(recorder?.state==='recording'){recorder.sendNow=true;recorder.stop();}};
 function interruptReply() {
   if(!busy)return;
-  epoch++;abort?.abort();abort=null;busy=false;clearCapture();player.pause();
+  epoch++;abort?.abort();abort=null;busy=false;clearCapture();replySeam=false;player.pause();
   playbackEndedAt = performance.now();
   if(active)listen();else setState('idle','Reply interrupted. Send another message when ready.');
 }
@@ -912,7 +1173,8 @@ window.addEventListener('keyup',event=>{if(spaceHeld && (event.code==='Space'||e
 window.addEventListener('blur',()=>{spaceHeld=false;});
 function speechSpeed(){const value=Number($('speed').value);return Number.isFinite(value)?Math.min(2,Math.max(.5,value)):1.2;}
 $('speed').oninput=()=>{const value=speechSpeed().toFixed(1);$('speed-value').value=value+'×';$('speed').setAttribute('aria-valuetext',value+' times');};
-$('new').onclick=()=>{stopSession('A fresh conversation. Start talking or type below.');setGlow(0);startFreshChat();player.removeAttribute('src');if(audioURL){URL.revokeObjectURL(audioURL);audioURL=null;}};
+$('new').onclick=()=>{stopSession('A fresh conversation. Start talking or type below.');setGlow(0);startFreshChat();renderChatList();player.removeAttribute('src');if(audioURL){URL.revokeObjectURL(audioURL);audioURL=null;}};
+if($('chats-toggle'))$('chats-toggle').onclick=()=>setChatsOpen();
 $('compose').onsubmit=event=>{event.preventDefault();const text=$('text').value.trim();if(!text||busy||!ready)return;primeAudio();armGlow();$('text').value='';runTurn(text);};
 let languageList=[],autoLanguage='a',speechPreferences={voices:{}};
 try{const saved=JSON.parse(localStorage.getItem('voice-speech')||'null');if(saved && typeof saved==='object' && !Array.isArray(saved))speechPreferences={...saved,voices:saved.voices&&typeof saved.voices==='object'?saved.voices:{}};}catch(_){}

@@ -206,9 +206,19 @@ the page never displays a turn that a refresh would lose.
 
 Storage is attacker-writable, so it is read through the same suspicion as a
 request body: half turns, non-string roles and over-long messages are dropped or
-clipped, never repaired.  A tab writes only into the conversation whose id it
-owns, which is what keeps a second tab's **New chat** from being resurrected by
-a reply finishing in the first.
+clipped, never repaired.  A tab writes only into the conversation it has open,
+which is what keeps a second tab's **New chat** from touching a reply finishing
+in the first.
+
+Conversations are a list, not a scratchpad (2026-09-11).  An index key holds the
+metadata for every chat and each chat has its own key, because rewriting every
+conversation on every turn would be write amplification against a synchronous,
+quota-limited store, and one oversized chat could then take all of them down.
+The list is bounded twice — 60 chats, ~3 MB — and eviction never removes the
+chat on screen.  The single-conversation build's record is migrated into the
+list once, on first load.  The index is treated as a cache: an entry whose key
+is gone is dropped, and the record is re-parsed when the list is rendered or a
+chat is opened, not on every saved turn.
 
 ## Deliberate limits, written down
 

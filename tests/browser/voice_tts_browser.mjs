@@ -61,8 +61,8 @@ const server=http.createServer((req,res)=>{
          '  ahead(0);'],
         ['    const audio = await clip(index);\n    ahead(index + SPEECH_CHUNK.prefetch);',
          '    const audio = await clip(index);\n    void SPEECH_CHUNK;'],
-        ['    await playReply(audio, signal, index === parts.length - 1);',
-         '    await playReply(audio, signal, index === parts.length - 1);\n    ahead(index + 1);'],
+        ['    await playReply(audio, signal, index === parts.length - 1, index === 0);',
+         '    await playReply(audio, signal, index === parts.length - 1, index === 0);\n    ahead(index + 1);'],
       ];
       for(const [from,to] of anchors){
         assert.ok(body.includes(from),`the sabotage anchor no longer matches web/chat.js: ${from.slice(0,40)}`);
@@ -126,7 +126,7 @@ try{
  await page.waitForFunction(n=>document.querySelectorAll('.message.assistant').length===1,1);
  await page.waitForFunction(()=>document.querySelector('#state').textContent==='Ready');
  let said=spoken.slice(mark);
- assert.ok(said.length>=3,`a three-sentence answer must be more than one request (got ${said.length})`);
+ assert.equal(said.length,2,`a three-sentence answer is a first bite plus one batched request (got ${said.length})`);
  assert.ok(said[0].text.length<LONG.length/3,
    `the first request must be a bite, not the answer (${said[0].text.length} of ${LONG.length} chars)`);
  assert.equal(said.map(part=>part.text).join(' ').replace(/\s+/g,' ').trim(),LONG,

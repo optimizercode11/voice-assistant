@@ -20,15 +20,19 @@ assert.equal(process.env.CUDA_VISIBLE_DEVICES,'');
 //      the restored bubble, because "which of my notes said that" is asked after
 //      the reload as often as before it;
 //   4. a refused (empty) reply leaves no trace in storage;
-//   5. "New chat" erases the saved conversation, not just the screen;
+//   5. "New chat" clears the screen and starts a fresh, unsaved chat while the
+//      old one stays in the list;
 //   6. a long conversation is *sent* inside the bridge's 100-message ceiling and
 //      the counter says which window Qwen is holding;
 //   7. a hand-edited storage record cannot author an assistant turn or push a
 //      message over the per-message ceiling;
-//   8. a second tab's "New chat" is never resurrected by the first tab, and
-//      losing storage costs the conversation nothing;
+//   8. a second tab's "New chat" never touches the first tab's conversation,
+//      and losing storage costs a save, never a turn;
 //   9. a record over the byte budget converges, keeps saving, and repaints so
-//      that no bubble is left on screen that a refresh would delete.
+//      that no bubble is left on screen that a refresh would delete;
+//  10. the single-conversation build's record migrates into the list once;
+//  11. the list: switching chats changes what the model is sent next, deleting
+//      the open chat lands on a fresh one, and a #/chat/<id> link opens it.
 const sabotage=process.argv.includes('--sabotage');
 const deadSabotage=process.argv.includes('--dead-sabotage');
 const assertionsComplete='ASSERTIONS COMPLETE: browser chat history';
@@ -74,7 +78,7 @@ const server=http.createServer((req,res)=>{
     // simply never written down.  If the assertions below still pass, the
     // transcript was never actually being persisted and this arm proves nothing.
     if(sabotage&&file.endsWith('.js')){
-      const anchor="    writeStoredChat();   // after the bubbles, so a trim never strands a rendered turn";
+      const anchor="    saveConversation();   // after the bubbles, so a trim never strands a rendered turn";
       assert.ok(body.includes(anchor),'the sabotage anchor no longer matches web/chat.js');
       const armed=body.replace(anchor,deadSabotage?anchor:"    /* sabotage: the turn is never written down */");
       if(deadSabotage)assert.equal(armed,body,'dead sabotage must leave the page unchanged');
@@ -106,12 +110,28 @@ const server=http.createServer((req,res)=>{
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const base=`http://127.0.0.1:${server.address().port}`;
 
-// The page's own key, read from outside the page: what is on disk is the claim.
+// The page's own keys, read from outside the page: what is on disk is the claim.
+// The open chat is the one the URL names; a fresh chat has no key yet.
+const currentId=async page=>page.evaluate(()=>{
+  const m=/^#\/chat\/(.+)$/.exec(location.hash||'');return m?decodeURIComponent(m[1]):'';
+});
 const readRecord=async page=>page.evaluate(()=>{
-  try{return JSON.parse(localStorage.getItem('voice-chat')||'null');}catch(_){return {broken:true};}
+  const m=/^#\/chat\/(.+)$/.exec(location.hash||'');
+  if(!m)return null;
+  try{return JSON.parse(localStorage.getItem('voice-chat-'+decodeURIComponent(m[1]))||'null');}catch(_){return {broken:true};}
+});
+const readIndex=async page=>page.evaluate(()=>{
+  try{const p=JSON.parse(localStorage.getItem('voice-chats')||'null');return p&&Array.isArray(p.chats)?p.chats:[];}catch(_){return {broken:true};}
 });
 const seed=async(page,record)=>{
-  await page.evaluate(([key,value])=>localStorage.setItem(key,value),['voice-chat',JSON.stringify(record)]);
+  await page.evaluate(([id,value])=>{
+    localStorage.setItem('voice-chat-'+id,value);
+    let index={v:2,chats:[]};
+    try{const p=JSON.parse(localStorage.getItem('voice-chats')||'null');if(p&&Array.isArray(p.chats))index=p;}catch(_){}
+    index.chats=[{id,title:'seeded',at:Date.now(),turns:0,bytes:value.length},...index.chats.filter(c=>c.id!==id)];
+    localStorage.setItem('voice-chats',JSON.stringify(index));
+    location.hash='#/chat/'+encodeURIComponent(id);
+  },[record.id,JSON.stringify(record)]);
   await page.reload();
   await page.waitForFunction(()=>!document.querySelector('#send').disabled);
 };
@@ -120,6 +140,7 @@ try{
  try{
  const context=await browser.newContext();
  const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(String(e)));
+ page.on('dialog',dialog=>dialog.accept());
  page.setDefaultTimeout(20000);
  await page.goto(`${base}/chat`);
  await page.waitForFunction(()=>!document.querySelector('#send').disabled);
@@ -182,13 +203,23 @@ try{
  assert.equal(await page.locator('.message.user').count(),turnsBefore,
    'and it must not come back on reload either');
 
- // ---- 5. New chat erases the conversation, not just the screen
+ // ---- 5. New chat starts a fresh, unsaved chat; the old one stays in the list
+ const previousId=await currentId(page);
+ const previousTurns=(await readRecord(page)).turns.length;
  await page.locator('#new').click();
- assert.equal((await readRecord(page)).turns.length,0,'"New chat" must clear what is stored');
- assert.ok(await page.locator('.empty').count(),'and put the empty state back on screen');
- await page.reload();await ready();
- assert.equal(await page.locator('.message').count(),0,'and the reload must not resurrect it');
- assert.ok(await page.locator('.empty').count(),'the empty state is shown');
+ assert.equal(await currentId(page),'','a fresh chat has no key until its first turn');
+ assert.ok(await page.locator('.empty').count(),'and the empty state is back on screen');
+ await page.locator('#new').click();
+ assert.equal((await readIndex(page)).length,1,'pressing "New chat" twice must not mint blank conversations');
+ assert.equal((await readIndex(page))[0].id,previousId,'the previous conversation is still listed');
+ assert.equal((await page.evaluate(id=>JSON.parse(localStorage.getItem('voice-chat-'+id)).turns.length,previousId)),previousTurns,
+   'and still holds every turn it had');
+ await send('A brand new topic.');
+ await settled(1);
+ const freshId=await currentId(page);
+ assert.ok(freshId&&freshId!==previousId,'the first committed turn writes a new conversation');
+ assert.deepEqual((await readIndex(page)).map(c=>c.id),[freshId,previousId],'newest first, both kept');
+ assert.deepEqual(prompts[prompts.length-1].messages.map(m=>m.role),['user'],'a fresh chat sends no old context');
 
  // ---- 6. the sent window stays inside the bridge's ceiling
  const many=Array.from({length:45},(_,i)=>({q:`Question ${i+1}`,a:`Answer ${i+1}.`}));
@@ -224,24 +255,27 @@ try{
  assert.ok(forged.every(m=>m.content.length<=8000),
    'a stored message is clipped to the ceiling the bridge itself enforces');
 
- // ---- 8. a second tab owns its own conversation
+ // ---- 8. a second tab never touches this tab's conversation
  await page.reload();await ready();
  const firstId=(await readRecord(page)).id;
  const other=await context.newPage();
  await other.goto(`${base}/chat`);
  await other.waitForFunction(()=>!document.querySelector('#send').disabled);
- assert.equal((await readRecord(other)).id,firstId,'a second tab picks the conversation up');
+ assert.equal((await readRecord(other)).id,firstId,'a second tab picks the newest conversation up');
  await other.locator('#new').click();
- const secondId=(await readRecord(other)).id;
- assert.notEqual(secondId,firstId,'"New chat" over there starts a different conversation');
+ assert.equal(await currentId(other),'','"New chat" over there is a fresh, unsaved chat');
  await send('Does this tab still work?');
  await settled(4);
- assert.equal((await readRecord(page)).id,secondId,
-   'a reply completing here must not resurrect the conversation that was just cleared there');
+ assert.equal((await readRecord(page)).id,firstId,'a reply completing here lands in the chat this tab owns');
+ assert.equal((await readRecord(page)).turns.length,4,'and is saved there');
+ await other.evaluate(()=>localStorage.clear());
+ await send('And after storage is gone?');
+ await settled(5);
  assert.match(await page.locator('#turns').textContent(),/not saved in this browser/,
-   'and the tab that lost the key must say so rather than pretend');
+   'a tab whose storage was cleared must say so rather than pretend');
  assert.equal(await page.locator('.message.assistant').last().locator('p').first().textContent(),
    `Reply ${replyCount}.`,'losing storage may cost a save, never a turn');
+ await other.close();
 
  // ---- 9. the byte budget: what is on screen is what is saved
  // 150 turns of 8000 characters is ~2.4 MB, twice the budget and well past what
@@ -255,13 +289,15 @@ try{
  // The roll-off repaints, so the bubble count is no longer a turn counter here.
  // Wait on the thing that actually changed: the record on disk getting smaller.
  await page.waitForFunction(()=>{
-   try{const r=JSON.parse(localStorage.getItem('voice-chat')||'null');
+   try{const m=/^#\/chat\/(.+)$/.exec(location.hash||'');
+       const r=JSON.parse(localStorage.getItem('voice-chat-'+decodeURIComponent(m[1]))||'null');
        return r&&Array.isArray(r.turns)&&r.turns.length<150;}catch(_){return false;}
  },undefined,{timeout:30000});
  await page.waitForFunction(()=>document.querySelector('#state').textContent==='Ready');
  const trimmed=await readRecord(page);
  const storedBytes=await page.evaluate(()=>{
-   const raw=localStorage.getItem('voice-chat')||'';
+   const m=/^#\/chat\/(.+)$/.exec(location.hash||'');
+   const raw=localStorage.getItem('voice-chat-'+decodeURIComponent(m[1]))||'';
    return new TextEncoder().encode(raw).length;
  });
  assert.ok(trimmed?.turns?.length>0,'the conversation must still be saved, not abandoned');
@@ -272,6 +308,43 @@ try{
  assert.match(await page.locator('#turns').textContent(),/saved in this browser/,
    'and the counter must still be telling the truth');
 
+ // ---- 10. the single-conversation build migrates into the list, once
+ await page.evaluate(()=>{localStorage.clear();location.hash='';
+   localStorage.setItem('voice-chat',JSON.stringify({v:1,id:'legacy',turns:[{q:'From the old build.',a:'Still here.'}]}));});
+ await page.reload();await ready();
+ assert.equal(await page.evaluate(()=>localStorage.getItem('voice-chat')),null,'the legacy key is removed');
+ assert.equal((await readIndex(page)).length,1,'and its conversation is listed exactly once');
+ shown=await bubbles();
+ assert.deepEqual(shown.user,['From the old build.'],'and opened');
+ await page.reload();await ready();
+ assert.equal((await readIndex(page)).length,1,'a second load does not migrate it twice');
+
+ // ---- 11. the list: switch, delete, deep link
+ const migratedId=await currentId(page);
+ await page.locator('#new').click();
+ await send('Second conversation.');
+ await settled(1);
+ const secondChat=await currentId(page);
+ await page.locator('#chats-toggle').click();
+ assert.match(await page.locator('#chats-toggle').textContent(),/Chats \(2\)/,'the toggle counts the saved chats');
+ assert.equal(await page.locator('.chat-entry').count(),2,'both conversations are listed');
+ await page.locator(`.chat-entry[data-id="${migratedId}"] .chat-open`).click();
+ shown=await bubbles();
+ assert.deepEqual(shown.user,['From the old build.'],'opening a listed chat shows its turns');
+ await send('Continue the old one.');
+ await settled(2);
+ assert.equal(prompts[prompts.length-1].messages[0].content,'From the old build.',
+   'the model is sent the reopened conversation, not the one that was on screen before');
+ assert.equal(await currentId(page),migratedId);
+ await page.evaluate(id=>{location.hash='#/chat/'+encodeURIComponent(id);},secondChat);
+ await page.waitForFunction(()=>document.querySelectorAll('.message.user').length===1);
+ shown=await bubbles();
+ assert.deepEqual(shown.user,['Second conversation.'],'a #/chat/<id> link opens that chat');
+ await page.locator(`.chat-entry[data-id="${secondChat}"] .chat-remove`).click();
+ assert.equal(await currentId(page),'','deleting the open chat lands on a fresh one');
+ assert.deepEqual((await readIndex(page)).map(c=>c.id),[migratedId],'and only the other chat remains');
+ assert.equal(await page.evaluate(id=>localStorage.getItem('voice-chat-'+id),secondChat),null,'its turns went with it');
+
  assert.deepEqual(errors,[]);
  if(sabotage)assert.ok(mutations>0,'the page must load the sabotage replacement');
  console.log(assertionsComplete);
@@ -281,7 +354,7 @@ try{
  }else{
   fs.mkdirSync('evidence/browser',{recursive:true});
   await page.screenshot({path:'evidence/browser/chromium-chat-history.png',fullPage:true});
-  console.log('PASS chromium: turn survives reload and reaches the model, restore re-speaks nothing, provenance survives, refused reply leaves no trace, New chat erases, 40-turn send window inside the bridge ceiling, forged storage cannot author a turn, a second tab keeps its own conversation, an over-budget record converges and repaints');
+  console.log('PASS chromium: turn survives reload and reaches the model, restore re-speaks nothing, provenance survives, refused reply leaves no trace, New chat keeps the old chat listed, 40-turn send window inside the bridge ceiling, forged storage cannot author a turn, a second tab keeps its own conversation, an over-budget record converges and repaints, the legacy record migrates once, the list switches/deletes/deep-links');
  }
  }finally{await browser.close();}
 }finally{await new Promise(resolve=>server.close(resolve));}

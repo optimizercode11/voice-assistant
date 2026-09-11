@@ -118,13 +118,17 @@ The bridge is stateless: every turn re-sends the whole transcript, so what Qwen
 remembers is exactly what the page holds.  That used to mean a refresh ended a
 conversation twice over — the bubbles went away *and* the model forgot what it
 had been told ten seconds ago, which is how a thread about one film came back
-with "I'm not sure what you mean by Carlton".  `/chat` now keeps the transcript
-in `localStorage` under `voice-chat` and rebuilds both halves from it, so a
-reload picks up where you left off and **re-speaks nothing**.
+with "I'm not sure what you mean by Carlton".  `/chat` keeps every conversation
+in `localStorage` — an index under `voice-chats` and one record per chat under
+`voice-chat-<id>` — and rebuilds both halves from it, so a reload picks up where
+you left off and **re-speaks nothing**.  **Chats** lists the saved
+conversations (newest first, titled by the first thing you said); **New chat**
+starts another and keeps the old one; a chat's link is `#/chat/<id>`.
 
-- **Nothing is uploaded, and nothing is stored on the server.** The transcript
-  lives in the browser profile that spoke it.  **New chat** erases it; so does
-  clearing site data.
+- **Nothing is uploaded, and nothing is stored on the server.** The
+  conversations live in the browser profile that spoke them.  Deleting one from
+  the list, or clearing site data, is how they go away.  At most 60 chats and
+  ~3 MB are kept; the oldest are evicted first, never the one on screen.
 - **Provenance survives the reload.** "Looked up · search_notes" and "From your
   notes · film.md" stay attached to the reply that earned them.
 - **A refused reply leaves no trace.** An empty or failed turn is never written
@@ -133,8 +137,8 @@ reload picks up where you left off and **re-speaks nothing**.
   but only the last 40 turns are sent — the bridge refuses more than 101
   messages — and the header says *"Qwen is holding the last 40"*.
 - **Two tabs do not overwrite each other.** A tab writes only into the
-  conversation it owns, so **New chat** in one tab is never resurrected by a
-  reply finishing in the other.  The tab that lost the key says *"not saved in
+  conversation it has open, so **New chat** in one tab never touches the reply
+  finishing in the other.  A tab whose storage was cleared says *"not saved in
   this browser"* and keeps working: losing storage costs a save, never a turn.
 
 `tests/browser/voice_history_browser.mjs` asserts each of those, including that

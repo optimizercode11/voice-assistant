@@ -66,9 +66,10 @@ const sizes = text => speechChunks(text).map(part => part.length);
 const longAnswer = 'Yes. ' + 'This is a long explanation that goes on for a while. '.repeat(20);
 check(speechChunks(longAnswer)[0].length < 12,
   `the first bite is tiny, so the first word is audible fast (got ${speechChunks(longAnswer)[0].length} chars)`);
-check(speechChunks(longAnswer).length > 10, 'a long answer really is split');
-check(speechChunks('Half Moon Bay is a small city. It is known for its long beaches. The old Carlton hotel closed.').length === 3,
-  'one request per sentence');
+check(speechChunks(longAnswer).length >= 2 && speechChunks(longAnswer).length <= 4,
+  `a long answer is a first bite plus a few growing groups, not one request per sentence (got ${speechChunks(longAnswer).length})`);
+check(speechChunks('Half Moon Bay is a small city. It is known for its long beaches. The old Carlton hotel closed.').length === 2,
+  'the first sentence stands alone; the rest travels together so the engine can batch it');
 check(speechChunks('Half Moon Bay is a small city. It is known for its beaches. The Carlton closed.').length === 2,
   'a trailing fragment joins the sentence before it rather than clicking alone');
 
@@ -92,8 +93,13 @@ for (const text of samples) check(lossless(text), `lossless: ${JSON.stringify(te
 
 // -- bounds and junk ----------------------------------------------------------
 for (const text of samples) {
-  const over = speechChunks(text).filter(part => part.length > SPEECH_CHUNK.maxChars).length;
-  check(over === 0, `no chunk over the ceiling: ${JSON.stringify(text.slice(0, 28))} -> ${JSON.stringify(sizes(text))}`);
+  const parts = sizes(text);
+  const first = parts.length === 0 || parts[0] <= SPEECH_CHUNK.maxChars;
+  // A later group must be synthesizable while the previous clip is spoken:
+  // no more than `growth` times the previous group (or one run-on ceiling).
+  const paced = parts.every((size, i) => i === 0
+    || size <= Math.min(SPEECH_CHUNK.groupMax, Math.max(SPEECH_CHUNK.maxChars, parts[i - 1] * SPEECH_CHUNK.growth)));
+  check(first && paced, `first bite under the ceiling and every group paced by the one before: ${JSON.stringify(text.slice(0, 28))} -> ${JSON.stringify(parts)}`);
 }
 for (const junk of [null, undefined, 0, 42, {}, [], NaN, false]) {
   let threw = false, value = null;
@@ -106,9 +112,11 @@ check(SPEECH_CHUNK.minChars > 3, `a stray ellipsis is not worth a request (${SPE
 // A seam through the middle of a word is heard as a word cut in half, which is
 // worse than the pause the feature set out to remove.
 const runOn = 'alpha beta gamma delta '.repeat(60);
-check(speechChunks(runOn).every(part => part.length <= SPEECH_CHUNK.maxChars
-      && /^[a-z]/.test(part.trim()) && /[a-z]$/.test(part.trim())),
-  'a run-on clause breaks between words, never through one');
+check(speechChunks(runOn)[0].length <= SPEECH_CHUNK.maxChars
+      && speechChunks(runOn).every(part => /^[a-z]/.test(part.trim()) && /[a-z]$/.test(part.trim())),
+  'a run-on clause breaks between words, never through one, and the first bite stays short');
+check(SPEECH_CHUNK.growth >= 2 && SPEECH_CHUNK.growth <= 25,
+  `a group grows against the previous clip's playback, within what speech (~25x slower than synthesis) can hide (${SPEECH_CHUNK.growth})`);
 
 console.log(assertionsComplete);
 if (sabotage) {

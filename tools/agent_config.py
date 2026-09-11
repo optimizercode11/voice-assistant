@@ -19,8 +19,10 @@ from urllib.parse import urlsplit
 
 MAX_TOOLS = 32                 # the engine accepts 64; a voice turn needs fewer
 MAX_TOOL_RESULT_CHARS = 6000   # per call, into the model's context
-MAX_TOOL_ROUNDS = 4            # generations per turn, so 3 rounds of tool calls: measured live,
-                               # "look at that folder" needs roots -> request_directory -> answer
+MAX_TOOL_ROUNDS = 6            # generations per turn, so 5 rounds of tool calls: measured live,
+                               # "list the folder, open the README, and the Makefile" needs
+                               # name-the-root -> list -> read -> read -> answer; a round is only
+                               # spent when the model asks for it
 
 
 class ConfigError(Exception):

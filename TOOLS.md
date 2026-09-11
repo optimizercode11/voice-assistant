@@ -269,6 +269,13 @@ removes the hold and the suite goes red.
 A control only ever comes from the bridge's own answer — a saved transcript
 record cannot carry one, and a failed tool call has it stripped at the source.
 
+Measured live (2026-09-11): "wait, what did you say?", "hold on, what's the
+capital of France?" and "give me a minute... what is two plus two?" did not
+call it, but a bare **"Stop."** did -- and "stop" is what a person says to
+stop the *reply*.  The tool's description now says a bare stop/wait/hold on/
+quiet means stop talking, never stop listening.  Re-run the same probe after
+any prompt change; the description is the only control here.
+
 ## Making the model ask for a folder
 
 The request-and-click flow (`request_directory`, the approval card) shipped on
@@ -288,8 +295,18 @@ transcript:
   the configured root", unknown root, `..`) end with *"ask them for it with
   request_directory"* — only when a grants file is configured, so the tool is
   never promised where it does not exist.
-- `limits.rounds` is 3 on the host (max 4): roots → request_directory → answer
-  did not fit in 2.
+- `limits.rounds` is 5 on the host (max 6): roots → request_directory → answer
+  did not fit in 2, and "list the folder, open the README and the Makefile"
+  did not fit in 3 -- measured live on 2026-09-11 as a turn that ended with
+  "The model kept looking things up and ran out of room", which the page
+  showed as *Something went wrong* and then closed the microphone.  A round
+  is only spent when the model asks for a tool.
+- The last tool result before the final generation now ends with a note that
+  no more tool calls are possible this turn, so the model answers instead of
+  asking for one more lookup (`tests/tool_loop_test.py`).
+- On the page, a bridge refusal keeps the conversation: the reason goes on the
+  status line and listening resumes, instead of "Something went wrong" ending
+  the session (`voice_pause_browser.mjs` asserts it).
 
 ## Progress, and why it is opt-in
 

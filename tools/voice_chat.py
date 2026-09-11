@@ -379,4 +379,17 @@ def turn(url, body, disconnected, *, registry=None, limits=None, on_event=None):
             emit('tool', **row)
             messages.append({'role': 'tool', 'tool_call_id': call['id'],
                              'content': result.for_model() or '(empty result)'})
+        if round_number == rounds - 1:
+            # The next generation is the last and is offered no tools, but the
+            # model does not know that: measured live (2026-09-11), it kept
+            # asking for one more lookup and the turn ended as "ran out of
+            # room" -- which the page showed as "Something went wrong".  Say it
+            # in the one place the model is certain to read: the last tool
+            # result of this round.
+            messages[-1]['content'] += LAST_ROUND_NOTE
     raise ChatError(502, 'The reply did not finish. Please try again.')
+
+
+LAST_ROUND_NOTE = ("\n\n[No further tool calls are possible in this turn. Answer the user now in "
+                   "plain spoken prose from what you already have; if something is still "
+                   "unknown, say so and offer to continue in the next turn.]")

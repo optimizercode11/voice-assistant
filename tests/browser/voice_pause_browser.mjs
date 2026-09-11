@@ -87,7 +87,12 @@ try{
    const body=route.request().postDataJSON();posts.push(body);
    const asked=body.messages.at(-1).content;
    let events;
-   if(/stop listening/i.test(asked)){
+   if(/fail this one/i.test(asked)){
+     // The bridge refused the turn (the round budget ran out).  Measured live
+     // 2026-09-11: this used to end the conversation with "Something went wrong".
+     events=[{type:'status',phase:'tool',round:1,calls:['mcp__files__list_dir']},
+             {type:'error',status:502,error:'The model kept looking things up and ran out of room. Please try again.'}];
+   }else if(/stop listening/i.test(asked)){
      // The bridge ran pause_listening mid-turn and folded its control into the
      // answer.  Nothing else in this stream tells the page to pause.
      events=[{type:'status',phase:'tool',round:1,calls:['pause_listening']},
@@ -158,6 +163,18 @@ try{
   await page.waitForFunction(()=>document.querySelectorAll('.message.assistant').length===4,null,{timeout:CAPTURE_LOOP_MS+15000});
   assert.equal(uploads.length,uploadsAtPause+1,'after resume the microphone loop took a turn on its own');
   assert.match(posts.at(-1).messages.at(-1).content,/still there/);
+
+  // A bridge refusal mid-conversation is a failed turn, not a closed session:
+  // the microphone stays, the status line carries the reason, and no
+  // "Something went wrong" ends the conversation.
+  const postsBeforeFail=posts.length;
+  await page.locator('#text').fill('fail this one');await page.locator('#send').click();
+  await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('ran out of room'),null,{timeout:30000});
+  assert.equal(await page.locator('#state').textContent(),'Listening','a refused turn keeps the session');
+  assert.notEqual(await page.locator('#orb').getAttribute('data-state'),'error');
+  assert.equal(await page.locator('#end').isVisible(),true,'the conversation is still on');
+  assert.equal(posts.length,postsBeforeFail+1);
+  assert.equal(await page.locator('.message.assistant').count(),4,'a refused reply leaves no assistant turn');
 
   // Ending the conversation clears the pause: a new session starts listening.
   await page.locator('#end').click();

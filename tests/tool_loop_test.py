@@ -270,6 +270,23 @@ class ToolLoopTests(unittest.TestCase):
         self.assertNotIn('tools', self.upstream.requests[1], 'the last round must force an answer')
         self.assertIn(b'ran out of room', data)
 
+    def test_the_model_is_told_when_its_next_round_is_the_last(self):
+        # Measured live 2026-09-11: a multi-step folder question spent every
+        # round on tools and the turn ended as "ran out of room".  The last
+        # tool result before the final generation now says so, and only that
+        # one does -- an earlier round must not be told to stop looking.
+        self.registry(rounds=3)
+        self.upstream.script = [calling([call('now', {})]), calling([call('now', {})]), answered('It is noon.')]
+        status, data = self.request({'messages': [{'role': 'user', 'content': 'time?'}]})
+        self.assertEqual(status, 200)
+        self.assertIn(b'It is noon.', data)
+        second, third = self.upstream.requests[1]['messages'], self.upstream.requests[2]['messages']
+        self.assertNotIn('No further tool calls', second[-1]['content'], 'round 2 still has tools')
+        self.assertEqual(third[-1]['role'], 'tool')
+        self.assertIn('No further tool calls are possible', third[-1]['content'])
+        self.assertNotIn('tools', self.upstream.requests[2])
+        self.assertIn('tools', self.upstream.requests[1])
+
     def test_malformed_tool_call_fails_closed(self):
         self.registry()
         self.upstream.script = [{'choices': [{'message': {'content': ''}, 'finish_reason': 'tool_calls'}]}]

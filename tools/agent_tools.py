@@ -388,10 +388,12 @@ class Registry:
             # less.
             self._add(Tool("pause_listening",
                            "Stop listening after this reply: the microphone closes and no further turns "
-                           "are taken until the user presses Resume on the page. Call this when the user "
-                           "asks you to stop listening, pause, hold on, wait, give them a minute, or says "
-                           "they need to take a call or talk to someone else. Never call it on your own "
-                           "initiative, and you cannot undo it: only the user can resume.",
+                           "are taken until the user presses Resume on the page. Call this ONLY when the "
+                           "user explicitly asks you to stop or pause LISTENING, to turn the microphone "
+                           "off, or says they are stepping away, taking a call or talking to someone "
+                           "else for a while. A bare 'stop', 'wait', 'hold on' or 'quiet' means stop "
+                           "talking, not stop listening: do not call this for those. Never call it on "
+                           "your own initiative, and you cannot undo it: only the user can resume.",
                            {"type": "object", "properties":
                             {"reason": {"type": "string", "maxLength": 200,
                                         "description": "Why, in the user's words, shown on the page"}},

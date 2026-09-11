@@ -1279,9 +1279,21 @@ async function runTurn(input, forced = false, voicedMs = null) {
         ? (event.citations?.length ? `Found ${event.citations.length} passage${event.citations.length > 1 ? 's' : ''} in your notes…` : 'Read it. Thinking…')
         : 'That did not work. Answering from what it has…');
     };
-    const reply = streaming
-      ? await responseProgress('/chat/completions', JSON.stringify({messages: pending}), controller.signal, progress)
-      : await responseJSON('/chat/completions', JSON.stringify({messages: pending}), controller.signal);
+    let reply;
+    try {
+      reply = streaming
+        ? await responseProgress('/chat/completions', JSON.stringify({messages: pending}), controller.signal, progress)
+        : await responseJSON('/chat/completions', JSON.stringify({messages: pending}), controller.signal);
+    } catch (error) {
+      // A refusal from the bridge ("ran out of room", "too long", "busy") is a
+      // turn that failed, not a conversation that ended.  Measured live
+      // (2026-09-11): a multi-step folder question hit the round budget, the
+      // page showed "Something went wrong" and closed the microphone, and the
+      // person had to reload and press Start to ask again.  Keep the session;
+      // the message goes on the status line and the next sentence is heard.
+      if (error?.name !== 'AbortError') error.keepSession = true;
+      throw error;
+    }
     check();
     // No further acknowledgment may start from here, but one already playing
     // keeps playing: the reply's own audio still needs a few hundred ms of

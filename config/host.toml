@@ -10,9 +10,12 @@
 # [mcp.server] named "files" at the bottom for what is actually exposed.
 
 [limits]
-# 3, not 2: measured live, "look at that folder" is roots -> request_directory
-# -> answer, and with 2 the model wrote a literal <tool_call> as its answer.
-rounds = 3
+# 5, not 2: measured live, "look at that folder" is roots -> request_directory
+# -> answer, and "list the folder, open the README and the Makefile" is
+# name-the-root -> list -> read -> read -> answer; at 3 that turn ended as
+# "ran out of room" on the page (2026-09-11).  A round is only spent when the
+# model asks for a tool, so the budget costs nothing on a plain question.
+rounds = 5
 per_call_seconds = 10
 result_chars = 6000
 turn_seconds = 150

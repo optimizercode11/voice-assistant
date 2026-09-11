@@ -551,3 +551,12 @@ streamed turn in `voice_tts_browser.mjs` that asserts the first sentence was
 requested before the answer event existed. The transcript still commits only
 the `answer`.
 
+Shipped to the CPU bridge as campaign `voice-stream-20260911-a` from head 47cb7e3:
+stage, install and restart PASS under the guard (`evidence/guarded-voice-stream-20260911-a-*`).
+Bridge PID 61188 since 08:29:37 UTC, NRestarts=0; `voice-stack-gpu2.service` kept
+PID 53262 / 07:37:54 UTC. Served `chat.js`
+`94caa8c20978a5a0a35cbf88b0c39615f2608233a2fe74d628e12aa2f730a695` equals this
+checkout; `check_site.py --compare-live` PASS 20/20. Measured on the live bridge
+right after: first prose delta 0.10 s after the question, full answer at 0.96 s
+(284 chars, 51 deltas). The 30-second manual microphone check is still owed.
+

@@ -1,0 +1,6 @@
+guarded-run: campaign=voice-stream-20260911-a label=stage mode=cpu cpus=24-27
+command: bash -c set\ -euo\ pipefail\;\ find\ .\ -name\ __pycache__\ -type\ d\ -prune\ -exec\ rm\ -rf\ \{\}\ +\ 2\>/dev/null\ \|\|\ true\;\ printf\ \"export\ GUARD_GIT_HEAD=%s\\nexport\ GUARD_SOURCE_FP=%s\\nexport\ VOICE_TOOLS_CAMPAIGN=voice-stream-20260911-a\\n\"\ \"\$GUARD_GIT_HEAD\"\ \"\$GUARD_SOURCE_FP\"\ \>\ deploy/source.env\;\ PYTHONDONTWRITEBYTECODE=1\ python3\ deploy/check_site.py\ --require-assets\ 2\>\&1\ \|\ tail\ -1\;\ PYTHONDONTWRITEBYTECODE=1\ python3\ tools/voicectl.py\ --config\ config/host.toml\ index\ build\ 2\>\&1\ \|\ tail\ -1\;\ PYTHONDONTWRITEBYTECODE=1\ python3\ -u\ tools/voicectl.py\ --config\ config/host.toml\ doctor\ 2\>\&1\ \|\ tail\ -1\;\ PYTHONDONTWRITEBYTECODE=1\ python3\ deploy/check_site.py\ --compare-live\ 2\>\&1\ \|\ tail\ -1\ \|\|\ true
+== PASS: 20 checks, 0 failures ==
+indexed 6 documents into 146 chunks in 0.022s at var/notes.sqlite
+doctor: ok
+== PASS: 20 checks, 0 failures ==

@@ -42,9 +42,17 @@ const wav=(()=>{const ms=90,rate=24000,samples=Math.round(rate*ms/1000);
 
 const LONG='Half Moon Bay is a small city in California. It is known for its long, cold beaches. The old Carlton hotel closed its doors for good.';
 const SHORT='Yes.';
+// The third turn is what the bridge does since 2026-09-11: prose streams as
+// 'delta' events while the model is still generating, then the answer.
+const STREAMED='First things first. Then the second sentence follows a little later. And a third one closes it.';
 const scripts=[[{at:0,type:'answer',text:LONG,usage:{},tools:[],sources:[]}],
-               [{at:0,type:'answer',text:SHORT,usage:{},tools:[],sources:[]}]];
-let turn=0;
+               [{at:0,type:'answer',text:SHORT,usage:{},tools:[],sources:[]}],
+               [{at:0,type:'delta',round:1,text:'First things first. '},
+                {at:350,type:'delta',round:1,text:'Then the second sentence '},
+                {at:600,type:'delta',round:1,text:'follows a little later. '},
+                {at:900,type:'delta',round:1,text:'And a third one closes it.'},
+                {at:1100,type:'answer',text:STREAMED,usage:{},tools:[],sources:[]}]];
+let turn=0, answerSentAt=0;
 const spoken=[];   // every /tts body with the moment it reached the server
 const server=http.createServer((req,res)=>{
   const url=req.url.split('?')[0];
@@ -73,7 +81,9 @@ const server=http.createServer((req,res)=>{
     res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript; charset=utf-8':'text/html; charset=utf-8');
     return res.end(body);
   }
-  if(url==='/chat/health')return res.end(JSON.stringify({available:true,streaming:true,tools:[],tool_sources:{}}));
+  // A tool is advertised because the page only streams (and only then can
+  // speak a reply while it is generated) when the bridge has tools attached.
+  if(url==='/chat/health')return res.end(JSON.stringify({available:true,streaming:true,tools:['now'],tool_sources:{}}));
   if(url==='/languages')return res.end(JSON.stringify({default:'a',languages:[{code:'a',name:'English (US)'}]}));
   if(url==='/voices')return res.end(JSON.stringify({voices:['af_heart']}));
   if(url==='/approvals')return res.end(JSON.stringify({enabled:false,requests:[],grants:[]}));
@@ -93,7 +103,7 @@ const server=http.createServer((req,res)=>{
       res.writeHead(200,{'Content-Type':'application/x-ndjson','Cache-Control':'no-store'});
       script.forEach((event,index)=>{
         const {at,...payload}=event;
-        setTimeout(()=>{res.write(JSON.stringify(payload)+'\n');
+        setTimeout(()=>{if(payload.type==='answer')answerSentAt=Date.now();res.write(JSON.stringify(payload)+'\n');
           if(index===script.length-1){res.end();turn++;}},at);
       });
     });
@@ -145,6 +155,21 @@ try{
  await page.waitForFunction(()=>document.querySelector('#state').textContent==='Ready');
  assert.deepEqual(spoken.slice(mark).map(part=>part.text),[SHORT],
    'a single short sentence stays a single request');
+
+ // 3. a streamed reply is spoken while the model is still talking
+ mark=spoken.length;
+ await send('stream it');
+ await page.waitForFunction(n=>document.querySelectorAll('.message.assistant').length===3,3);
+ await page.waitForFunction(()=>document.querySelector('#state').textContent==='Ready');
+ said=spoken.slice(mark);
+ assert.ok(said.length>=2,`a streamed answer is spoken in more than one request (got ${said.length})`);
+ assert.equal(said[0].text,'First things first.','the first sentence is requested as soon as it is complete');
+ assert.ok(said[0].arrived<answerSentAt,
+   `the first sentence was requested ${answerSentAt-said[0].arrived} ms before the answer event existed`);
+ assert.equal(said.map(part=>part.text).join(' ').replace(/\s+/g,' ').trim(),STREAMED,
+   'every streamed word is spoken, in order, exactly once');
+ assert.equal(await page.locator('.message.assistant').last().locator('p').first().textContent(),STREAMED,
+   'the transcript shows the answer the bridge committed, not the stream');
 
  assert.deepEqual(errors,[]);
  if(sabotage)assert.ok(true,'the page must load the sabotage replacement');

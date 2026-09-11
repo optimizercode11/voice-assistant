@@ -102,9 +102,16 @@ insecure origin.
   is returned unchanged so the UI can show what was actually heard.
 
 `/tts`
-* The bridge forwards chunked responses. The current `/chat` page waits for
-  the full audio blob before playback (`web/chat.js::runTurn`, `response.blob()`),
-  so that page does not obtain first-segment streaming latency.
+* The bridge forwards chunked responses, and since 2026-09-11 it also asks the
+model to stream: prose is forwarded to the page as `delta` events (with the
+generation round it belongs to) while the model is still talking, the engine's
+tool-call and reasoning text is never forwarded, and the final `answer` event
+stays the only thing the page commits.  The page speaks sentences as they
+complete -- the first alone, then whatever has arrived by the time the current
+clip is about to end -- so the first word is heard around the model's
+time-to-first-token instead of after the whole reply, and the TTS engine still
+batches the bulk of it.  What the stream said is reconciled against the answer
+at the end; the answer's unspoken remainder wins if they differ.
 
 ## Turn-taking and barge-in
 

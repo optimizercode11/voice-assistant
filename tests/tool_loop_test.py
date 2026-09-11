@@ -62,6 +62,28 @@ class Upstream(BaseHTTPRequestHandler):
         reply = script[index] if index < len(script) else script[-1]
         if callable(reply):
             reply = reply(self.server.requests)
+        if isinstance(reply, dict) and reply.get('sse') and self.server.requests[-1].get('stream'):
+            # Scripted OpenAI-style stream: one chunk per piece of prose, the
+            # tool calls (if any) on the last chunk, then [DONE].
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.end_headers()
+            pieces = reply.get('pieces', [])
+            for i, piece in enumerate(pieces):
+                delta = {'content': piece}
+                if i == 0:
+                    delta['role'] = 'assistant'
+                last = i == len(pieces) - 1
+                if last and reply.get('calls'):
+                    delta['tool_calls'] = reply['calls']
+                chunk = {'choices': [{'index': 0, 'delta': delta,
+                                      'finish_reason': ('tool_calls' if reply.get('calls') else 'stop') if last else None}]}
+                self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
+                self.wfile.flush()
+                time.sleep(reply.get('gap', 0))
+            self.wfile.write(b'data: [DONE]\n\n')
+            self.wfile.flush()
+            return
         body = json.dumps(reply).encode()
         self.send_response(200)
         self.send_header('Content-Length', str(len(body)))
@@ -144,6 +166,46 @@ class ToolLoopTests(unittest.TestCase):
         if 'application/x-ndjson' in (response.getheader('Content-Type') or ''):
             return response.status, [json.loads(line) for line in raw.decode().splitlines() if line.strip()]
         return response.status, raw
+
+    # -- streaming: prose reaches the page while the model is still talking --
+    def test_streams_prose_as_deltas_before_the_answer(self):
+        self.registry()
+        self.upstream.script = [{'sse': True, 'pieces': ['The bridge ', 'is on 8092. ', 'It is local.'], 'gap': 0.02}]
+        status, events = self.request({'messages': [{'role': 'user', 'content': 'what port is the bridge on?'}]},
+                                      accept='application/x-ndjson')
+        self.assertEqual(status, 200)
+        self.assertTrue(self.upstream.requests[0].get('stream'), 'a streaming page asks the engine to stream')
+        self.assertEqual([event['type'] for event in events], ['delta', 'delta', 'delta', 'answer'])
+        self.assertEqual(''.join(event['text'] for event in events[:-1]), 'The bridge is on 8092. It is local.')
+        self.assertTrue(all(event['round'] == 1 for event in events[:-1]))
+        self.assertEqual(events[-1]['text'], 'The bridge is on 8092. It is local.')
+
+    def test_streamed_tool_round_keeps_its_deltas_apart_from_the_answer(self):
+        self.registry()
+        self.upstream.script = [
+            {'sse': True, 'pieces': ['Let me check.'], 'calls': [call('search_notes', {'query': 'bridge port'})]},
+            lambda requests: {'sse': True, 'pieces': ['The bridge is on 8092.']} if _has_tool_result(requests[-1]) else calling([])]
+        status, events = self.request({'messages': [{'role': 'user', 'content': 'what port is the bridge on?'}]},
+                                      accept='application/x-ndjson')
+        self.assertEqual(status, 200)
+        self.assertEqual([event['type'] for event in events], ['delta', 'status', 'tool', 'delta', 'answer'])
+        self.assertEqual((events[0]['round'], events[0]['text']), (1, 'Let me check.'))
+        self.assertEqual((events[3]['round'], events[3]['text']), (2, 'The bridge is on 8092.'))
+        self.assertEqual(events[-1]['text'], 'The bridge is on 8092.')
+
+    def test_a_plain_json_body_is_still_accepted_when_streaming_was_asked_for(self):
+        self.registry()
+        self.upstream.script = [answered('Plain reply.')]
+        status, events = self.request({'messages': [{'role': 'user', 'content': 'hi'}]}, accept='application/x-ndjson')
+        self.assertEqual(status, 200)
+        self.assertEqual([event['type'] for event in events], ['answer'])
+        self.assertEqual(events[-1]['text'], 'Plain reply.')
+
+    def test_a_stream_that_never_finishes_is_a_cut_reply(self):
+        self.registry()
+        self.upstream.script = [{'sse': True, 'pieces': []}]   # [DONE] with no finish_reason
+        status, events = self.request({'messages': [{'role': 'user', 'content': 'hi'}]}, accept='application/x-ndjson')
+        self.assertEqual([event['type'] for event in events], ['error'])
 
     # -- the happy path ----------------------------------------------------
     def test_tool_round_trip_is_server_owned_and_cited(self):

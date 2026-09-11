@@ -115,12 +115,74 @@ def payload(body, tools=None, system=None):
     return request
 
 
-def _exchange(url, request, disconnected, timeout):
-    """One POST to the engine, cancellable, size-bounded.  Returns the decoded reply."""
+def _collect_stream(response, on_delta):
+    """Read an OpenAI-style SSE stream into one decoded reply, calling on_delta
+    for every piece of prose as it arrives (2026-09-11: this is how the page
+    speaks the first sentence while the rest is still being generated).
+
+    Only `delta.content` is forwarded, and only until anything that looks like a
+    tool call or a reasoning block shows up; the engine holds those back from
+    the stream anyway, and the final `answer` event stays authoritative."""
+    content, calls, finish, usage = [], None, None, {}
+    forward, buffer, total = True, b'', 0
+    while True:
+        chunk = response.read1(65536) if hasattr(response, 'read1') else response.read(65536)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_RESPONSE_BYTES:
+            raise ChatError(502, 'The reply exceeded the size limit.')
+        buffer += chunk
+        while b'\n' in buffer:
+            line, buffer = buffer.split(b'\n', 1)
+            line = line.strip()
+            if not line.startswith(b'data:'):
+                continue
+            payload = line[5:].strip()
+            if payload == b'[DONE]':
+                buffer = b''
+                break
+            try:
+                event = json.loads(payload)
+            except ValueError:
+                continue
+            choices = event.get('choices') if isinstance(event, dict) else None
+            choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
+            delta = choice.get('delta') if isinstance(choice.get('delta'), dict) else {}
+            text = delta.get('content')
+            if isinstance(text, str) and text:
+                content.append(text)
+                if forward and ('<tool_call' in text or '<think' in text or '</think' in text):
+                    forward = False
+                if forward and on_delta is not None:
+                    try:
+                        on_delta(text)
+                    except Exception:
+                        pass                          # progress is never a failure
+            if isinstance(delta.get('tool_calls'), list) and delta['tool_calls']:
+                calls = (calls or []) + delta['tool_calls']
+            if choice.get('finish_reason'):
+                finish = choice['finish_reason']
+            if isinstance(event.get('usage'), dict):
+                usage = event['usage']
+    message = {'content': ''.join(content)}
+    if calls:
+        message['tool_calls'] = calls
+    return {'choices': [{'message': message, 'finish_reason': finish or 'length'}], 'usage': usage}
+
+
+def _exchange(url, request, disconnected, timeout, on_delta=None):
+    """One POST to the engine, cancellable, size-bounded.  Returns the decoded reply.
+
+    With `on_delta` the request asks the engine to stream and the prose is handed
+    over as it is generated; an engine that answers with a plain JSON body anyway
+    is accepted as before."""
     target = urlsplit(url)
     connection = http.client.HTTPConnection(target.hostname, target.port or 80, timeout=5)
     done = threading.Event()
     result = []
+    if on_delta is not None:
+        request = dict(request, stream=True)
     try:
         connection.connect()
         connection.sock.settimeout(max(5.0, timeout - 5))
@@ -129,13 +191,16 @@ def _exchange(url, request, disconnected, timeout):
         def receive():
             try:
                 response = connection.getresponse()
-                data = response.read(MAX_RESPONSE_BYTES)
-                if len(data) > MAX_RESPONSE_BYTES:
-                    raise ChatError(502, 'The reply exceeded the size limit.')
                 if response.status == 400:
                     raise ChatError(400, 'This conversation is too long. Start a new chat.')
                 if response.status != 200:
                     raise ChatError(503, 'The conversation model is busy or unavailable. Please try again.')
+                if on_delta is not None and 'text/event-stream' in (response.getheader('Content-Type') or ''):
+                    result.append(_collect_stream(response, on_delta))
+                    return
+                data = response.read(MAX_RESPONSE_BYTES)
+                if len(data) > MAX_RESPONSE_BYTES:
+                    raise ChatError(502, 'The reply exceeded the size limit.')
                 result.append(json.loads(data))
             except Exception as error:
                 result.append(error)
@@ -246,7 +311,11 @@ def turn(url, body, disconnected, *, registry=None, limits=None, on_event=None):
         remaining = turn_deadline - time.monotonic()
         if remaining <= 1:
             raise ChatError(504, 'That took too long. Please try a shorter question.')
-        decoded = _exchange(url, request, disconnected, min(generation_seconds, remaining))
+        # Prose streams to the page as it is generated (type 'delta', with the
+        # round it belongs to); the 'answer' event at the end is still the only
+        # thing the page commits.
+        on_delta = (lambda text, n=round_number: emit('delta', round=n, text=text)) if on_event is not None else None
+        decoded = _exchange(url, request, disconnected, min(generation_seconds, remaining), on_delta=on_delta)
         for key, value in (decoded.get('usage') or {}).items():
             if isinstance(value, int):
                 usage[key] = usage.get(key, 0) + value

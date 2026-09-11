@@ -535,3 +535,19 @@ equal this checkout; `check_site.py --compare-live` PASS 20/20 on the live tree.
 The 30-second manual microphone check is owed, as before. Rollback snapshot
 stays at `~/qwen36/voice-stage/voice-fixes-20260911-a/rollback/` until it passes.
 
+### Speaking while the model is still talking (2026-09-11)
+
+Measured on the live stack: a first sentence synthesizes in 65 ms and a whole
+paragraph in 255 ms, the bridge adds 2 ms, and the model answers a typical
+question in about 2 s with a time-to-first-token of up to 1.9 s -- yet the page
+did not speak until the whole answer had arrived, because the bridge called the
+model with `stream: false` and forwarded only the final `answer`. The silence
+the user heard was generation, not synthesis. The bridge now streams the
+model's prose as `delta` events (tool-call and reasoning text withheld; a plain
+JSON body from an engine that ignores `stream` is still accepted) and the page
+speaks each sentence as it completes, taking the next group late so the engine
+still batches. Gates: four streaming cases in `tests/tool_loop_test.py` and a
+streamed turn in `voice_tts_browser.mjs` that asserts the first sentence was
+requested before the answer event existed. The transcript still commits only
+the `answer`.
+

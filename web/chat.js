@@ -848,7 +848,7 @@ function mentionThinking(text, id, signal) {
     })
     .catch(() => {});
 }
-async function playReply(blob, signal, final = true, first = true) {
+async function playReply(blob, signal, final = true, first = true, onStart = null) {
   // A continuation clip must not reopen the settle window (see replySeam).
   replySeam = !first;
   replaceAudio(blob);
@@ -871,7 +871,7 @@ async function playReply(blob, signal, final = true, first = true) {
     const attempt = () => {
       if(settled || signal.aborted)return;
       $('resume').hidden=true;
-      player.play().then(()=>{replySeam = !final;if(!settled && !player.paused){startPlaybackGlow();startBargeWatch();}},error=>{
+      player.play().then(()=>{replySeam = !final;if(!settled && !player.paused){startPlaybackGlow();startBargeWatch();onStart?.();}},error=>{
         if(settled || signal.aborted)return;
         if(error.name!=='NotAllowedError'){failed();return;}
         if(!final){startBargeWatch();return;}   // re-entrant: attempt() is already the retry path
@@ -961,6 +961,124 @@ function speechChunks(text) {
   return groups;
 }
 // SPEECH-CHUNK-END
+
+// ------------------------------------------------ streamed speech (2026-09-11)
+// The bridge now forwards the model's prose as it is generated ('delta'
+// events).  Waiting for the whole answer before speaking cost the entire
+// generation -- ~2 s for a typical reply -- in silence after the question.
+// Sentences are spoken as they complete: the first one alone, then whatever
+// has arrived by the time the current clip is about to end, so generation
+// (~45 chars/s) stays ahead of speech (~17 chars/s) and the engine still
+// batches the bulk.  The 'answer' event at the end is authoritative: what it
+// says beyond what was already spoken is spoken, and nothing is committed to
+// the transcript from the stream itself.
+function sentenceSource() {
+  const src = {queue: [], closed: false, buffer: '', round: 0, taken: '', all: '', waiter: null};
+  const wake = () => { const w = src.waiter; src.waiter = null; if (w) w(); };
+  src.wait = signal => new Promise((resolve, reject) => {
+    if (src.queue.length || src.closed) return resolve();
+    src.waiter = resolve;
+    signal?.addEventListener('abort', () => { src.waiter = null; reject(new DOMException('Stopped', 'AbortError')); }, {once: true});
+  });
+  const drain = final => {
+    const text = src.buffer.replace(/\s+/g, ' ');
+    const done = text.match(/[^.!?\u2026]+[.!?\u2026]+["'\u201d\u2019)\]]*/g) ?? [];
+    let used = 0;
+    for (const sentence of done) { used += sentence.length; const piece = sentence.trim(); if (piece) src.queue.push(piece); }
+    src.buffer = text.slice(used);
+    if (final) { const tail = src.buffer.trim(); if (tail) src.queue.push(tail); src.buffer = ''; }
+    if (src.queue.length || final) wake();
+  };
+  src.push = (round, text) => {
+    if (round !== src.round) { src.buffer = ''; src.all = ''; src.round = round; }   // a new generation
+    src.buffer += text; src.all += text;
+    drain(false);
+  };
+  src.finish = answer => {
+    // What the stream said must be what the answer says; if the two differ the
+    // unspoken remainder of the answer wins and the stale queue is dropped.
+    drain(true);
+    const same = (a, b) => a.replace(/\s+/g, '') === b.replace(/\s+/g, '');
+    if (!same(src.all, answer)) {
+      src.queue.length = 0;
+      const rest = remainderAfter(answer, src.taken);
+      if (rest === null) console.warn('streamed speech diverged from the answer; the rest is not re-spoken');
+      else for (const piece of speechChunks(rest)) src.queue.push(piece);
+    }
+    src.closed = true; wake();
+  };
+  src.close = () => { src.closed = true; wake(); };
+  return src;
+}
+function remainderAfter(answer, spoken) {
+  // The part of `answer` after `spoken`, ignoring whitespace; null if `spoken`
+  // is not a prefix of it.
+  let i = 0, j = 0;
+  while (j < spoken.length) {
+    if (/\s/.test(spoken[j])) { j++; continue; }
+    while (i < answer.length && /\s/.test(answer[i])) i++;
+    if (i >= answer.length || answer[i] !== spoken[j]) return null;
+    i++; j++;
+  }
+  return answer.slice(i).trim();
+}
+async function speakStreamed(src, signal, onFirstClip) {
+  let query = null;
+  const clipFor = text => {
+    if (!query) {
+      const spoken = replyVoice(text);   // the first sentence decides the voice for the reply
+      query = new URLSearchParams({format: 'wav', language: spoken.language, voice: spoken.voice, speed: String(speechSpeed())});
+    }
+    return fetch('/tts?' + query, {method: 'POST', body: text, signal})
+      .then(response => { if (!response.ok) throw new Error('Speech synthesis failed. Your reply is shown above.'); return response.blob(); })
+      .then(audio => { if (audio.size <= 44) throw new Error('The reply audio was empty.'); return audio; })
+      .catch(error => { if (error.name !== 'AbortError') error.keepSession = true; throw error; });
+  };
+  let first = true, prevLen = 0;
+  const take = () => {
+    if (!src.queue.length) return null;
+    let group;
+    if (first) { first = false; group = src.queue.shift(); }
+    else {
+      const budget = Math.min(SPEECH_CHUNK.groupMax, Math.max(SPEECH_CHUNK.maxChars, prevLen * SPEECH_CHUNK.growth));
+      group = '';
+      while (src.queue.length && (!group || group.length + 1 + src.queue[0].length <= budget))
+        group = group ? group + ' ' + src.queue.shift() : src.queue.shift();
+    }
+    prevLen = group.length; src.taken += (src.taken ? ' ' : '') + group;
+    return group;
+  };
+  const next = async () => { for (;;) { const g = take(); if (g) return g; if (src.closed) return null; await src.wait(signal); } };
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  let group = await next();
+  if (!group) return false;
+  let pending = clipFor(group), index = 0;
+  try {
+    while (group) {
+      const audio = await pending;
+      if (signal.aborted) throw new DOMException('Stopped', 'AbortError');
+      if (!index) onFirstClip?.();
+      let startResolve; const started = new Promise(resolve => { startResolve = resolve; });
+      const playing = playReply(audio, signal, false, index === 0, startResolve);
+      // Take the next group late: what has arrived by ~0.5 s before this clip
+      // ends travels together, and its synthesis still lands before the seam.
+      const durationMs = Math.max(0, (audio.size - 44) / 2 / 24000 * 1000);
+      await Promise.race([started, playing]);
+      await Promise.race([sleep(Math.max(0, durationMs - 500)), playing]);
+      const following = next().then(g => g ? {g, clip: clipFor(g)} : null);
+      await playing;
+      const item = await following;
+      if (!item) break;
+      group = item.g; pending = item.clip; index++;
+    }
+  } finally {
+    // The reply is over (or was cut): close the settle window and the gate now,
+    // since every clip was played as a continuation.
+    replySeam = false; playbackEndedAt = performance.now();
+    stopPlaybackGlow(); stopBargeWatch(); setGlow(0);
+  }
+  return true;
+}
 
 async function speakReply(answer, signal, onFirstClip) {
   const spoken = replyVoice(answer);
@@ -1055,7 +1173,22 @@ async function runTurn(input, forced = false, voicedMs = null) {
     message('user',text,original); setState('thinking','Qwen is preparing a reply…');
     armThinkingAloud(id, controller.signal);
     const pending = [...before,{role:'user',content:text}];
+    const source = streaming ? sentenceSource() : null;
+    let speaking = null, speechError = null;
+    const spoken = () => {
+      stopThinkingAloud();        // the reply is in hand: it never waits behind the acknowledgment
+      setState('speaking',active?'Press Space to interrupt and speak. Listening resumes after the reply.':'Press Space to stop the reply.');
+    };
     const progress = event => {
+      if (event.type === 'delta' && source) {
+        source.push(Number(event.round) || 0, String(event.text ?? ''));
+        if (!speaking && source.queue.length) {
+          cancelThinkingAloud();
+          setState('synthesizing','Your reply is becoming speech\u2026');
+          speaking = speakStreamed(source, controller.signal, spoken).catch(error => { speechError = error; return false; });
+        }
+        return;
+      }
       check();
       if (event.type === 'status') {
         setState('thinking', `Looking that up — ${event.calls.join(', ')}…`);
@@ -1099,16 +1232,23 @@ async function runTurn(input, forced = false, voicedMs = null) {
     // user needs to see is one poll overdue.  Fetch it now, not in four seconds.
     refreshApprovals();
     saveConversation();   // after the bubbles, so a trim never strands a rendered turn
-    setState('synthesizing','Your reply is becoming speech\u2026');
-    await speakReply(answer, controller.signal, () => {
-      stopThinkingAloud();        // the reply is in hand: it never waits behind the acknowledgment
-      setState('speaking',active?'Press Space to interrupt and speak. Listening resumes after the reply.':'Press Space to stop the reply.');
-    });
+    if (speaking) {
+      source.finish(answer);
+      const spokeAny = await speaking;
+      check();
+      if (speechError) throw speechError;
+      if (!spokeAny) { setState('synthesizing','Your reply is becoming speech\u2026'); await speakReply(answer, controller.signal, spoken); }
+    } else {
+      if (source) source.close();
+      setState('synthesizing','Your reply is becoming speech\u2026');
+      await speakReply(answer, controller.signal, spoken);
+    }
     check();busy=false;
     if(active)listen();else setState('idle','Send another message, or start a voice conversation.');
   } catch(error) {
     if(id !== epoch) return;
     if(!committed){ history=before; transcript=was; }   // a refused reply leaves no trace
+    controller.abort();          // a streamed reply that failed must not keep talking
     stopThinkingAloud();
     // A refusal is not the end of a conversation.  Anything that merely declined
     // to answer keeps the microphone, so the next sentence needs no second click

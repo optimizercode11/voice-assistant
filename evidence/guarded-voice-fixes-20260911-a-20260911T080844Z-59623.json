@@ -1,0 +1,33 @@
+{
+  "campaign": "voice-fixes-20260911-a",
+  "command": [
+    "systemctl",
+    "--user",
+    "--job-mode=ignore-dependencies",
+    "restart",
+    "voice-tools-bridge.service"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "24-27",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stage/voice-fixes-20260911-a",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-11T08:08:44.077536501Z",
+  "git_head": "507e514babb0adbd8bba8fa0c9f49a50c7c6d0de",
+  "inputs": [],
+  "label": "restart",
+  "log": "/home/ambudsharma/qwen36/voice-stage/voice-fixes-20260911-a/evidence/guarded-voice-fixes-20260911-a-20260911T080844Z-59623.log",
+  "run_id": "voice-fixes-20260911-a-20260911T080844Z-59623",
+  "schema_version": 2,
+  "source_fingerprint": "3e36b7bc5eecd2f85c8d3065fa902dded9f9bd83bd3236d63a24c2f4be758005",
+  "started_utc": "2026-09-11T08:08:44.060174733Z",
+  "status": "PASS"
+}

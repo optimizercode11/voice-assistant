@@ -1,0 +1,16 @@
+guarded-run: campaign=voice-fixes-20260911-a label=install mode=cpu cpus=24-27
+command: bash -c $'\n        set -euo pipefail\n        live="$HOME/qwen36/voice-stack/voice-tools-20260910"\n        test ! -e rollback\n        systemctl --user is-active voice-stack-gpu2.service\n        systemctl --user --job-mode=ignore-dependencies stop voice-tools-bridge.service\n        mkdir rollback\n        rsync -a "$live/" rollback/\n        touch rollback-complete\n        rsync -aR web tools deploy scripts config README.md ARCHITECTURE.md RUNBOOK.md TOOLS.md PROVENANCE.md tests/README.md .guarded-run "$live/"\n        cd "$live"\n        PYTHONDONTWRITEBYTECODE=1 python3 tools/voicectl.py --config config/host.toml index build\n        PYTHONDONTWRITEBYTECODE=1 python3 -u tools/voicectl.py --config config/host.toml doctor\n        sha256sum web/chat.js web/chat.html tools/turn_control.py\n      '
+active
+indexed 6 documents into 143 chunks in 0.014s at var/notes.sqlite
+tools (4): fetch_url, now, request_directory, search_notes
+  fetch_url                          builtin
+  now                                builtin
+  request_directory                  builtin
+  search_notes                       retrieval
+limits: rounds=2 per_call=10.0s turn=150.0s result_chars=6000
+warn: fetch_url is enabled for en.wikipedia.org
+warn: ffmpeg is not on PATH; the bridge cannot decode uploads
+doctor: ok
+24a3d8cff9c2f537ed63750cc80df2c4cccaaac3c74f890844d0fe83a9e29b24  web/chat.js
+6a898c5488cc1750ec4417a39973c245d28cfc967eb5c8d57118cb320d7953cb  web/chat.html
+99c198206031a87169389a82ce13d858e658eef3378606b5c103e6f8186bdc41  tools/turn_control.py

@@ -523,3 +523,15 @@ index plus per-chat keys, migration of the single-chat record, switching,
 deleting, deep links — and `voice_history_browser.mjs` grew from nine claims to
 eleven. Supersedes the ownership paragraph above: a tab writes into the chat it
 has open, and "New chat" no longer erases anything.
+
+Shipped to the CPU bridge as campaign `voice-fixes-20260911-a` from head 507e514
+(fingerprint 3e36b7bc5eec…): stage, install and restart all PASS under the guard
+(`evidence/guarded-voice-fixes-20260911-a-*`). The bridge is PID 59644 since
+08:08:44 UTC, NRestarts=0; `voice-stack-gpu2.service` kept PID 53262 and its
+07:37:54 UTC start across the campaign. Served `chat.js`
+`24a3d8cff9c2f537ed63750cc80df2c4cccaaac3c74f890844d0fe83a9e29b24` and `chat`
+`6a898c5488cc1750ec4417a39973c245d28cfc967eb5c8d57118cb320d7953cb` over TLS
+equal this checkout; `check_site.py --compare-live` PASS 20/20 on the live tree.
+The 30-second manual microphone check is owed, as before. Rollback snapshot
+stays at `~/qwen36/voice-stage/voice-fixes-20260911-a/rollback/` until it passes.
+

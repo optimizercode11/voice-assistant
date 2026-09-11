@@ -1,0 +1,39 @@
+guarded-run: campaign=voice-controls-20260911-a label=stage mode=cpu cpus=24-27
+command: bash -c $'set -euo pipefail\nfind . -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true\nprintf "export GUARD_GIT_HEAD=%s\\nexport GUARD_SOURCE_FP=%s\\nexport VOICE_TOOLS_CAMPAIGN=voice-controls-20260911-a\\n" "$GUARD_GIT_HEAD" "$GUARD_SOURCE_FP" > deploy/source.env\nPYTHONDONTWRITEBYTECODE=1 python3 deploy/check_site.py --require-assets 2>&1 | tail -3\nPYTHONDONTWRITEBYTECODE=1 python3 tools/voicectl.py --config config/host.toml index build\nPYTHONDONTWRITEBYTECODE=1 python3 -u tools/voicectl.py --config config/host.toml doctor --probe\nPYTHONDONTWRITEBYTECODE=1 python3 tools/mcp_web.py --doctor\nPYTHONDONTWRITEBYTECODE=1 python3 deploy/check_site.py --compare-live 2>&1 | tail -2 || true'
+  ok   inputs bind deploy/voice_stack.py
+  ok   all 107 bound inputs exist on this machine
+== PASS: 20 checks, 0 failures ==
+indexed 6 documents into 161 chunks in 0.023s at var/notes.sqlite
+tools (12): mcp__files__find, mcp__files__grep, mcp__files__list_dir, mcp__files__read_file, mcp__files__roots, mcp__stack__health, mcp__web__read_page, mcp__web__search, now, pause_listening, request_directory, search_notes
+  mcp__files__find                   mcp:files
+  mcp__files__grep                   mcp:files
+  mcp__files__list_dir               mcp:files
+  mcp__files__read_file              mcp:files
+  mcp__files__roots                  mcp:files
+  mcp__stack__health                 mcp:stack
+  mcp__web__read_page                mcp:web
+  mcp__web__search                   mcp:web
+  now                                builtin
+  pause_listening                    builtin
+  request_directory                  builtin
+  search_notes                       retrieval
+mcp:
+  stack            up    1 tools  restarts=0
+  web              up    2 tools  restarts=0
+  files            up    5 tools  restarts=0
+limits: rounds=3 per_call=10.0s turn=150.0s result_chars=6000
+warn: ffmpeg is not on PATH; the bridge cannot decode uploads
+doctor: ok
+Read-only web MCP server.  The model may GET public web pages under this policy:
+  tools: search, read_page
+  search backend: ddg; fallback: wikipedia opensearch at https://en.wikipedia.org/w/api.php
+  allow-list: (none: any public host)
+  deny-list: (none)
+  private, loopback, link-local, multicast, reserved and *.local/*.internal/localhost addresses: refused, on the typed URL and on every redirect hop
+  redirects: at most 5, each re-checked; DNS pinned to the vetted address
+  caps: bytes=1500000 output=24000 chars links=40 timeout=10.0s
+  rate: 30/minute, 1.0s between requests to one host
+  user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36 voice-assistant/1.0
+  method: GET only; no cookies, no credentials, no request body. Writes: not implemented, by design.
+  ok   live and repo bind the same 88 inputs (+0 -0)
+== PASS: 20 checks, 0 failures ==

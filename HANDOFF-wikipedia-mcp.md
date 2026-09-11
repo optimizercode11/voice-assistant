@@ -7,7 +7,12 @@ Pum`, the regression in Finding 1 — and `read_page` for any public host. The
 capability manifest from "Related open work" also shipped (`Registry.manifest()`,
 `purpose` per MCP server). A Wikipedia-specific `resolve_entity`/`lookup_entity`
 pair is still unbuilt; build it only if a live measurement shows the general
-server missing what it would add. Everything below is measured on this
+server missing what it would add. Finding 2 is **still open** after that
+shipment: on 2026-09-11, with `mcp__web__search` attached and a manifest in the
+prompt, "Who are Saif Ali Khan's parents?" was answered wrong (Amrita Singh)
+with no tool called, while a question that said "please check" did call the
+search and answered correctly. The remaining suspect is `reasoning_effort:
+"none"` (`voice_chat.py`); step 0 below is now the measurement to run. Everything below is measured on this
 deployment, not assumed. Two findings change the design; read them first.
 
 ## The problem

@@ -518,6 +518,40 @@ Not performed: the speaker-to-microphone check above, including the reload step.
 `voice_history_browser` proves the transcript and the model's context survive a
 reload in Chromium; it does not prove anything about a room.
 
+### Executed: 2026-09-11, campaign `voice-controls-20260911-a`
+
+Steps 1-5 were run in order from head `e64e54d`, shipping `pause_listening`,
+the `web` MCP server and the folder-request fixes. Every host-writing step
+went through the CPU guard on `--cpus 24-27 --nice 10`; no command named a
+GPU. Steps 3 and 4 were driven through `scripts/guarded-hostrun` (which
+writes the launch script to a file and runs it by path) rather than an ssh
+heredoc, with the payload kept in a local file; `--file config/host.toml`
+satisfies its file list without re-syncing the stage.
+
+| Label | Result | Evidence |
+| --- | --- | --- |
+| `stage` | PASS, 20 checks, index rebuilt in the stage, `doctor --probe` 12 tools, `mcp_web.py --doctor` policy printed | `guarded-...-20260911T092213Z-3988019` |
+| `install` | **FAIL, by design**: `systemctl --user is-active voice-stack-gpu2.service` answered `activating` (rc 3) because campaign `qasr-deploy-20260911` was restarting the GPU stack at 09:18-09:22; `set -e` stopped the payload *before* the `stop` line, no snapshot, nothing copied | `guarded-...-20260911T092227Z-3988884` |
+| `install-2` | PASS after the stack settled (`active`); rollback snapshot + `rollback-complete`, index rebuilt, `doctor --probe` ok | `guarded-...-20260911T092318Z-3990779` |
+| `restart` | PASS | `guarded-...-20260911T092327Z-3991089` |
+
+The lesson from the aborted install: the `is-active` line at the top of the
+payload is a real gate, not a formality -- check `systemctl --user show
+voice-stack-gpu2.service -p ActiveState,ActiveEnterTimestamp` and look for a
+foreign campaign in flight (`ps -eo pid,etimes,args | grep guarded`) before
+step 3, and if the GPU stack's start timestamp moved since step 1, re-record it
+rather than treating it as evidence this campaign touched it.
+
+Post-deploy verification: bridge PID `103298` since `09:23:28 UTC`,
+`NRestarts=0`, `/chat/health` 12 tools with `stack`/`web`/`files` ready and
+retrieval fresh (161 chunks); served `chat.js`
+`8b2c8dc3b4d5ba7ae0a50c33b1d8bc1d273fee24af260270b03eb6a7f07da806` equals the
+checkout; `check_site.py --compare-live` PASS 20/20; `rsync -aRnic` differs
+only in `__pycache__`. The live behaviour was then measured with three probe
+scripts (see `PROVENANCE.md`): pause control delivered, folder request filed
+and declined, web search answered. Not performed: the speaker-to-microphone
+room check.
+
 ### 6. Roll back this app update if copy, startup or acceptance fails
 
 Use the *new* snapshot from step 3; do not rerun the old ASR campaign.

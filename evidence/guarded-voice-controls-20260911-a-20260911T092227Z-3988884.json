@@ -1,0 +1,88 @@
+{
+  "campaign": "voice-controls-20260911-a",
+  "command": [
+    "bash",
+    "-c",
+    "set -euo pipefail\nlive=\"$HOME/qwen36/voice-stack/voice-tools-20260910\"\ntest ! -e rollback\nsystemctl --user is-active voice-stack-gpu2.service\nsystemctl --user --job-mode=ignore-dependencies stop voice-tools-bridge.service\nmkdir rollback\nrsync -a \"$live/\" rollback/\ntouch rollback-complete\nrsync -aR web tools deploy scripts config README.md ARCHITECTURE.md RUNBOOK.md TOOLS.md PROVENANCE.md HANDOFF-wikipedia-mcp.md HANDOFF-controls-web-approvals.md tests/README.md .guarded-run \"$live/\"\ncd \"$live\"\npython3 tools/voicectl.py --config config/host.toml index build\npython3 tools/voicectl.py --config config/host.toml doctor --probe\npython3 tools/mcp_web.py --doctor"
+  ],
+  "command_exit_code": 3,
+  "containment": {
+    "cpus": "24-27",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stage/voice-controls-20260911-a",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-11T09:22:29.099347049Z",
+  "git_head": "e64e54df0048eb7d7ebfaff0bca7b5a0c9f20c3a",
+  "inputs": [
+    {
+      "bytes": 88713,
+      "exists": true,
+      "path": "web/chat.js",
+      "sha256": "8b2c8dc3b4d5ba7ae0a50c33b1d8bc1d273fee24af260270b03eb6a7f07da806",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 15839,
+      "exists": true,
+      "path": "web/chat.html",
+      "sha256": "d074cb520bca16518fcba20b75439f7aceb237d50f650d43d9caac1a97fe20c8",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 37366,
+      "exists": true,
+      "path": "tools/speech_ui.py",
+      "sha256": "80392e7fa2101582e6e0b5b05d80e13f3fa8cc57586768501ae90e369e4b9ca5",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 18982,
+      "exists": true,
+      "path": "tools/voice_chat.py",
+      "sha256": "954da3508116ed531c522c5777df2b28fb4e927b5297e2bfca8f82d2cdbd78be",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 31698,
+      "exists": true,
+      "path": "tools/agent_tools.py",
+      "sha256": "9418493629e846e68708108c51ddff157f5bc478203e6d96df91043ecd1bc15d",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 36935,
+      "exists": true,
+      "path": "tools/mcp_web.py",
+      "sha256": "d1a27be0f269045adc84bcfadd5c8d6db65de5f66c3a9e2f5818b91ea0bc6374",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 30669,
+      "exists": true,
+      "path": "tools/mcp_files.py",
+      "sha256": "dce3b3920bb8c54d644af75c4fb55289692a8cee22302b57bdb8ca99f7a8ad9d",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 6709,
+      "exists": true,
+      "path": "config/host.toml",
+      "sha256": "029dcadb1883034b5e3c092afe7dce46c8c34f8eaf6661d04b487625697d8e17",
+      "verification": "current_local"
+    }
+  ],
+  "label": "install",
+  "log": "/home/ambudsharma/qwen36/voice-stage/voice-controls-20260911-a/evidence/guarded-voice-controls-20260911-a-20260911T092227Z-3988884.log",
+  "run_id": "voice-controls-20260911-a-20260911T092227Z-3988884",
+  "schema_version": 2,
+  "source_fingerprint": "953fc4346812b151c32c54923ba9c0ab2830dbc77a2aed1d0b5a7e8105d5d699",
+  "started_utc": "2026-09-11T09:22:29.088998459Z",
+  "status": "FAIL"
+}

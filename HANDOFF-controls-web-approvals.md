@@ -1,7 +1,13 @@
 # Handoff: pause-listening control, a web-browsing MCP server, and making the file-permission request actually happen
 
-Status: **in progress, 2026-09-11.** Session checkpoint; a fresh session must be
-able to resume from this file alone.
+Status: **shipped 2026-09-11** as campaign `voice-controls-20260911-a` from
+head e64e54d; the live measurements are in `PROVENANCE.md` and the executed
+steps in `RUNBOOK.md`. Kept as the record of what was measured before and
+after. Two gaps remain open and are NOT fixed here: unprompted, the model still
+answers a fact it feels sure of without checking (Saif Ali Khan's parents,
+wrong again, no tool called -- `HANDOFF-wikipedia-mcp.md` Finding 2); and asked
+for the *parent* of its configured root it lists the root it has instead of
+asking for the parent.
 
 ## What was measured on the live bridge (:8094, 2026-09-11, before any change)
 
@@ -69,7 +75,14 @@ Wikipedia opensearch 200. Bing/Brave/Mojeek answer 200 but serve a challenge pag
   tests + check-site). `make sabotage` exit 0: every arm "correctly refused",
   including the two new ones (`mcp_web_test.py --sabotage`,
   `voice_pause_browser.mjs --sabotage`). `make test-browser` running.
-- NEXT: `make test-browser` result; commit; ship per
+- 10:40 `make test-browser` 11 suites green (chromium + webkit). Committed e64e54d.
+- 09:22-09:24 UTC (host clock) shipped as `voice-controls-20260911-a`: stage
+  PASS; first install aborted on its own `is-active` gate while a concurrent
+  campaign restarted the GPU stack (nothing touched); install-2 PASS; restart
+  PASS. Bridge PID 103298, 12 tools. Live probes: pause control delivered,
+  folder request filed + declined, web search correct; parents question still
+  unchecked (open), parent-of-root near-miss (open).
+- DONE. Superseded NEXT (kept for the record): ship per
   RUNBOOK §"Ship the current app to the CPU bridge" (restart only
   voice-tools-bridge.service); re-run `probe_tools.py` on :8094 and record
   whether the model now calls `pause_listening` / `request_directory` /

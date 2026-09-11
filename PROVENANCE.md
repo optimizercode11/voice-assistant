@@ -585,3 +585,52 @@ NRestarts=0; `voice-stack-gpu2.service` kept PID 53262 / 07:37:54 UTC. Served `c
 `e2f3f6b501c5e0841a19294dab87dec2a49e96f3140cab2ccb030dc733121999` equals this
 checkout; `check_site.py --compare-live` PASS 20/20.
 
+
+### Pause listening, web browsing, reachable folder requests (2026-09-11)
+
+Measured on the live tools bridge before the change (`probe_tools.py`, three
+prompts over `/chat/completions`): "stop listening for a bit" was answered
+*"I'll pause listening"* while the page kept listening; "look at folder X"
+called `roots` and then, on the last round with no tools offered, returned a
+literal `<tool_call>` block as prose which the bridge spoke, and
+`request_directory` was never reached; there was no way to search the web.
+
+Three things landed in head e64e54d.  `pause_listening` is a builtin whose
+result carries a control that the loop folds into the answer and the page
+enforces inside `listen()` until a person presses Resume or Space
+(`voice_pause_browser.mjs`: a real looping fake microphone uploads nothing for
+16.25 s while paused; the sabotage arm that removes the hold fails on the
+third upload).  `tools/mcp_web.py` is the MCP server `web`: `search` (DDG html,
+Wikipedia opensearch fallback) and `read_page`, every host resolved and refused
+unless globally routable, the socket pinned to the vetted address, every
+redirect hop re-vetted, text-only and capped (30 tests; the sabotage arm that
+skips the per-hop check reds exactly the redirect-into-private test).  For the
+folder flow, `_speakable` refuses `<tool_call` text, the system prompt carries a
+capability manifest, the file server's scope refusals name `request_directory`,
+and `rounds` is 3.  `fetch_url` is off in `config/host.toml`, superseded.
+
+Shipped to the CPU bridge as campaign `voice-controls-20260911-a` from head
+e64e54d: `stage` PASS (20 checks, 12 tools, stack/web/files up), the first
+`install` aborted on its own guard because a concurrent campaign
+(`qasr-deploy-20260911`) was restarting `voice-stack-gpu2.service` at that
+moment (`is-active` answered `activating`, rc 3, before the stop line -- nothing
+was touched), `install-2` PASS with the rollback snapshot, `restart` PASS
+(`evidence/guarded-voice-controls-20260911-a-*`).  Bridge PID 103298 since
+09:23:28 UTC, NRestarts=0; `voice-stack-gpu2.service` PID 98338 since
+09:22:34 UTC, started by that other campaign and untouched by this one.  Served
+`chat.js` `8b2c8dc3b4d5ba7ae0a50c33b1d8bc1d273fee24af260270b03eb6a7f07da806`
+equals this checkout; `check_site.py --compare-live` PASS 20/20; `rsync -aRnic`
+shows only `__pycache__` differences.
+
+Measured on the live bridge right after (`probe_tools2.py`, `probe_tools3.py`):
+
+| Prompt | Tools called | Outcome |
+|---|---|---|
+| "Stop listening for a bit, I need to take a call." | `pause_listening` | answer carries `controls: {pause_listening: true, pause_reason: "User needs to take a phone call."}`; reply tells the user to press Resume |
+| "Look inside /home/…/voice-stack/probe-20260911" (outside the root) | `mcp__files__list_dir` (refused, hint) → `request_directory` | a pending request with 8 files appeared in `/approvals`; the reply asks the user to approve it on the page.  Declined afterwards; no grant was left behind |
+| "What year did Ta Ra Rum Pum come out, and who starred?" | `mcp__web__search` (987 ms) | 2007, Saif Ali Khan and Rani Mukerji, director and studio -- correct |
+| "Who are Saif Ali Khan's parents?" | none | wrong again (Amrita Singh).  Unprompted, the model still does not check a fact it feels sure of; that is `HANDOFF-wikipedia-mcp.md` Finding 2 and is not fixed by this campaign |
+| "Look at /home/…/voice-stack" (the *parent* of the configured root) | `roots` → `list_dir` | it listed the root it has and described it as the folder asked for -- a near-miss, not a refusal; recorded as a known gap |
+
+Not performed: a microphone-in-a-room check of the Paused state; the browser
+suite proves it in Chromium with a fake capture device.

@@ -69,6 +69,17 @@ describes a stack with the 27B in it, so a `start` of the GPU unit would try
 to bring the 27B back on 8080 (and fail on the busy 8090).  Sorting that unit
 out is still an operator's job.
 
+## Which machine a tool sees (2026-09-12, campaign voice-claude-20260912-d)
+
+The `files` MCP server runs on vllm and reads vllm's disk.  The `/mnt` a
+person approved on the page is therefore vllm's model-weights directory, not
+codex's `/mnt` where the repositories are; only the `claude` server reaches
+those.  `config/host.toml` now carries a `[prompt] where` section that tells
+the model so, and the `claude` and `files` purposes name their machine.  If a
+project question is again answered from the wrong disk, check that the live
+`config/host.toml` still contains "Where things are" before touching anything
+else; a config change needs one bridge restart (steps 2 to 4 below).
+
 ## What the user will feel — a 30-second check
 
 Open `:8094/chat` over trusted HTTPS, choose the intended microphone/output,

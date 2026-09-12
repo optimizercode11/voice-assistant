@@ -1,0 +1,33 @@
+{
+  "campaign": "voice-claude-20260912-d",
+  "command": [
+    "systemctl",
+    "--user",
+    "--job-mode=ignore-dependencies",
+    "restart",
+    "voice-tools-bridge.service"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "24-27",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stage/voice-claude-20260912-d",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-12T01:50:20.875300378Z",
+  "git_head": "46c2713163264cd9ebac0a0f5b36810c4a0d74e9",
+  "inputs": [],
+  "label": "restart",
+  "log": "/home/ambudsharma/qwen36/voice-stage/voice-claude-20260912-d/evidence/guarded-voice-claude-20260912-d-20260912T015020Z-35926.log",
+  "run_id": "voice-claude-20260912-d-20260912T015020Z-35926",
+  "schema_version": 2,
+  "source_fingerprint": "8f9c368715b59dc9cd6f8a94fe9fbf3f83ed6f8ffe74994f222721bd924b98bb",
+  "started_utc": "2026-09-12T01:50:20.849314810Z",
+  "status": "PASS"
+}

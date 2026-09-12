@@ -1025,3 +1025,24 @@ Clear button.  Shown only: a trace is never spoken and never enters the
 transcript (asserted in `voice_push_browser.mjs`, `events_test.py`,
 `mcp_claude_test.py`, `mcp_codex_test.py`).  `make test` green, page suite
 green with the paused-hold sabotage arm still red.
+
+## A promise it could not keep, and a note read back as news (2026-09-12, campaign voice-claude-20260912-g)
+
+From the user's transcript: asked "once we're done with this, can we also ask
+Codex to do the same?", the voice model answered "I'll ask Codex once Claude
+Code finishes" and called nothing; asked later "are you asking Codex next?" it
+sent to Codex but also re-read Claude Code's summary, which the page had
+appended to the last turn as "[Claude Code reported: ...]" so that "tell it to
+also do X" has a referent.  Replayed against Flash-Next (reasoning off, five
+to six samples per turn, live tool set):
+
+| | promised, no call | sent to Codex | repeated the summary |
+|---|---|---|---|
+| shipped `-f` | 5 of 5 | 0 of 5 (first turn); 3 of 5 (follow-up) | 1 of 5, and one reply imitated the note ("[Codex reported: ...]") |
+| candidate | 0 of 6 | 6 of 6; 5 of 6 | 0 of 12 |
+
+Change: `TOOLS_PREAMBLE` says the model cannot act later (send now, or say it
+cannot schedule) and that a bracketed note is something the user already
+heard, never to repeat and never to write; the page's note now reads
+"[<agent> reported this and the user already heard it spoken: ...]"
+(`web/chat.js`, `voice_push_browser.mjs`, `voice_chat_test.py`).

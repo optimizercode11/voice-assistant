@@ -98,6 +98,9 @@ class CapabilityPromptMatchesAttachedTools(unittest.TestCase):
         prompt = voice_chat.system_prompt([{'type': 'function'}])
         self.assertNotIn('no live web', prompt)
         self.assertIn('You have tools', prompt)
+        self.assertIn('Never promise a later action', prompt,
+                      '2026-09-12: "I will ask Codex once Claude Code finishes" was said five times out of five and never done')
+        self.assertIn('never repeat or paraphrase it', prompt)
 
     def test_an_empty_registry_says_so_plainly(self):
         prompt = voice_chat.system_prompt([])

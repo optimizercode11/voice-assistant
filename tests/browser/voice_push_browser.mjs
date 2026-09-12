@@ -156,7 +156,7 @@ try{
   await page.waitForFunction(count=>document.querySelectorAll('.message.assistant').length>count,await page.locator('.message.assistant').count(),{timeout:40000});
   const next=posts[postsBefore];
   assert.ok(next,'the microphone loop took another turn');
-  const carried=next.messages.filter(m=>m.role==='assistant').some(m=>m.content.includes('[Claude Code reported: I finished the second job while you were talking.]'));
+  const carried=next.messages.filter(m=>m.role==='assistant').some(m=>m.content.includes('[Claude Code reported this and the user already heard it spoken: I finished the second job while you were talking.]'));
   assert.ok(carried,'the model must be told what Claude Code said: '+JSON.stringify(next.messages.slice(-3)));
 
   // 4. Paused.  The second clip asks to stop listening; the answer carries the

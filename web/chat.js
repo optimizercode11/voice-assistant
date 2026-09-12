@@ -882,11 +882,13 @@ function drainUpdates() {
 }
 function noteUpdateInHistory(update) {
   // Qwen must know what Claude Code said, or "tell it to also do X" has no
-  // referent.  History alternates roles and a turn is q/a, so the update rides on
+  // referent.  The note says the user already heard it: measured 2026-09-12, a
+  // bare "[Claude Code reported: ...]" was re-read to the user as news, and once
+  // imitated ("[Codex reported: ...]" written into a reply and spoken).  History alternates roles and a turn is q/a, so the update rides on
   // the last assistant turn as a bracketed note; before any turn it is shown only.
   const last = transcript.at(-1);
   if (!last) return;
-  const note = `\n[${update.agent} reported: ${update.spoken}]`;
+  const note = `\n[${update.agent} reported this and the user already heard it spoken: ${update.spoken}]`;
   if (last.a.length + note.length > MAX_MESSAGE) return;
   transcript = [...transcript.slice(0, -1), {...last, a: last.a + note}];
   history = historyFrom(transcript);

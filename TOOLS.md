@@ -282,6 +282,31 @@ codex), and a verbatim path that would let a *tool result* be spoken without
 the local model — measure how faithfully it relays `spoken` first.  (A pushed
 update is spoken without the model, but it is not a tool result: see below.)
 
+### The agent console: raw output as it happens
+
+Asked for on 2026-09-12: "a small window that shows me raw output of the
+codex / claude instance".  Both servers already parse every event their child
+writes; with `--push` they now also send each one up the wire as a third
+notification, `notifications/voice/trace`, with a `kind` (`tool`, `command`,
+`output`, `edit`, `text`, `error`) and one `line` clipped to 400 characters.
+Claude Code: each `tool_use` block as the tool name plus its one telling
+argument (the command, the path, the pattern), each `tool_result` as output,
+each text block as text.  Codex: a `command_execution` when it starts and its
+`exit N: output` when it ends, a `file_change` as the paths, the
+`agent_message` as text.
+
+The bridge whitelists the method like the other two, clips again, and
+publishes it as an `event: trace` on `/events`, but **not into the backlog**:
+a console line with no page open is dropped, it is worth nothing later.  The
+page appends it to a folded `<details>` panel under the conversation (the
+instruction from the `working` notice and the spoken line from the `update`
+land there too), bounded to 400 lines, newest at the bottom, with a Clear
+button.  Nothing from it is ever spoken and none of it enters the transcript:
+`voice_push_browser.mjs` asserts a trace is not a message and reaches no TTS
+request; `events_test.py` asserts only `type, server, kind, line, id` cross;
+`mcp_claude_test.py` and `mcp_codex_test.py` assert the lines a `code` turn
+produces.
+
 ### Guiding Codex by voice, on the local model: `tools/mcp_codex.py`
 
 The same two tools, `send` and `updates`, folded as `mcp__codex__send` and

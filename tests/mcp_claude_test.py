@@ -224,13 +224,23 @@ class PushTests(unittest.TestCase):
         try:
             instance.call(tools['send'], {'instruction': 'code'})
             deadline = time.monotonic() + 10
-            while time.monotonic() < deadline and len(heard) < 2:
+            while time.monotonic() < deadline and not any(m == 'notifications/voice/update' for _, m, _ in heard):
                 time.sleep(0.05)
-            self.assertEqual([method for _, method, _ in heard],
-                             ['notifications/voice/working', 'notifications/voice/update'],
-                             'a working notice when the job starts, one update when it finishes')
+            methods = [method for _, method, _ in heard]
+            self.assertEqual(methods[0], 'notifications/voice/working', 'a working notice when the job starts')
+            self.assertEqual(methods[-1], 'notifications/voice/update', 'one update when it finishes')
+            self.assertEqual(methods.count('notifications/voice/update'), 1)
             self.assertEqual(heard[0][2], {'instruction': 'code'})
-            name, method, params = heard[1]
+            # In between, the raw output as it happened (2026-09-12): one line
+            # per tool call and result, clipped, for the page's console.
+            traces = [params for _, method, params in heard if method == 'notifications/voice/trace']
+            self.assertTrue(traces, 'child events must be traced up the wire')
+            self.assertIn(('tool', 'Read tools/voice_chat.py'), [(t['kind'], t['line']) for t in traces])
+            self.assertIn(('tool', 'Bash make test-chat'), [(t['kind'], t['line']) for t in traces])
+            self.assertIn(('output', 'ok'), [(t['kind'], t['line']) for t in traces])
+            self.assertTrue(any(t['kind'] == 'text' and t['line'].startswith('I looked at the bridge') for t in traces))
+            self.assertTrue(all(len(t['line']) <= 400 for t in traces), 'a console line is clipped')
+            name, method, params = heard[-1]
             self.assertEqual((name, method), ('claude', 'notifications/voice/update'))
             self.assertEqual(params['spoken'],
                              'I fixed the manifest bug in the chat module and the tests pass. Nothing else changed.')

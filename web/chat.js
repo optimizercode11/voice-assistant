@@ -801,14 +801,44 @@ function listen() {
 // Which coding agent spoke: the bridge names the MCP server an update came
 // from, and two of them exist (Claude Code, and Codex on the local model).
 function agentName(server) { return server === 'codex' ? 'Codex' : 'Claude Code'; }
+// The agent console (2026-09-12): the raw output of a Claude Code or Codex turn
+// as it happens -- every command, edit, tool call and reply, one clipped line
+// each, from the bridge's `trace` events.  It is a window, not a voice: nothing
+// here is ever spoken, and a line arriving while the page speaks changes
+// nothing about the speech.  Bounded, newest at the bottom, cleared by hand.
+const CONSOLE_MAX_LINES = 400;
+function consoleLine(agent, kind, line) {
+  const box = $('console'), log = $('console-log'), note = $('console-note');
+  if (!box || !log) return;
+  const row = document.createElement('div'); row.className = `line ${kind}`;
+  const who = document.createElement('span'); who.className = 'agent'; who.textContent = `${agent} `;
+  const what = document.createElement('span'); what.className = 'k'; what.textContent = `${kind}: `;
+  row.append(who, what, document.createTextNode(line));
+  log.append(row);
+  while (log.childElementCount > CONSOLE_MAX_LINES) log.firstElementChild.remove();
+  if (box.hidden) { box.hidden = false; box.open = true; }
+  if (note) note.textContent = `${log.childElementCount} line${log.childElementCount === 1 ? '' : 's'}`;
+  log.scrollTop = log.scrollHeight;
+}
+$('console-clear')?.addEventListener('click', event => {
+  event.preventDefault(); event.stopPropagation();          // a click on Clear must not fold the panel
+  $('console-log').replaceChildren(); $('console-note').textContent = '';
+});
 function connectUpdates() {
   if (updateSource || typeof EventSource !== 'function') return;
   updateSource = new EventSource('/events');
+  updateSource.addEventListener('trace', event => {
+    let trace; try { trace = JSON.parse(event.data); } catch (_) { return; }
+    const line = typeof trace?.line === 'string' ? trace.line.slice(0, 400) : '';
+    if (!line.trim()) return;
+    consoleLine(agentName(trace.server), typeof trace.kind === 'string' ? trace.kind.slice(0, 16) : 'text', line);
+  });
   updateSource.addEventListener('working', event => {
     // The agent has the job.  Shown, not spoken: a person waiting wants to see
     // that the instruction landed, not to be told so out loud.
     let notice; try { notice = JSON.parse(event.data); } catch (_) { return; }
     const instruction = typeof notice?.instruction === 'string' ? notice.instruction.trim().slice(0, 200) : '';
+    consoleLine(agentName(notice?.server), 'instruction', instruction || '(none)');
     document.querySelector('.message.claude.pending')?.remove();
     $('messages').querySelector('.empty')?.remove();
     const item = document.createElement('div'); item.className = 'message claude pending';
@@ -821,6 +851,7 @@ function connectUpdates() {
     const spoken = typeof update?.spoken === 'string' ? update.spoken.trim().slice(0, 600) : '';
     if (!spoken) return;
     const activity = update.activity && typeof update.activity === 'object' ? update.activity : {};
+    consoleLine(agentName(update.server), update.is_error === true ? 'error' : 'done', spoken);
     pendingUpdates.push({spoken, detail: typeof update.detail === 'string' ? update.detail.slice(0, 4500) : '', isError: update.is_error === true,
                          seconds: Number.isFinite(update.seconds) ? update.seconds : null, agent: agentName(update.server),
                          commands: Number(activity.commands) || 0, filesEdited: Number(activity.files_edited) || 0});

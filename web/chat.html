@@ -15,6 +15,9 @@
 .message.claude{padding:4px 0 4px 14px;border-left:3px solid var(--green)}
 .message.claude .role{color:var(--green)}
 .message.claude.pending p{color:var(--muted);font-style:italic}
+/* The agent console: the raw output of Claude Code or Codex as it happens, one
+   clipped line per event.  Shown only; the speaker never gets it. */
+.console{border:1px solid var(--line);border-radius:12px;background:var(--surface);margin:0 0 12px;font-size:12px}.console[hidden]{display:none}.console summary{cursor:pointer;padding:8px 12px;color:var(--muted);display:flex;gap:10px;align-items:center;list-style:revert}.console summary button{margin-left:auto;font-size:11px;padding:3px 9px;border-radius:8px}.console pre{margin:0;max-height:200px;overflow:auto;padding:8px 12px;border-top:1px solid var(--line);font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}.console .line{margin:0 0 3px}.console .agent{color:var(--muted)}.console .k{color:var(--green)}.console .error .k{color:#b3412f}
 .message .report{margin-top:8px;font-size:12px;color:var(--muted)}.message .report summary{cursor:pointer}
 .message .report pre{margin:6px 0 0;padding:10px 12px;max-height:50dvh;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:8px;color:var(--ink);font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
 /* The orb is the one place this page can admit what it is actually doing.
@@ -80,6 +83,7 @@ red skeleton = Ritz-Carlton</textarea></label><small id="corrections-note" role=
 <div id="chats" class="chats" hidden aria-label="Saved conversations"></div>
 <div id="approvals" class="approvals" hidden aria-live="polite"></div>
 <div id="messages" role="log" aria-live="polite"><div class="empty"><strong>What's on your mind?</strong><p>Start talking, or write a message below.</p></div></div>
+<details id="console" class="console" hidden><summary>Agent console <span id="console-note"></span><button type="button" id="console-clear">Clear</button></summary><pre id="console-log" aria-live="off"></pre></details>
 <audio id="player" playsinline hidden aria-hidden="true"></audio>
 <form class="compose" id="compose"><input id="text" aria-label="Your message" placeholder="Or type a message…" maxlength="8000" autocomplete="off"><button id="send" disabled>Send ↗</button></form>
 <p class="footnote">Audio and messages are processed on your server. End closes the microphone. Your conversations are kept in <strong>this browser only</strong> — never on the server — and survive a reload; “Chats” lists them, “New chat” starts another and keeps the old one. Clearing site data erases them all.</p>

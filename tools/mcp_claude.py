@@ -58,6 +58,8 @@ PROTOCOL = "2025-03-26"
 SPOKEN_MARK = "SPOKEN:"
 UPDATE_METHOD = "notifications/voice/update"
 WORKING_METHOD = "notifications/voice/working"
+TRACE_METHOD = "notifications/voice/trace"     # one line per child event, for the page's console; never spoken
+MAX_TRACE_CHARS = 400
 MAX_INSTRUCTION = 4000
 MAX_SPOKEN_CHARS = 600            # a spoken line longer than this is not a spoken line
 MAX_DETAIL_CHARS_DEFAULT = 4500   # under the bridge's 6000-char result clip, with room for the envelope
@@ -152,8 +154,12 @@ def split_reply(text: str) -> tuple[str, str]:
 class Session:
     """The child, its reader thread, and everything learned from its stdout."""
 
-    def __init__(self, claude: str, cwd: str, extra_args: list[str], max_detail: int, log, notify=None):
+    def __init__(self, claude: str, cwd: str, extra_args: list[str], max_detail: int, log, notify=None, trace=None):
         self.claude, self.cwd, self.extra_args, self.max_detail, self.log = claude, cwd, list(extra_args), max_detail, log
+        # With `trace` set, every child event becomes one clipped line up the
+        # wire (2026-09-12: the user asked to SEE the raw output as it happens,
+        # not only hear the finished turn).  Shown by the page, never spoken.
+        self.trace = trace
         # With `notify` set, a finished turn is PUSHED to the bridge the moment it
         # lands and does not wait to be asked for -- so it is delivered, not
         # unread, and "any news?" afterwards is honestly told there is none.
@@ -251,9 +257,13 @@ class Session:
                 self.session_id = str(event.get("session_id", ""))[:64]
             elif kind == "assistant":
                 for block in (event.get("message") or {}).get("content") or []:
+                    if block.get("type") == "text":
+                        self._trace("text", block.get("text"))
+                        continue
                     if block.get("type") != "tool_use":
                         continue
                     name = str(block.get("name", ""))
+                    self._trace("tool", f"{name} {_tool_summary(block.get('input'))}")
                     self.activity["last_tool"] = name
                     if name in COMMAND_TOOLS:
                         self.activity["commands"] += 1
@@ -263,6 +273,10 @@ class Session:
                         self.activity["files_read"] += 1
                     else:
                         self.activity["other_tools"] += 1
+            elif kind == "user":
+                for block in (event.get("message") or {}).get("content") or []:
+                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                        self._trace("output", _result_text(block.get("content")))
             elif kind == "result":
                 text = event.get("result") if isinstance(event.get("result"), str) else ""
                 is_error = bool(event.get("is_error")) or event.get("subtype") not in (None, "success")
@@ -272,6 +286,17 @@ class Session:
                 self._finish(spoken=spoken, detail=detail, is_error=is_error,
                              duration_ms=event.get("duration_ms"))
                 self._dispatch_locked()
+
+    def _trace(self, kind: str, text) -> None:
+        if self.trace is None:
+            return
+        line = str(text or "").strip()
+        if not line:
+            return
+        try:
+            self.trace(kind, line)
+        except Exception as error:               # the console is a convenience; the turn goes on
+            self.log(f"trace failed: {error}")
 
     def _finish(self, *, spoken: str, detail: str, is_error: bool, duration_ms=None) -> None:
         self.seq += 1
@@ -396,6 +421,31 @@ def notify_update(row: dict, max_detail: int) -> None:
     _write({"jsonrpc": "2.0", "method": UPDATE_METHOD, "params": params})
 
 
+def _tool_summary(arguments) -> str:
+    """The one argument a person reading a console wants: the command, the path, the pattern."""
+    if not isinstance(arguments, dict):
+        return ""
+    for key in ("command", "file_path", "path", "pattern", "query", "url", "prompt", "description"):
+        value = arguments.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return json.dumps(arguments, ensure_ascii=False)
+
+
+def _result_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(str(block.get("text", "")) for block in content
+                         if isinstance(block, dict) and block.get("type") == "text")
+    return ""
+
+
+def notify_trace(kind: str, line: str) -> None:
+    _write({"jsonrpc": "2.0", "method": TRACE_METHOD,
+            "params": {"kind": str(kind)[:16], "line": _clip(str(line).strip(), MAX_TRACE_CHARS)}})
+
+
 def notify_working(instruction: str) -> None:
     _write({"jsonrpc": "2.0", "method": WORKING_METHOD, "params": {"instruction": _clip(instruction, 200)}})
 
@@ -481,7 +531,8 @@ def main() -> int:
         sys.stderr.flush()
 
     session = Session(claude or "claude", os.path.abspath(arguments.cwd), build_extra_args(arguments),
-                      max(200, arguments.max_detail_chars), log, notify=notify_update if arguments.push else None)
+                      max(200, arguments.max_detail_chars), log, notify=notify_update if arguments.push else None,
+                      trace=notify_trace if arguments.push else None)
     tools = json.loads(json.dumps(TOOLS))
     if arguments.push:
         # The model should not send the person off to ask: the result will be

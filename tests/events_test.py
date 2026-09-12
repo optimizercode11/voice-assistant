@@ -214,7 +214,19 @@ class EventsTests(unittest.TestCase):
             self.assertIsNotNone(notice, 'the page is told the agent has the job')
             self.assertEqual(notice['event'], 'working')
             self.assertEqual(notice['data']['instruction'], 'push me a note')
+            # Between the notice and the finished turn: the raw output as it
+            # happened, for the page's console (2026-09-12).  Only the
+            # whitelisted fields cross, each clipped; a line never reaches the
+            # speaker because the page only ever shows a `trace`.
+            traces = []
             event = stream.next_event()
+            while event is not None and event['event'] == 'trace':
+                traces.append(event)
+                event = stream.next_event()
+            self.assertTrue(traces, 'the child\'s events must reach the page as trace lines')
+            self.assertEqual(set(traces[0]['data']), {'type', 'server', 'kind', 'line', 'id'})
+            self.assertEqual(traces[0]['data']['server'], 'claude')
+            self.assertTrue(any('push me a note' in t['data']['line'] for t in traces), traces)
             self.assertIsNotNone(event, 'the finished turn must arrive without anyone asking')
             self.assertEqual(event['event'], 'update')
             self.assertEqual(event['data']['spoken'], 'You said push me a note')

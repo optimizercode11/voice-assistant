@@ -240,12 +240,20 @@ class PushTests(unittest.TestCase):
         try:
             instance.call(tools['send'], {'instruction': 'code'})
             deadline = time.monotonic() + 10
-            while time.monotonic() < deadline and len(heard) < 2:
+            while time.monotonic() < deadline and not any(m == 'notifications/voice/update' for _, m, _ in heard):
                 time.sleep(0.05)
-            self.assertEqual([method for _, method, _ in heard],
-                             ['notifications/voice/working', 'notifications/voice/update'])
+            methods = [method for _, method, _ in heard]
+            self.assertEqual(methods[0], 'notifications/voice/working')
+            self.assertEqual(methods[-1], 'notifications/voice/update')
+            self.assertEqual(methods.count('notifications/voice/update'), 1)
             self.assertEqual(heard[0][2], {'instruction': 'code'})
-            name, method, params = heard[1]
+            traces = [(params['kind'], params['line']) for _, method, params in heard
+                      if method == 'notifications/voice/trace']
+            self.assertIn(('command', 'make test-chat'), traces, 'a command is traced when it starts')
+            self.assertIn(('output', 'exit 0: 14 passed'), traces, 'and its output when it ends')
+            self.assertIn(('edit', 'tools/voice_chat.py'), traces)
+            self.assertTrue(any(kind == 'text' and line.startswith('I looked at the bridge') for kind, line in traces))
+            name, method, params = heard[-1]
             self.assertEqual((name, method), ('codex', 'notifications/voice/update'))
             self.assertEqual(params['spoken'],
                              'I fixed the manifest bug in the chat module and the tests pass. Nothing else changed.')

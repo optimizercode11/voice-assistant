@@ -1013,3 +1013,15 @@ say Codex.  Transport: `vllm:~/.ssh/id_ed25519_voice_codex` (alias
 `python3 /mnt/voice-assistant/tools/mcp_codex.py --codex /usr/local/bin/codex
 --profile q38f --cwd /home/ambudsharma --add-dir /mnt --push`; the hop
 answered `initialize` and `tools/list` from vllm before the config was staged.
+
+## The agent console (2026-09-12, campaign voice-claude-20260912-f)
+
+Asked for: "a small window that shows me raw output of the codex / claude
+instance".  Both agent servers now push one clipped line per child event
+(`notifications/voice/trace`: kind plus line), the bridge forwards it as
+`event: trace` without backlogging it, and the page shows it in a folded
+"Agent console" panel under the conversation, bounded to 400 lines with a
+Clear button.  Shown only: a trace is never spoken and never enters the
+transcript (asserted in `voice_push_browser.mjs`, `events_test.py`,
+`mcp_claude_test.py`, `mcp_codex_test.py`).  `make test` green, page suite
+green with the paused-hold sabotage arm still red.

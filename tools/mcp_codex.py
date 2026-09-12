@@ -137,10 +137,11 @@ class Session:
     """One Codex thread, continued by `exec resume`; one child per turn."""
 
     def __init__(self, codex: str, cwd: str, profile: str, codex_home: str, access: str,
-                 add_dirs: list[str], max_detail: int, log, notify=None):
+                 add_dirs: list[str], max_detail: int, log, notify=None, trace=None):
         self.codex, self.cwd, self.profile, self.codex_home = codex, cwd, profile, codex_home
         self.access, self.add_dirs, self.max_detail, self.log = access, list(add_dirs), max_detail, log
         self.notify = notify
+        self.trace = trace                     # one clipped line per child event, for the page's console
         self.lock = threading.Lock()
         self.process: subprocess.Popen | None = None
         self.thread_id = ""                    # set by the first turn; resumed by every later one
@@ -267,9 +268,21 @@ class Session:
                 if item_type == "agent_message":
                     if kind == "item.completed" and isinstance(item.get("text"), str):
                         self.last_text = item["text"]
+                        self._trace("text", item["text"])
                     return
                 if item_type in QUIET_ITEMS:
                     return
+                if item_type in COMMAND_ITEMS:
+                    if kind == "item.started":
+                        self._trace("command", item.get("command"))
+                    else:
+                        self._trace("output", f"exit {item.get('exit_code')}: {item.get('aggregated_output') or ''}")
+                elif item_type in EDIT_ITEMS and kind == "item.completed":
+                    changes = item.get("changes") if isinstance(item.get("changes"), list) else []
+                    self._trace("edit", ", ".join(str(change.get("path", "")) for change in changes
+                                                  if isinstance(change, dict)) or item_type)
+                elif kind == "item.started":
+                    self._trace("tool", f"{item.get('server', '')}.{item.get('tool', '')}".strip(".") or item_type)
                 identity = str(item.get("id") or f"{item_type}:{len(self.seen)}")
                 if identity in self.seen:
                     return
@@ -285,8 +298,21 @@ class Session:
             elif kind == "turn.failed":
                 error = event.get("error") if isinstance(event.get("error"), dict) else {}
                 self.error_text = str(error.get("message") or "the turn failed")
+                self._trace("error", self.error_text)
             elif kind == "error":
                 self.error_text = str(event.get("message") or "error")
+                self._trace("error", self.error_text)
+
+    def _trace(self, kind: str, text) -> None:
+        if self.trace is None:
+            return
+        line = str(text or "").strip()
+        if not line:
+            return
+        try:
+            self.trace(kind, line)
+        except Exception as error:
+            self.log(f"trace failed: {error}")
 
     def _finish_turn_locked(self, code: int) -> None:
         text = self.last_text.strip()
@@ -475,7 +501,8 @@ def main() -> int:
 
     session = Session(codex or "codex", os.path.abspath(arguments.cwd), arguments.profile, arguments.codex_home,
                       arguments.access, arguments.add_dir, max(200, arguments.max_detail_chars), log,
-                      notify=shared.notify_update if arguments.push else None)
+                      notify=shared.notify_update if arguments.push else None,
+                      trace=shared.notify_trace if arguments.push else None)
     tools = json.loads(json.dumps(TOOLS))
     if arguments.push:
         tools[0]["description"] = tools[0]["description"].replace(

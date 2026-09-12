@@ -86,9 +86,23 @@ try{
   const deadline=Date.now()+10000;while(!listeners.length&&Date.now()<deadline)await page.waitForTimeout(100);
   assert.equal(listeners.length,1,'the page must hold /events open without being asked');
 
-  // 0. The job lands: a pending "working" bubble, shown and not spoken.
+  // 0. The job lands: a pending "working" bubble, shown and not spoken.  The
+  //    agent console (2026-09-12) is folded away until there is something in it.
+  assert.equal(await page.locator('#console').isHidden(),true,'no output yet, no console');
   push({type:'working',server:'claude',instruction:'run the tests'});
   await page.waitForFunction(()=>document.querySelectorAll('.message.claude.pending').length===1);
+  // 0b. Raw output as it happens: trace events land in the console, labelled by
+  //     agent and kind, and never in the speaker or the conversation.
+  push({type:'trace',server:'claude',kind:'tool',line:'Bash make test'});
+  push({type:'trace',server:'claude',kind:'output',line:'14 passed\n0 failed'});
+  await page.waitForFunction(()=>document.querySelectorAll('#console-log .line').length===3);
+  assert.equal(await page.locator('#console').isVisible(),true);
+  const consoleText=await page.locator('#console-log').textContent();
+  assert.match(consoleText,/Claude Code instruction: run the tests/);
+  assert.match(consoleText,/Claude Code tool: Bash make test/);
+  assert.match(consoleText,/Claude Code output: 14 passed\n0 failed/);
+  assert.equal(await page.locator('.message').count(),1,'a trace line is not a message');
+  assert.equal(tts.length,0,'a trace line is never spoken');
   assert.match(await page.locator('.message.claude.pending p').textContent(),/Working on it: run the tests/);
   assert.equal(tts.length,0,'a working notice is never spoken');
   // 1. Idle page, nobody talking: the update replaces the pending bubble, is shown as Claude Code and spoken;
@@ -118,6 +132,11 @@ try{
   assert.match(await page.locator('.message.claude .toolnote').last().textContent(),/Update from Codex · 5 s · 2 commands/);
   await page.waitForFunction(()=>document.querySelector('#state').textContent==='Ready');
   assert.equal(tts.filter(text=>text.includes('build is green')).length,1,'the Codex update went through the TTS path once');
+  push({type:'trace',server:'codex',kind:'command',line:'/bin/bash -lc make'});
+  await page.waitForFunction(()=>/Codex command: \/bin\/bash -lc make/.test(document.querySelector('#console-log').textContent));
+  await page.locator('#console-clear').click();
+  assert.equal(await page.locator('#console-log .line').count(),0,'Clear empties the console');
+  assert.equal(await page.locator('#console').getAttribute('open'),'','and does not fold it');
 
   // 2. A live conversation.  Push while the reply is PLAYING: the update must
   //    wait for the reply to end, then be spoken before listening resumes.

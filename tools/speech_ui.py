@@ -353,7 +353,9 @@ class Events:
     """
     METHOD = "notifications/voice/update"
     WORKING = "notifications/voice/working"
+    TRACE = "notifications/voice/trace"     # the agent's raw output, one clipped line per event; shown, never spoken
     BACKLOG = 20
+    MAX_TRACE = 400
     MAX_SPOKEN = 600
     MAX_DETAIL = 4500          # shown under the spoken line, never spoken
 
@@ -370,6 +372,15 @@ class Events:
         if method == self.WORKING:
             self.publish({"type": "working", "server": str(server)[:40],
                           "instruction": str(params.get("instruction") or "")[:200]})
+            return
+        if method == self.TRACE:
+            # A console line is only worth anything while someone is watching:
+            # with no page open it is dropped, not kept for the next one.
+            line = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", str(params.get("line") or ""))[: self.MAX_TRACE]
+            if line.strip():
+                self.publish({"type": "trace", "server": str(server)[:40],
+                              "kind": re.sub(r"[^a-z_]", "", str(params.get("kind") or "text").lower())[:16] or "text",
+                              "line": line}, keep=False)
             return
         if method != self.METHOD:
             return
@@ -391,7 +402,7 @@ class Events:
         }
         self.publish(event)
 
-    def publish(self, event: dict) -> None:
+    def publish(self, event: dict, keep: bool = True) -> None:
         with self.lock:
             if self.closed:
                 return
@@ -400,7 +411,7 @@ class Events:
             if self.subscribers:
                 for subscriber in self.subscribers:
                     subscriber.put(event)
-            else:
+            elif keep:
                 self.backlog.append(event)
                 del self.backlog[:-self.BACKLOG]
 

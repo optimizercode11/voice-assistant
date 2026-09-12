@@ -906,3 +906,10 @@ so the transcriber's spelling is on the screen instead of a bare wait.  The
 bridge journal showed no `/stt` from the person's browser after it loaded
 the `-a` page, so `-a` was never actually tried by voice; this entry is the
 measurement, not a report of a miss in the room.
+
+Shipped as campaign `voice-claude-20260912-b`: stage / install / restart PASS
+under the guard with the engine health gate
+(`evidence/guarded-voice-claude-20260912-b-*`).  Bridge PID 31773, NRestarts=0;
+served `chat.js` `dc301bb560f67178…` equals this checkout; compare-live PASS
+20/20; GPU engine PID 16739 untouched.  `make test` green, wake suite green,
+sabotage arm red at the gate assertion.

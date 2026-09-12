@@ -1,0 +1,4 @@
+guarded-run: campaign=voice-claude-20260912-b label=stage mode=cpu cpus=24-27
+command: bash -c $'\n  set -euo pipefail\n  find . -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true\n  printf "export GUARD_GIT_HEAD=%s\\nexport GUARD_SOURCE_FP=%s\\nexport VOICE_TOOLS_CAMPAIGN=voice-claude-20260912-b\\n" "$GUARD_GIT_HEAD" "$GUARD_SOURCE_FP" > deploy/source.env\n  PYTHONDONTWRITEBYTECODE=1 python3 deploy/check_site.py --require-assets 2>&1 | tail -1\n  PYTHONDONTWRITEBYTECODE=1 python3 tools/voicectl.py --config config/host.toml index build >/dev/null\n  PYTHONDONTWRITEBYTECODE=1 python3 -u tools/voicectl.py --config config/host.toml doctor | tail -1\n'
+== PASS: 20 checks, 0 failures ==
+doctor: ok

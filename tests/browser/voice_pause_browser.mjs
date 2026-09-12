@@ -111,6 +111,7 @@ try{
   // voice_barge_browser.mjs's to test.  Here the question is the pause, so use
   // the mode where track state is the whole story.
   await page.uncheck('#barge-in');
+  await page.fill('#silence-timeout','0');   // the recording has a 10.6 s quiet gap; the silence timeout (default 5 s) must not close the microphone under this suite
   await page.locator('#start').click();
 
   // Turn 1: an ordinary answer.  Listening must come back on its own -- the

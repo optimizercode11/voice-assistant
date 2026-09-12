@@ -54,6 +54,7 @@ for(const [name,type] of (sabotage?[['chromium',chromium]]:[['chromium',chromium
  await page.locator('#interrupt').click();await page.locator('#new').click();
  assert.equal(await page.locator('.message').count(),0);
  if(name==='chromium'){
+   await page.fill('#silence-timeout','0');   // the recording has a 10.6 s quiet gap; the silence timeout (default 5 s) must not close the microphone under this suite
    await page.locator('#start').click();
    await page.waitForFunction(()=>document.querySelector('#state').textContent==='Speaking',{}, {timeout:20000});
    assert.equal(stt,1,'silence detection automatically submitted one real MediaRecorder upload');

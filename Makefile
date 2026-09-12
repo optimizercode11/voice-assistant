@@ -108,7 +108,7 @@ doctor:
 	$(CPU) $(PYTHON) -u tools/voicectl.py --config config/assistant.toml doctor
 
 test-browser:
-	@for suite in voice_chat_browser voice_carry_browser voice_barge_browser voice_controls_browser voice_language_browser stt_browser voice_tools_browser voice_think_browser voice_tts_browser voice_history_browser voice_pause_browser voice_push_browser voice_wake_browser; do \
+	@for suite in voice_chat_browser voice_carry_browser voice_barge_browser voice_controls_browser voice_language_browser stt_browser voice_tools_browser voice_think_browser voice_tts_browser voice_history_browser voice_pause_browser voice_push_browser voice_wake_browser voice_silence_browser; do \
 	  echo "== $$suite =="; \
 	  $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/$$suite.mjs || exit 1; \
 	done
@@ -139,6 +139,9 @@ sabotage:
 	if $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/voice_barge_browser.mjs --sabotage >/dev/null 2>&1; then \
 	  echo "SABOTAGE PASSED (this is the failure): barge-in arms with no echo reference"; failures=$$((failures+1)); \
 	else echo "ok  correctly refused: voice_barge_browser.mjs --sabotage"; fi; \
+	if $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/voice_silence_browser.mjs --sabotage >/dev/null 2>&1; then \
+	  echo "SABOTAGE PASSED (this is the failure): silence never closes the microphone"; failures=$$((failures+1)); \
+	else echo "ok  correctly refused: voice_silence_browser.mjs --sabotage"; fi; \
 	if $(CPU) $(NODE) tests/barge_gate_test.mjs --sabotage >/dev/null 2>&1; then \
 	  echo "SABOTAGE PASSED (this is the failure): the echo floor is decorative"; failures=$$((failures+1)); \
 	else echo "ok  correctly refused: barge_gate_test.mjs --sabotage"; fi; \

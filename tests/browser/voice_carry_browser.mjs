@@ -90,6 +90,7 @@ try{
   await page.route('**/tts?*',route=>route.fulfill({contentType:'audio/wav',body:wav}));
   await page.goto(`http://127.0.0.1:${server.address().port}/chat`);
   await page.waitForFunction(()=>!document.querySelector('#send').disabled);
+  await page.fill('#silence-timeout','0');   // the recording has a 10.6 s quiet gap; the silence timeout (default 5 s) must not close the microphone under this suite
   await page.locator('#start').click();
 
   // Half a sentence: the page must hold it and say so, not answer it.

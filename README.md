@@ -153,6 +153,17 @@ wakes it.  Typing and **Send now** are never gated.  `tests/browser/voice_wake_b
 real microphone loop, and its sabotage arm treats every clip as addressed
 and must go red.
 
+## Silence timeout
+
+Settings has a **Silence timeout**, five seconds by default: when nobody has
+spoken for that long the microphone closes and the page says so.  Being
+asleep is not the same as the "be quiet" pause the assistant can ask for:
+an agent's finished update is still spoken, and listening returns after it,
+after the next reply (typed messages still work), or with Resume or Space.
+Zero keeps listening.  The timeout is off while the wake word is on, because
+waiting for the name is listening to silence on purpose.
+`tests/browser/voice_silence_browser.mjs` drives it with a silent recording.
+
 ## The conversation stays in your browser
 
 The bridge is stateless: every turn re-sends the whole transcript, so what Qwen

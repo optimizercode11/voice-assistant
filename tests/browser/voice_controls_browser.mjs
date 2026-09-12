@@ -117,6 +117,7 @@ for(const [name,type] of (sabotage?[['chromium',chromium]]:[['chromium',chromium
  while(!release)await page.waitForTimeout(20);await space();release();slow=false;await page.waitForTimeout(100);
  assert.equal(await page.locator('.assistant').count(),count);assert.equal(await page.locator('#player').evaluate(a=>a.paused),true);
  if(name==='chromium'){
+   await page.fill('#silence-timeout','0');   // the recording has a 10.6 s quiet gap; the silence timeout (default 5 s) must not close the microphone under this suite
    await page.locator('#start').click();await page.waitForFunction(()=>document.querySelector('#state').textContent==='Speaking',{}, {timeout:20000});await playing();
    assert.equal(await page.evaluate(()=>window.observedTracks.every(t=>!t.enabled)),true,'built-in speakers remain isolated');
    await space();assert.equal(await page.locator('#state').textContent(),'Listening');

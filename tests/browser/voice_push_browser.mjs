@@ -141,6 +141,7 @@ try{
   // 2. A live conversation.  Push while the reply is PLAYING: the update must
   //    wait for the reply to end, then be spoken before listening resumes.
   await page.uncheck('#barge-in');
+  await page.fill('#silence-timeout','0');   // the recording has a 10.6 s quiet gap; the silence timeout (default 5 s) must not close the microphone under this suite
   await page.locator('#start').click();
   await page.waitForFunction(()=>document.querySelector('#state').textContent==='Speaking',null,{timeout:40000});
   const ttsBeforePush=tts.length;

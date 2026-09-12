@@ -21,6 +21,11 @@ let fragmentHolds = 0, heldText = '';
 // conversation.  Nothing the model says later can clear it, because a paused
 // microphone hears nothing for the model to say it about.
 let paused = false, pauseReason = '';
+// Asleep (2026-09-12): the microphone closed because nobody spoke for the
+// silence timeout.  Unlike `paused`, which means "be quiet", being asleep only
+// means "nobody is talking": an agent's finished update is still spoken, and
+// listening returns after it, after the next reply, or with Resume or Space.
+let asleep = false, silenceFrom = 0;
 // Updates the bridge pushes on its own (a finished Claude Code turn).  They
 // queue here until it is safe to speak: never over a reply, never over a
 // person mid-sentence, and never while the microphone is paused.
@@ -86,7 +91,7 @@ function setState(value, message) {
   $('end').hidden = !active && !busy;
   $('finish').hidden = value !== 'listening';
   $('interrupt').hidden = !busy;
-  $('resume-listening').hidden = !(paused && active && !busy);
+  $('resume-listening').hidden = !((paused || asleep) && active && !busy);
   $('send').disabled = !ready || busy;
   $('language').disabled = busy; $('voice').disabled = busy;
   $('corrections').disabled=busy;$('corrections-enabled').disabled=busy;
@@ -716,19 +721,23 @@ function holdListening() {
   clearCapture(); player.pause(); busy = false;
   if (stream) stream.getTracks().forEach(track=>{track.enabled=false;});
   $('level').style.width = '0%'; setGlow(0);
-  const why = pauseReason ? ` (${pauseReason})` : '';
-  setState('paused', `Paused${why}. Qwen is not listening and will not take a turn. Press Resume listening, or Space, to continue; typing still works.`);
+  if (paused) {
+    const why = pauseReason ? ` (${pauseReason})` : '';
+    setState('paused', `Paused${why}. Qwen is not listening and will not take a turn. Press Resume listening, or Space, to continue; typing still works.`);
+  } else {
+    setState('paused', `Quiet for ${silenceSeconds()} s, so I stopped listening. Press Resume listening or Space, or type; I listen again after the next reply or update.`);
+  }
 }
 function resumeListening() {
-  if (!paused) return;
-  paused = false; pauseReason = '';
+  if (!paused && !asleep) return;
+  paused = false; asleep = false; pauseReason = '';
   if (active && !busy) listen();
   else setState(active ? phase : 'idle', 'Listening resumes after this reply.');
   drainUpdates();   // whatever finished while the microphone was paused is spoken now, not never
 }
 function listen() {
   if (!active || !stream) return;
-  if (paused) { holdListening(); return; }
+  if (paused || asleep) { holdListening(); return; }
   // The seam after a reply, before the microphone reopens, is the one moment
   // that is certainly nobody's turn: whatever Claude Code finished meanwhile
   // is said here, and listening resumes after it.
@@ -743,9 +752,11 @@ function listen() {
   rec.onstop = () => {
     if (!active || thisEpoch !== epoch) return;
     recorder = null; cancelAnimationFrame(raf); stream.getTracks().forEach(track=>{track.enabled=false;});
-    if (!chunks.length || (voiced < 120 && !rec.sendNow)) {listen(); return;}
+    if (!chunks.length || (voiced < 120 && !rec.sendNow)) {listen.continuing = true; listen(); return;}   // the same silence goes on
     runTurn(new Blob(chunks,{type:rec.mimeType || 'audio/webm'}), rec.sendNow === true, voiced);
   };
+  if (!listen.continuing) silenceFrom = performance.now();   // the silence clock runs from when listening began, or the last voice
+  listen.continuing = false;
   rec.start(250); busy = false;
   setState('listening', dormant ? `Waiting for “${wakePhrase()}”. Say it first, and I will answer.` : 'I’m listening. A short pause sends your message.');
   // Awake and nothing happening: after the quiet period, go back to waiting
@@ -777,6 +788,11 @@ function listen() {
     if (now < settleUntil) {raf = requestAnimationFrame(tick); return;}
     if (rms > .015) {voiced += Math.min(100,now-lastTick);lastVoice=now;micLastVoiceAt=now;}
     lastTick=now;
+    // Nobody has spoken for the silence timeout: close the microphone and go to
+    // sleep (not while the wake word is on: waiting for the name IS listening
+    // to silence).  The clip is dropped as speechless, and listen() then holds.
+    const quietMs = silenceMs();
+    if (quietMs && !wakeWanted() && voiced < 180 && now - Math.max(silenceFrom, micLastVoiceAt) >= quietMs) { asleep = true; rec.stop(); return; }
     // 20 s, not the engine's 30 s ceiling: measured against known ground truth,
 // a 19.5 s upload keeps 96% of its words and a 29.3 s upload keeps 19% -- the
 // engine returns its first sentence and then degenerates.  Stopping earlier
@@ -894,6 +910,7 @@ function noteUpdateInHistory(update) {
   history = historyFrom(transcript);
 }
 async function announceUpdate(update) {
+  asleep = false;                      // an update wakes the page: it is spoken, then listening returns
   clearCapture(); player.pause(); busy = true;
   const id = ++epoch, controller = new AbortController(); abort = controller;
   const check = () => {if(id !== epoch || controller.signal.aborted) throw new DOMException('Stopped','AbortError');};
@@ -1009,6 +1026,12 @@ function wakeQuietMs() {
   const seconds = Number($('wake-quiet').value);
   return (Number.isFinite(seconds) && seconds >= 5 ? Math.min(600, seconds) : 30) * 1000;
 }
+// ---------------------------------------------------------------- silence timeout
+function silenceSeconds() {
+  const seconds = Number($('silence-timeout').value);
+  return Number.isFinite(seconds) && seconds > 0 ? Math.min(600, Math.max(1, Math.round(seconds))) : 0;   // 0: keep listening
+}
+function silenceMs() { return silenceSeconds() * 1000; }
 const CALL_WORDS = new Set(['hey', 'hi', 'hello', 'ok', 'okay', 'yo']);
 function plainWord(token) { return token.toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu, ''); }
 function editDistance(a, b) {
@@ -1589,7 +1612,7 @@ async function runTurn(input, forced = false, voicedMs = null) {
       await speakReply(answer, controller.signal, spoken);
     }
     check();busy=false;
-    if(active)listen();else setState('idle','Send another message, or start a voice conversation.');
+    asleep=false;if(active)listen();else setState('idle','Send another message, or start a voice conversation.');
   } catch(error) {
     if(id !== epoch) return;
     if(!committed){ history=before; transcript=was; }   // a refused reply leaves no trace
@@ -1610,7 +1633,7 @@ async function runTurn(input, forced = false, voicedMs = null) {
 $('start').onclick = async () => {
   if(secureURL){location.assign(secureURL);return;}
   if(active || busy) return;
-  active=true;const id=++epoch;primeAudio();dormant=wakeWanted();lastTurnAt=performance.now();setState('listening','Allow microphone access to begin.');$('finish').hidden=true;
+  active=true;const id=++epoch;primeAudio();dormant=wakeWanted();asleep=false;lastTurnAt=performance.now();setState('listening','Allow microphone access to begin.');$('finish').hidden=true;
   try {
     const acquired=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:!bargeWanted()}});
     if(id!==epoch){acquired.getTracks().forEach(track=>track.stop());return;}
@@ -1640,7 +1663,7 @@ function interruptReply() {
   if(!busy)return;
   epoch++;abort?.abort();abort=null;busy=false;clearCapture();replySeam=false;player.pause();gapless.stop();
   playbackEndedAt = performance.now();
-  if(active)listen();else setState('idle','Reply interrupted. Send another message when ready.');
+  asleep=false;if(active)listen();else setState('idle','Reply interrupted. Send another message when ready.');
 }
 $('interrupt').onclick=interruptReply;
 $('resume').onclick=()=>resumePlayback?.();
@@ -1655,7 +1678,7 @@ window.addEventListener('keydown',event=>{
   if(event.repeat)return;
   // Space is the one key the page owns: it interrupts a reply, and while the
   // microphone is paused it is the way back.  Both are human actions.
-  if(paused && active && !busy){event.preventDefault();spaceHeld=true;resumeListening();return;}
+  if((paused || asleep) && active && !busy){event.preventDefault();spaceHeld=true;resumeListening();return;}
   if(!busy)return;
   event.preventDefault();spaceHeld=true;interruptReply();
 });
@@ -1677,6 +1700,7 @@ function saveSpeech(){
   speechPreferences.wake=$('wake-enabled').checked;
   speechPreferences.wakeWord=$('wake-word').value.slice(0,40);
   speechPreferences.wakeQuiet=$('wake-quiet').value;
+  speechPreferences.silence=$('silence-timeout').value;
   try{localStorage.setItem('voice-speech',JSON.stringify(speechPreferences));}catch(_){}
 }
 function effectiveLanguage(){return $('language').value==='auto'?autoLanguage:$('language').value;}
@@ -1730,6 +1754,8 @@ if(typeof speechPreferences.wakeWord==='string'&&speechPreferences.wakeWord.trim
 if(typeof speechPreferences.wakeQuiet==='string'&&speechPreferences.wakeQuiet)$('wake-quiet').value=speechPreferences.wakeQuiet;
 $('wake-enabled').onchange=()=>{saveSpeech();if(!wakeWanted()&&dormant){dormant=false;if(active&&!busy)listen();}};
 $('wake-word').oninput=saveSpeech;$('wake-quiet').onchange=saveSpeech;
+if(typeof speechPreferences.silence==='string'&&speechPreferences.silence!=='')$('silence-timeout').value=speechPreferences.silence;
+$('silence-timeout').onchange=saveSpeech;
 correctionRules();
 // ------------------------------------------------------------- directory access
 // Qwen can ask for a folder; only this card can hand one over.  The flow is

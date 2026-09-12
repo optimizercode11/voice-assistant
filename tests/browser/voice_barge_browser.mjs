@@ -109,6 +109,7 @@ async function observe(browser, {noAec}) {
   await page.route('**/tts?*', r => r.fulfill({contentType:'audio/wav', body:wav}));
   await page.goto(`http://127.0.0.1:${server.address().port}/chat`);
   await page.waitForFunction(()=>!document.querySelector('#send').disabled);
+  await page.fill('#silence-timeout','0');   // the recording has a 10.6 s quiet gap; the silence timeout (default 5 s) must not close the microphone under this suite
   await page.locator('#start').click();
   await page.waitForFunction(()=>document.querySelector('#state').textContent==='Speaking',null,{timeout:20000});
   // Let the reply actually render a few frames before reading the meter.

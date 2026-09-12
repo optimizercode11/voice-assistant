@@ -34,7 +34,7 @@ await speech('Please check red scarlet.');assert.equal(requests.at(-1).messages.
 await speech('RED SKELETON near me');assert.equal(requests.at(-1).messages.at(-1).content,'Ritz-Carlton near me');
 await send('red skeleton');assert.equal(requests.at(-1).messages.at(-1).content,'red skeleton','typed input is never rewritten');
 await speech('red skeletons');assert.equal(requests.at(-1).messages.at(-1).content,'red skeletons','whole phrases only');
-await page.locator('summary').click();await page.locator('#corrections-enabled').uncheck();await speech('red skeleton');assert.equal(requests.at(-1).messages.at(-1).content,'red skeleton');
+await page.locator('details.speech-corrections summary').click();await page.locator('#corrections-enabled').uncheck();await speech('red skeleton');assert.equal(requests.at(-1).messages.at(-1).content,'red skeleton');
 await page.locator('#corrections-enabled').check();await page.locator('#corrections').fill('a.b = $hotel\n$hotel = other');await speech('a.b axb');assert.equal(requests.at(-1).messages.at(-1).content,'$hotel axb','literal, single-pass correction');
 await page.locator('#corrections').fill('invalid');await speech('red scarlet');assert.equal(requests.at(-1).messages.at(-1).content,'red scarlet');assert.equal(await page.locator('#corrections').getAttribute('aria-invalid'),'true');
 // State transition permits configuration while listening, freezes it during a reply.

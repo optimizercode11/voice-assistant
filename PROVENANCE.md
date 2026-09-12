@@ -1046,3 +1046,22 @@ cannot schedule) and that a bracketed note is something the user already
 heard, never to repeat and never to write; the page's note now reads
 "[<agent> reported this and the user already heard it spoken: ...]"
 (`web/chat.js`, `voice_push_browser.mjs`, `voice_chat_test.py`).
+
+## Silence closes the microphone, and an update reopens it (2026-09-12, campaign voice-claude-20260912-h)
+
+Asked for: "silence deactivate listening, let's make it 5s", then "after the
+claude / codex completion event and tts completes it should start listening
+again".  A new `asleep` state in `web/chat.js`, distinct from `paused`: the
+capture loop closes the microphone when no voice has been heard for the
+Silence timeout (settings, default 5 s, 0 keeps listening, skipped while the
+wake word is on), the page shows Paused with the reason and the Resume
+button, and a pushed update is still spoken (the paused hold does not apply)
+with listening returning after it, after a reply, or on Resume or Space.
+`voice_silence_browser.mjs` drives it over a silent recording
+(`tests/fixtures/silence.wav`); its sabotage arm removes the closing line and
+fails at "two seconds of silence must close the microphone".  The shipped
+default would have put every existing microphone suite to sleep (the capture
+recording has a 10.6 s quiet gap), so those suites set the timeout to 0.
+Found on the way: the agent console's `<summary>` had made
+`voice_language_browser.mjs`'s `locator('summary')` ambiguous since campaign
+`-f`; that suite now names the corrections panel.

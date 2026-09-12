@@ -114,6 +114,7 @@ try{
   // Longer than one loop of the capture file (13.25 s), so an awake page takes
   // the next clip; short enough that two silent loops put it back to sleep.
   await page.fill('#wake-quiet','20');
+  await page.fill('#silence-timeout','0');   // the recording has a 10.6 s quiet gap; the silence timeout (default 5 s) must not close the microphone under this suite
   await page.locator('#start').click();
 
   // Clip 1: heard and dropped.  The page keeps listening and says what it waits for.

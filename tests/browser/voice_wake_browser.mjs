@@ -58,6 +58,15 @@ assert.equal(matcher('Wendy is here','Qwen'),null);
 assert.equal(matcher('Q and A time','Qwen'),null,'two tokens absorbed must still spell the name');
 assert.equal(matcher('Jervis lights','Jarvis'),'lights','the spelled rule is not Qwen-specific');
 assert.equal(matcher('Travis lights','Jarvis'),null);
+// "Bubu" (the person's own choice) is heard as "Boo boo", "Boo bo." and
+// "Boo! Boo!": both halves are the name, and the question keeps none of it.
+assert.equal(matcher('Boo boo! What time is it?','Bubu'),'What time is it?');
+assert.equal(matcher('Boo bo.','Bubu'),'');
+assert.equal(matcher('Boo! Boo!','Bubu'),'');
+assert.equal(matcher('Hey, Boo Boo. What time is it?','Bubu'),'What time is it?');
+assert.equal(matcher('Boo hoo, I am sad','Bubu'),null,'a two-consonant name gets no slip');
+assert.equal(matcher('Book a table','Bubu'),null);
+assert.equal(matcher('Quen, I want to go','Qwen'),'I want to go','a tie goes to the shorter run: "I" is not absorbed');
 
 // --- the page -----------------------------------------------------------------
 const server=http.createServer((req,res)=>{

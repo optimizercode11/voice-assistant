@@ -142,6 +142,10 @@ again and says so.  The transcriber spells an unfamiliar name the way it
 sounds -- "Qwen" on its own comes back as "Q N.", "Qn," or "Q. When." -- so
 the name is matched by its consonants and first letter, not letter for
 letter: those three all wake it, while "when", "question" and "quick" do not.
+The same rule hears "Boo boo" as *Bubu*; a name with fewer than three
+consonants is matched on its consonants exactly, so "Book" and "Boo hoo" are
+not.  A dropped clip's status line shows what was heard, so a spelling the
+rule misses is visible rather than silent.
 A near miss with a different first letter ("Hey Gwen", "Hey Kwen") wakes it
 only after a call word such as *hey* or *okay*.  The price of the loose
 match is that a sentence *starting* with a near-homophone ("Queen …") also

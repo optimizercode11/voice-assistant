@@ -1002,23 +1002,33 @@ function afterWakeWord(text, phrase) {
   const wanted = String(phrase).trim().split(/\s+/).map(plainWord).filter(Boolean);
   if (!wanted.length) return null;
   const name = wanted.join(''), loose = name.length >= 4;
+  // One consonant slip is allowed only when the name has consonants to spare:
+  // "qwn" may be heard as "qn" or "qwhn", but "bb" (Bubu) heard as "b" or "bk"
+  // would make "Boo hoo" and "Book" the name.
+  const slips = skeleton(name).length >= 3 ? 1 : 0;
   // The phrase may itself begin with a call word ("Hey Jarvis"), so try it
   // where it stands first, then after up to two call words.
   let skippable = 0;
   while (skippable < tokens.length && skippable < 2 && CALL_WORDS.has(plainWord(tokens[skippable]))) skippable++;
-  const attempts = [];   // [start, token count, how strict]
-  for (const strict of ['exact', 'spelled', 'called'])
-    for (let at = 0; at <= skippable; at++)
-      for (let count = wanted.length; count <= wanted.length + 1; count++)
-        if (at + count <= tokens.length) attempts.push([at, count, strict]);
-  for (const [at, count, strict] of attempts) {
-    const heard = tokens.slice(at, at + count).map(plainWord).join('');
-    let matched = false;
-    if (strict === 'exact') matched = heard === name;
-    else if (strict === 'spelled') matched = loose && heard[0] === name[0] && editDistance(skeleton(heard), skeleton(name)) <= 1;
-    else matched = loose && at > 0 && editDistance(heard, name) <= 1;
-    if (matched) return tokens.slice(at + count).join(' ').replace(/^[\s,.:;!?—-]+/, '').trim();
-  }
+  // How far a run of tokens is from the name under each rule; Infinity is no
+  // match.  Within a rule the closer run wins, and a tie goes to the shorter
+  // one: "Boo boo! What time" is all of "Bubu" (both halves, distance 0), while
+  // "Quen, I want" is "Qwen" alone (absorbing "I" would not get closer).
+  const distance = {
+    exact: heard => heard === name ? 0 : Infinity,
+    spelled: heard => loose && heard[0] === name[0] ? editDistance(skeleton(heard), skeleton(name)) : Infinity,
+    called: (heard, at) => loose && at > 0 ? editDistance(heard, name) : Infinity,
+  };
+  for (const rule of ['exact', 'spelled', 'called'])
+    for (let at = 0; at <= skippable; at++) {
+      let best = null, bestDistance = rule === 'spelled' ? slips : 1;
+      for (let count = wanted.length; count <= wanted.length + 1 && at + count <= tokens.length; count++) {
+        const heard = tokens.slice(at, at + count).map(plainWord).join('');
+        const d = distance[rule](heard, at);
+        if (d < bestDistance || (d === bestDistance && best === null)) { best = count; bestDistance = d; }
+      }
+      if (best !== null) return tokens.slice(at + best).join(' ').replace(/^[\s,.:;!?—-]+/, '').trim();
+    }
   return null;
 }
 // WAKE-MATCH-END
@@ -1435,7 +1445,7 @@ async function runTurn(input, forced = false, voicedMs = null) {
         const rest = afterWakeWord(text, wakePhrase());
         if (dormant) {
           // WAKE-GATE: not addressed to the assistant.  Heard, transcribed, dropped.
-          if (rest === null) { busy = false; listen(); setState('listening', `Waiting for “${wakePhrase()}”. Say it first, and I will answer.`); return; }
+          if (rest === null) { busy = false; listen(); setState('listening', `Heard “${text}”, not “${wakePhrase()}”. Waiting for “${wakePhrase()}”: say it first, and I will answer.`); return; }
           dormant = false; lastTurnAt = performance.now();
           if (!rest) {
             // Just the name: answer it, then listen for the actual question.

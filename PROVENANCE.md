@@ -891,3 +891,18 @@ wake suite green, sabotage arm red at the gate assertion.  Not performed: the
 name spoken into a real microphone in a room -- the spellings above are
 Kokoro's pronunciation transcribed, which is the closest measurement the
 stack can make of itself.
+
+### "Bubu", and saying what was heard (2026-09-12, campaign `voice-claude-20260912-b`)
+
+The person had renamed the wake word to *Bubu* and still saw "Waiting for
+“Bubu”".  Measured the same way: "Bubu" is heard as **"Boo boo!"**, **"Boo
+bo."** and **"Boo! Boo!"**.  The skeleton rule took the first "Boo" as the
+name and left the second in the question; it now scores both token runs and
+keeps the closer one (a tie to the shorter), so "Boo boo! What time is it?"
+is exactly the name and the question.  A name with fewer than three
+consonants gets no slip, or "Book a table" and "Boo hoo" would wake it.  The
+dormant status line now reads "Heard “…”, not “Bubu”" when it drops a clip,
+so the transcriber's spelling is on the screen instead of a bare wait.  The
+bridge journal showed no `/stt` from the person's browser after it loaded
+the `-a` page, so `-a` was never actually tried by voice; this entry is the
+measurement, not a report of a miss in the room.

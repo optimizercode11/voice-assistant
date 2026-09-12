@@ -1,0 +1,67 @@
+{
+  "campaign": "voice-claude-20260912-g",
+  "command": [
+    "bash",
+    "-c",
+    "\n    set -euo pipefail\n    live=\"$HOME/qwen36/voice-stack/voice-tools-20260910\"\n    test ! -e rollback\n    for p in 8038/health 8090/health 8095/health; do code=$(curl -s -m 5 -o /dev/null -w \"%{http_code}\" \"http://127.0.0.1:$p\"); echo \"engine $p -> $code\"; test \"$code\" = 200; done\n    systemctl --user --job-mode=ignore-dependencies stop voice-tools-bridge.service\n    mkdir rollback; rsync -a \"$live/\" rollback/; touch rollback-complete\n    rsync -aR web tools deploy scripts config README.md ARCHITECTURE.md RUNBOOK.md TOOLS.md PROVENANCE.md tests/README.md .guarded-run \"$live/\"\n    cd \"$live\"; python3 tools/voicectl.py --config config/host.toml index build >/dev/null; python3 tools/voicectl.py --config config/host.toml doctor | tail -1"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "24-27",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stage/voice-claude-20260912-g",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-12T02:41:12.229903521Z",
+  "git_head": "d92021234e082a400bf96f3ab611881b95bcbe7c",
+  "inputs": [
+    {
+      "bytes": 106228,
+      "exists": true,
+      "path": "web/chat.js",
+      "sha256": "28ce528a9900cab7e68d32362fc6efbfc708e3739a2681a315defd40ed980eef",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 18178,
+      "exists": true,
+      "path": "web/chat.html",
+      "sha256": "484fc9934616b66ba748064bd131ca438c64ce53d44d91ac2b2b578038122d53",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 45374,
+      "exists": true,
+      "path": "tools/speech_ui.py",
+      "sha256": "05273306aa255b45194ca4fa50f4e1b89a0d426e7376ceb61d514165202e42fa",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 20411,
+      "exists": true,
+      "path": "tools/voice_chat.py",
+      "sha256": "29d0ad7d9a73a76a3dcb4aad83041b5cf4106135ef091da44f11f2adff102139",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 12143,
+      "exists": true,
+      "path": "config/host.toml",
+      "sha256": "798c8d168ae826dd9b9d7d725bc81c928bd4a9797d7a0c793b8e89d874ff48da",
+      "verification": "current_local"
+    }
+  ],
+  "label": "install",
+  "log": "/home/ambudsharma/qwen36/voice-stage/voice-claude-20260912-g/evidence/guarded-voice-claude-20260912-g-20260912T024111Z-40346.log",
+  "run_id": "voice-claude-20260912-g-20260912T024111Z-40346",
+  "schema_version": 2,
+  "source_fingerprint": "4e148ab278d62ccd010e704d0e417ad0014578fe74d4b05b1d61d844368bdd3f",
+  "started_utc": "2026-09-12T02:41:11.963856185Z",
+  "status": "PASS"
+}

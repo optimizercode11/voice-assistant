@@ -138,9 +138,14 @@ model or shown for it.  Saying just the name gets "Yes?" and the next clip is
 the question.  Once awake, clips are turns as usual until the **quiet
 period** (default 30 s, measured from the last real turn, not from every
 silent clip) passes with nothing said to it; then it waits for the name
-again and says so.  A near miss ("Hey Gwen") wakes it only after a call word
-such as *hey* or *okay*; bare "when" never does.  Typing and **Send now** are
-never gated.  `tests/browser/voice_wake_browser.mjs` drives this over the
+again and says so.  The transcriber spells an unfamiliar name the way it
+sounds -- "Qwen" on its own comes back as "Q N.", "Qn," or "Q. When." -- so
+the name is matched by its consonants and first letter, not letter for
+letter: those three all wake it, while "when", "question" and "quick" do not.
+A near miss with a different first letter ("Hey Gwen", "Hey Kwen") wakes it
+only after a call word such as *hey* or *okay*.  The price of the loose
+match is that a sentence *starting* with a near-homophone ("Queen …") also
+wakes it.  Typing and **Send now** are never gated.  `tests/browser/voice_wake_browser.mjs` drives this over the
 real microphone loop, and its sabotage arm treats every clip as addressed
 and must go red.
 

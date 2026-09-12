@@ -982,30 +982,42 @@ function editDistance(a, b) {
     rows[i][j] = Math.min(rows[i - 1][j] + 1, rows[i][j - 1] + 1, rows[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
   return rows[a.length][b.length];
 }
+// The consonants of a word, in order.  qasr spells an unfamiliar name the way
+// it sounds -- "Qwen" alone came back as "Q N.", "Qn," and "Q. When." on
+// 2026-09-12 -- and what survives that is the consonant skeleton, not the
+// letters: qwen -> qwn, qn -> qn, qwhen -> qwhn.
+function skeleton(word) { return word.replace(/[aeiouy]/g, ''); }
 // WAKE-MATCH-BEGIN: extracted verbatim by tests/browser/voice_wake_browser.mjs.
 // The words after the wake phrase, or null when the clip did not start with it.
 // "Hey Qwen, what time is it?" -> "what time is it?"; "Qwen" -> ""; "What time is it?" -> null.
-// A near miss ("Gwen", "Quen") is accepted only after a call word: the ASR hears
-// the name imperfectly, but bare "when" must not wake it.
+// The name is matched three ways, strictest first: spelled as written; spelled
+// as the ASR spells it (the same consonants, allowing one slip, and the same
+// first letter -- "Q N", "Qn" and "Q. When" are all "Qwen", while "when" is
+// not, because it does not start with a q); and, only after a call word such
+// as "hey", one letter off ("Hey Gwen").  Bare "when" must never wake it.  The
+// ASR may split the name over two tokens ("Q N"), so one extra leading token
+// may be absorbed into the name.
 function afterWakeWord(text, phrase) {
   const tokens = String(text).trim().split(/\s+/).filter(Boolean);
   const wanted = String(phrase).trim().split(/\s+/).map(plainWord).filter(Boolean);
   if (!wanted.length) return null;
+  const name = wanted.join(''), loose = name.length >= 4;
   // The phrase may itself begin with a call word ("Hey Jarvis"), so try it
   // where it stands first, then after up to two call words.
   let skippable = 0;
   while (skippable < tokens.length && skippable < 2 && CALL_WORDS.has(plainWord(tokens[skippable]))) skippable++;
-  for (let at = 0; at <= skippable; at++) {
-    const called = at > 0;
-    if (tokens.length - at < wanted.length) break;
-    let matched = true;
-    for (let index = 0; index < wanted.length && matched; index++) {
-      const heard = plainWord(tokens[at + index]), want = wanted[index];
-      if (heard === want) continue;
-      if (called && want.length >= 4 && editDistance(heard, want) <= 1) continue;
-      matched = false;
-    }
-    if (matched) return tokens.slice(at + wanted.length).join(' ').replace(/^[\s,.:;!?—-]+/, '').trim();
+  const attempts = [];   // [start, token count, how strict]
+  for (const strict of ['exact', 'spelled', 'called'])
+    for (let at = 0; at <= skippable; at++)
+      for (let count = wanted.length; count <= wanted.length + 1; count++)
+        if (at + count <= tokens.length) attempts.push([at, count, strict]);
+  for (const [at, count, strict] of attempts) {
+    const heard = tokens.slice(at, at + count).map(plainWord).join('');
+    let matched = false;
+    if (strict === 'exact') matched = heard === name;
+    else if (strict === 'spelled') matched = loose && heard[0] === name[0] && editDistance(skeleton(heard), skeleton(name)) <= 1;
+    else matched = loose && at > 0 && editDistance(heard, name) <= 1;
+    if (matched) return tokens.slice(at + count).join(' ').replace(/^[\s,.:;!?—-]+/, '').trim();
   }
   return null;
 }

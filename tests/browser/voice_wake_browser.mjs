@@ -42,6 +42,22 @@ assert.equal(matcher('Hey Jarvis, lights','Hey Jarvis'),'lights','a two-word phr
 assert.equal(matcher('Jarvis lights','Hey Jarvis'),null);
 assert.equal(matcher('','Qwen'),null);
 assert.equal(matcher('anything','   '),null,'an empty phrase never matches');
+// The ASR's own spellings of the bare name, measured on 2026-09-12 by synthesising
+// the phrase with Kokoro and transcribing it with the live qasr: these are what
+// a person saying "Qwen" without a call word actually produces.
+assert.equal(matcher('Q N.','Qwen'),'','"Q N." is the name spelled out');
+assert.equal(matcher('Qn, what time is it?','Qwen'),'what time is it?','"Qn" is the name');
+assert.equal(matcher('Q. When. What time is it?','Qwen'),'What time is it?','"Q. When." is the name split in two');
+assert.equal(matcher('Okay, Qwen. What is the weather?','Qwen'),'What is the weather?','punctuation after a call word');
+assert.equal(matcher('Quen, hello','Qwen'),'hello','same consonants, same first letter');
+assert.equal(matcher('Kwen, hello','Qwen'),null,'a different first letter needs a call word');
+assert.equal(matcher('Hey Kwen, hello','Qwen'),'hello');
+assert.equal(matcher('Question one','Qwen'),null,'"question" shares the q but not the consonants');
+assert.equal(matcher('Quick question','Qwen'),null);
+assert.equal(matcher('Wendy is here','Qwen'),null);
+assert.equal(matcher('Q and A time','Qwen'),null,'two tokens absorbed must still spell the name');
+assert.equal(matcher('Jervis lights','Jarvis'),'lights','the spelled rule is not Qwen-specific');
+assert.equal(matcher('Travis lights','Jarvis'),null);
 
 // --- the page -----------------------------------------------------------------
 const server=http.createServer((req,res)=>{

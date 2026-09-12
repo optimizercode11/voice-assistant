@@ -854,3 +854,29 @@ suite green (the controls fix above, then the rest rerun individually).
 Not performed: a wake word spoken into a real microphone in a room -- the ASR
 spelling of the name is the one thing the fixture cannot measure, and the
 name-corrections box exists for whatever it turns out to hear.
+
+### The bare wake word was never heard (2026-09-12)
+
+First morning with **Wake word only** on: every clip for twenty minutes was
+transcribed and dropped (`POST /stt` after `POST /stt` in the bridge journal,
+not one `/chat/completions`), and the person reported that the page kept
+asking for the wake word they were saying.  The fixture could not have shown
+this, as the previous entry warned: the ASR's spelling of the name was the
+open question.  Measured on the live stack by synthesising the phrases with
+Kokoro (`af_heart`, `am_michael`) and transcribing them through the bridge's
+own `/stt`: "Hey Qwen, …" and "Okay Qwen, …" come back spelled correctly and
+woke it; "Qwen" alone comes back as **"Q N."**, **"Qn,"** and **"Q. When."**,
+none of which the letter-for-letter matcher accepted, and the near-miss rule
+was deliberately reserved for clips that begin with a call word.  So the one
+form a person naturally uses -- the name, then the question -- was the one
+form that never worked.
+
+`afterWakeWord()` now matches in three tiers, strictest first: spelled as
+written; spelled as the ASR spells it -- the same consonant skeleton within
+one edit and the same first letter, with one extra leading token allowed so a
+split "Q N" is one name; and, after a call word only, one letter off.  "when",
+"question", "quick", "Wendy" and "Q and A" still do not wake it; "Queen …" and
+"Quinn …" at the very start of a sentence now do, which is the documented
+price.  The rule is not name-specific ("Jervis" wakes "Jarvis", "Travis" does
+not).  `voice_wake_browser.mjs` checks the measured spellings as pure-function
+cases; the sabotage arm is unchanged and still goes red.

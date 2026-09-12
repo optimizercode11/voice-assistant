@@ -880,3 +880,14 @@ split "Q N" is one name; and, after a call word only, one letter off.  "when",
 price.  The rule is not name-specific ("Jervis" wakes "Jarvis", "Travis" does
 not).  `voice_wake_browser.mjs` checks the measured spellings as pure-function
 cases; the sabotage arm is unchanged and still goes red.
+
+Shipped as campaign `voice-claude-20260912-a` (page and docs; the bridge is
+unchanged): stage / install / restart PASS under the guard with the engine
+health gate (`evidence/guarded-voice-claude-20260912-a-*`).  Bridge PID
+30030 since 01:06:23 UTC, NRestarts=0; served `chat.js` `6c30ea53b6cd87b9…`
+equals this checkout; `check_site.py --compare-live` PASS 20/20 (only
+`__pycache__` differs); GPU engine PID 16739 untouched.  `make test` green,
+wake suite green, sabotage arm red at the gate assertion.  Not performed: the
+name spoken into a real microphone in a room -- the spellings above are
+Kokoro's pronunciation transcribed, which is the closest measurement the
+stack can make of itself.

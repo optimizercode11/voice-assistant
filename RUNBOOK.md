@@ -34,7 +34,8 @@ its engines run on as orphans (see `PROVENANCE.md`, "Guiding Claude Code by
 voice").  Until an operator sorts that unit out, the install step's
 `systemctl --user is-active voice-stack-gpu2.service` line answers `failed`
 for a stack that is actually serving; campaign `voice-claude-20260911-a`
-gated on `curl` to 8080/8090/8095 `/health` instead, and recorded it.  Do not
+gated on `curl` to 8080/8090/8095 `/health` instead, and recorded it (since
+2026-09-12 the model port in that gate is 8038, see below).  Do not
 `start` that unit to make the gate pass: it would try to spawn a second stack
 on GPU 2.
 
@@ -50,6 +51,23 @@ body installs the GPU unit (`deploy/install-service.sh:27`), disables/stops
 There is no `--tools-only` flag. The existing ASR campaign also stops and starts
 the GPU stack (`deploy/campaigns/qasr-20260909/deploy.py:301`). Neither is a
 shortcut for this procedure.
+
+## The model behind the bridge (2026-09-12)
+
+The bridge answers from `q38f-server.service` (Qwen3.8-Flash-Next-NVFP4 on
+GPUs 0,1,3,4, port 8038), not from the 27B on 8080.  The 27B was shut down
+on 2026-09-12 at the user's request: its supervisor
+(`voice_stack.py supervise`, the orphan of the failed GPU unit) tears down
+every child -- Kokoro, qasr, the g2p sidecar, the old 8092 bridge -- the
+moment any one exits, so the supervisor was SIGKILLed first (its `finally`
+never ran) and the 27B SIGTERMed second.  Kokoro (8090), qasr (8095) and the
+g2p sidecar run on as orphans in the failed unit's cgroup, exactly as before;
+GPU 2 went from ~29 GB used to ~5.8 GB.  Consequences: the install gate is now
+`8038/8090/8095`; `mcp_stack_status.py` probes 8038; the old bridge on
+8091/8092 still points at 8080 and cannot answer; `voice_stack.py` still
+describes a stack with the 27B in it, so a `start` of the GPU unit would try
+to bring the 27B back on 8080 (and fail on the busy 8090).  Sorting that unit
+out is still an operator's job.
 
 ## What the user will feel — a 30-second check
 

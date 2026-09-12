@@ -913,3 +913,22 @@ under the guard with the engine health gate
 served `chat.js` `dc301bb560f67178…` equals this checkout; compare-live PASS
 20/20; GPU engine PID 16739 untouched.  `make test` green, wake suite green,
 sabotage arm red at the gate assertion.
+
+### Flash-Next behind the bridge, 27B off (2026-09-12, campaign `voice-claude-20260912-c`)
+
+Asked for by voice: "shutdown the q38-27b server and instead point to the
+q38f engine".  Measured on 8038 before switching: `reasoning_effort: none`
+returns no thinking text (without it the chain of thought comes back as
+content); a tool request returns `tool_calls` with `finish_reason:
+tool_calls`, plus the literal `<tool_call>` block in `content`, which the
+bridge only ever feeds back to the model; 133 tok/s decode, 3.5k tok/s
+prefill.  Changed: `--llm-url` in `deploy/start-tools-bridge.sh`, the `llm`
+probe in `tools/mcp_stack_status.py`, the model id in `tools/voice_chat.py`.
+Stage / install (gate `8038/8090/8095`) / restart PASS
+(`evidence/guarded-voice-claude-20260912-c-*`); bridge PID 33965; a live
+turn through `/chat/completions` called `now` and answered, and the health
+tool reported Flash-Next serving.  Then the 27B: supervisor 2298 SIGKILLed
+(its teardown never ran), `q38_27_server` 4334 SIGTERMed, gone in 2 s; Kokoro,
+qasr and g2p alive; TTS then STT of "The 27B is off." round-tripped through
+the bridge; GPU 2 at 5.8 GB.  The GPU unit stays `failed`; RUNBOOK "The model
+behind the bridge" records what a `start` would now do.

@@ -1,0 +1,298 @@
+{
+  "campaign": "voice-claude-20260912-c",
+  "command": [
+    "bash",
+    "-c",
+    "\n  set -euo pipefail\n  find . -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true\n  printf \"export GUARD_GIT_HEAD=%s\\nexport GUARD_SOURCE_FP=%s\\nexport VOICE_TOOLS_CAMPAIGN=voice-claude-20260912-c\\n\" \"$GUARD_GIT_HEAD\" \"$GUARD_SOURCE_FP\" > deploy/source.env\n  PYTHONDONTWRITEBYTECODE=1 python3 deploy/check_site.py --require-assets 2>&1 | tail -1\n  PYTHONDONTWRITEBYTECODE=1 python3 tools/voicectl.py --config config/host.toml index build >/dev/null\n  PYTHONDONTWRITEBYTECODE=1 python3 -u tools/voicectl.py --config config/host.toml doctor | tail -1\n"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "24-27",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stage/voice-claude-20260912-c",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-12T01:30:02.767372526Z",
+  "git_head": "fe7710eddfab691a8a06d6cb77d4a534fa79168d",
+  "inputs": [
+    {
+      "bytes": 17104,
+      "exists": true,
+      "path": "web/chat.html",
+      "sha256": "1d59790360268a81496f13c5421ad96065f3cb4d03b81f8dca5feaf9268934f7",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 103625,
+      "exists": true,
+      "path": "web/chat.js",
+      "sha256": "dc301bb560f67178caf500f849215d18751aec5bce40f90756f9576c917f707f",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 29030,
+      "exists": true,
+      "path": "web/index.html",
+      "sha256": "5292b9a2fbe09c13a6bf4cc3c0002b3b5defc14869a670a6105c3e9930ba98a0",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 13802,
+      "exists": true,
+      "path": "tools/agent_config.py",
+      "sha256": "5594d2a71468b0d1090e983145f5265552b8b3f5601bd7b8098e29c55491c488",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 32277,
+      "exists": true,
+      "path": "tools/agent_tools.py",
+      "sha256": "e3da63f3a9cf8f09a720b7744cda264339906d690d0e88c5da10b39dcfb03e59",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 10255,
+      "exists": true,
+      "path": "tools/approvals.py",
+      "sha256": "012a281e61ab0d9008b6845106c46c140528f2512c75fabe4b4f173fda83fd76",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 5771,
+      "exists": true,
+      "path": "tools/g2p_sidecar.py",
+      "sha256": "325999b23b736cc951bc37ce437868ac4caf5e8d6eab353b54ab8ff4c49fe811",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 25472,
+      "exists": true,
+      "path": "tools/mcp_claude.py",
+      "sha256": "c6f634e54120709cbff8126603a110244f19fdfc1e6f5a4e99711e979085a094",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 17351,
+      "exists": true,
+      "path": "tools/mcp_client.py",
+      "sha256": "40a5edf904ccf82d73b6ac79d848e10466bc4996584877a10f6ec0097ad881ad",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 30669,
+      "exists": true,
+      "path": "tools/mcp_files.py",
+      "sha256": "dce3b3920bb8c54d644af75c4fb55289692a8cee22302b57bdb8ca99f7a8ad9d",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 4114,
+      "exists": true,
+      "path": "tools/mcp_stack_status.py",
+      "sha256": "342d21630c543fb284a306aa3ed316df3516815cf809d6490f7984181694b357",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 36935,
+      "exists": true,
+      "path": "tools/mcp_web.py",
+      "sha256": "d1a27be0f269045adc84bcfadd5c8d6db65de5f66c3a9e2f5818b91ea0bc6374",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 13553,
+      "exists": true,
+      "path": "tools/retrieval.py",
+      "sha256": "0e4d8fc320cfb909fc81f098d2492fd5a3190b4b3a2263142928128a7b056620",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 44610,
+      "exists": true,
+      "path": "tools/speech_ui.py",
+      "sha256": "3a2ecd9493d7b2fa5a3f79181d3a89fb6c1778a148a83aebe3651ad802e139e4",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 9584,
+      "exists": true,
+      "path": "tools/turn_control.py",
+      "sha256": "99c198206031a87169389a82ce13d858e658eef3378606b5c103e6f8186bdc41",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 19794,
+      "exists": true,
+      "path": "tools/voice_chat.py",
+      "sha256": "417b411a5c97575b46e53e67a7450278cf9856bcd35b5bf4d97d4b3243f7a74e",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 7339,
+      "exists": true,
+      "path": "tools/voicectl.py",
+      "sha256": "f9353a40ff4573fa63907c3b83d3408c13b422d672ecf9aa9fcf5d4521cd2715",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 6265,
+      "exists": true,
+      "path": "deploy/check_site.py",
+      "sha256": "bb807723ad04ede014fb65303194efd0b69dfd54df42b579ef6a8110f6d5f798",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 7989,
+      "exists": true,
+      "path": "deploy/site_config.py",
+      "sha256": "35a5582ccff344db87977016d582e0fef723e943b761679a6c03609c4278caa9",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 14360,
+      "exists": true,
+      "path": "deploy/voice_stack.py",
+      "sha256": "b454e0e1a1f5b6437e7fbc0911ea90770bb17d938fd00b657e110f766f55bfd9",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 1848,
+      "exists": true,
+      "path": "deploy/install-service.sh",
+      "sha256": "8895cc4ba9e3f779d69de8d7fe0d0b9d9e554fa3a0823765a26eb8e8c95b246c",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 1621,
+      "exists": true,
+      "path": "deploy/start-tools-bridge.sh",
+      "sha256": "f50503fb5f464da27285971270bacc9cdc91e3d50ff272915246c06f9de84259",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 979,
+      "exists": true,
+      "path": "deploy/start-voice-stack.sh",
+      "sha256": "72450d505f55dab39d81eb393ad3e2e9a2cae679cd96323edcc06f192b889d7c",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 1005,
+      "exists": true,
+      "path": "deploy/voice-stack-gpu2.service",
+      "sha256": "2b4c7e8bbfcc2bfd13ce146bb1932bcb73913eafd2948a852135a748099fef08",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 890,
+      "exists": true,
+      "path": "deploy/voice-tools-bridge.service",
+      "sha256": "acf98da65ea847d3d8df05921835003936f2dc498bba9796cfa1ab7ced01bfd4",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 4241,
+      "exists": true,
+      "path": "scripts/guarded-hostrun",
+      "sha256": "03bb95172b2cbfca7393cf81502b99dd5387b8cf69af6b4211bb6e4dd04a875d",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 15726,
+      "exists": true,
+      "path": "scripts/guarded-run",
+      "sha256": "614d767943adae76a4d3451e52781dd76b56f40e84e9ec17b2ce96a881eafa17",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 8049,
+      "exists": true,
+      "path": "scripts/guardrail-check",
+      "sha256": "27d44f57434d0132df5212d0eb702a7b5e72255a734a2a363bd6bfd3eda0bc59",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 1498,
+      "exists": true,
+      "path": "scripts/VENDORED.md",
+      "sha256": "1a8168a8fc9cf6f5b925157946ee1b10b01fab1f4294ac67b4d49aad43380313",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 1469,
+      "exists": true,
+      "path": "scripts/worktree-fingerprint",
+      "sha256": "158471f131c436775b86466a315d0a217df63e2fe6cc79f6b6d5ab474805023f",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 3036,
+      "exists": true,
+      "path": "config/assistant.toml",
+      "sha256": "4c729afa63b1acdd24aa57a47e2f0a7f7c800c42954f14a83f6678ded2b57624",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 8872,
+      "exists": true,
+      "path": "config/host.toml",
+      "sha256": "d394ba4cf30d7718b0735b7918cd8a77a3c6043444529f7e843fdae672f9bfa8",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 13271,
+      "exists": true,
+      "path": "README.md",
+      "sha256": "dbfe2b801f7238bd8d0d296d805c4ef9667dd1852e6aee9e0f8effcebd9fb3fe",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 17882,
+      "exists": true,
+      "path": "ARCHITECTURE.md",
+      "sha256": "0cb666eadc3813e36a496797684524d5af1ce34d63b09482d09488eacd9abbe4",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 42115,
+      "exists": true,
+      "path": "RUNBOOK.md",
+      "sha256": "781a9e95fc807b160bf27b8011fa10dc7d20a744ab5fc720032bbbcb727c4748",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 29040,
+      "exists": true,
+      "path": "TOOLS.md",
+      "sha256": "3a8642efcfd8fcc12e46c4920b53c320017c03c97a9da0f04625713e49bc1569",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 57741,
+      "exists": true,
+      "path": "PROVENANCE.md",
+      "sha256": "10e929d13b17dc168c44ca32e1d1c023c29515212e0ac19fdabfa4dca808a35d",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 7938,
+      "exists": true,
+      "path": "tests/README.md",
+      "sha256": "4f2a294109d13c2fc54fe967bbbce030d3c1c5dbcf97150e45e602270f929b81",
+      "verification": "current_local"
+    }
+  ],
+  "label": "stage",
+  "log": "/home/ambudsharma/qwen36/voice-stage/voice-claude-20260912-c/evidence/guarded-voice-claude-20260912-c-20260912T012958Z-1963442.log",
+  "run_id": "voice-claude-20260912-c-20260912T012958Z-1963442",
+  "schema_version": 2,
+  "source_fingerprint": "4e45c9e77fd4d3af191ea5a380cedc579af7d8f3d3205b5e73a89a6652526941",
+  "started_utc": "2026-09-12T01:30:02.554139682Z",
+  "status": "PASS"
+}

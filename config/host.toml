@@ -21,6 +21,26 @@ result_chars = 6000
 turn_seconds = 150
 generation_seconds = 45
 
+# Where things are.  The tool schemas say how to call a tool and the `purpose`
+# lines say what a server is for; neither can say WHICH MACHINE a server sees,
+# and on this deployment that is the whole question.  The "files" server below
+# reads this host's disk (vllm: the deployed tree, plus whatever a person
+# approved on the page -- and /mnt here is a directory of model weights, not
+# the user's projects).  The user's repositories live on codex, reachable only
+# through the "claude" server.  Without these lines "look up my inference
+# engine project in /mnt" went to the file tools twelve times out of twelve,
+# found vllm's /mnt/engine2, and "read the readme of the inference engine
+# project" read this repository's README instead (2026-09-12, Flash-Next with
+# reasoning off).  With them, sixteen of sixteen project requests went to
+# Claude Code and the local questions (the bridge port, the runbook, the
+# deployed folder) stayed local.  Each line is sent on every turn: keep them
+# few and plain.
+[prompt]
+where = [
+  "The user's own projects, repositories and code (the inference engine, everything under /mnt and the home directory on the user's computer) live on the user's computer, which only Claude Code reaches. Any request about them, even just finding a project, reading its README or a file, or summarising it, goes to mcp__claude__send; the files tools cannot see them.",
+  "The files tools and search_notes see only this bridge host: the deployed voice-stack tree, its docs, and folders approved on the page.",
+]
+
 [builtins]
 now = true
 # "Stop listening for a bit" used to be answered with "I'll pause listening"
@@ -161,7 +181,7 @@ enabled = true
 # page hears about finished work only when someone asks.
 [[mcp.server]]
 name = "claude"
-purpose = "hand a spoken instruction to Claude Code, the coding agent on the user's computer (send), and hear what it has done since (updates); use detail only when the user asks for specifics"
+purpose = "the user's own projects, repositories and code live on the user's computer, which only Claude Code reaches: send hands it any request to find, look up, read, summarise, explain or change them (the answer is pushed back and spoken when ready); updates says what it has done since; use detail only when the user asks for specifics"
 command = "ssh"
 args = ["-T", "codex-claude"]
 timeout_seconds = 20
@@ -169,7 +189,7 @@ enabled = true
 
 [[mcp.server]]
 name = "files"
-purpose = "list, read and grep files under the approved folders; ask for more with request_directory"
+purpose = "list, read and grep files on this bridge host only (the deployed voice-stack tree and folders approved on the page); the user's projects and repositories are NOT on this host, so send those to Claude Code instead"
 command = "python3"
 args = ["tools/mcp_files.py", "--root", ".", "--roots-file", "var/approvals.json"]
 timeout_seconds = 20

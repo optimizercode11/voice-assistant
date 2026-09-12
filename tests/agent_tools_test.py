@@ -43,6 +43,20 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaises(agent_config.ConfigError, msg=text):
                 agent_config.load(self.write(text))
 
+    def test_prompt_where_lines_are_checked_and_bounded(self):
+        config = agent_config.load(self.write('[prompt]\nwhere = ["  Repos live on  codex,\\t behind Claude Code. "]\n'))
+        self.assertEqual(config.prompt.where, ['Repos live on codex, behind Claude Code.'],
+                         'whitespace is folded: each line is one spoken-prompt sentence')
+        self.assertEqual(agent_config.load('').prompt.where, [])
+        for text in ('[prompt]\nwhere = "one string"\n',
+                     '[prompt]\nwhere = ["ok", 3]\n',
+                     '[prompt]\nwhere = ["   "]\n',
+                     '[prompt]\nrules = ["x"]\n',
+                     '[prompt]\nwhere = [' + ', '.join(['"a"'] * (agent_config.MAX_PROMPT_WHERE + 1)) + ']\n',
+                     '[prompt]\nwhere = ["' + 'x' * (agent_config.MAX_PROMPT_WHERE_CHARS + 1) + '"]\n'):
+            with self.assertRaises(agent_config.ConfigError, msg=text):
+                agent_config.load(self.write(text))
+
     def test_fetch_without_an_allow_list_refuses_to_start(self):
         with self.assertRaises(agent_config.ConfigError) as caught:
             agent_config.load(self.write('[fetch]\nenabled = true\n'))
@@ -170,6 +184,25 @@ class RegistryTests(unittest.TestCase):
         self.assertIn('- mcp__web__read_page, mcp__web__search: search and read the public web', manifest,
                       'an MCP server is described by its operator-written purpose, not five raw names')
         self.assertLess(len(manifest), 1200, 'the manifest is sent on every turn; keep it short')
+        self.assertNotIn('Where things are', manifest, 'no [prompt] where lines, no section')
+
+    def test_the_manifest_ends_with_where_things_are_when_the_operator_says(self):
+        """A purpose says what a server is for; only the operator knows which
+        machine it sees.  On the live bridge the file tools read the GPU host
+        and the repositories are on codex behind Claude Code, and without this
+        section "look up my inference engine project" went to the file tools
+        every time (2026-09-12)."""
+        config = agent_config.load('')
+        config.prompt.where = ['The repositories live on codex, which only Claude Code reaches.',
+                               'The files tools see only this host.']
+        registry = agent_tools.Registry(config)
+        self.addCleanup(registry.close)
+        manifest = registry.manifest()
+        self.assertTrue(manifest.endswith('Where things are:\n'
+                                          '- The repositories live on codex, which only Claude Code reaches.\n'
+                                          '- The files tools see only this host.'), manifest)
+        self.assertLess(manifest.index('- now:'), manifest.index('Where things are:'),
+                        'capabilities first, then where they reach')
 
     def test_unknown_tool_names_what_does_exist(self):
         registry = agent_tools.Registry(agent_config.load(''))

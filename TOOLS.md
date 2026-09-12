@@ -409,6 +409,21 @@ transcript:
 - On the page, a bridge refusal keeps the conversation: the reason goes on the
   status line and listening resumes, instead of "Something went wrong" ending
   the session (`voice_pause_browser.mjs` asserts it).
+- **`[prompt] where`** (2026-09-12): the manifest can end with operator-written
+  lines under *Where things are*.  A `purpose` says what a server is for; it
+  cannot say which machine the server sees, and on the live bridge that is the
+  whole question: the `files` server reads the GPU host's disk, and the `/mnt`
+  a person approved on the page is that host's directory of model weights,
+  while the repositories are on codex behind the `claude` server.  Measured
+  against Flash-Next with reasoning off, "look up my inference engine project
+  in /mnt" went to the file tools 12/12 and found `/mnt/engine2` on the wrong
+  machine; "read the readme of the inference engine project" read this
+  repository's README.  Rewording the two purposes alone moved only the edit
+  requests.  With the two `where` lines in `config/host.toml`, 16/16 project
+  requests (find, read the README, summarise, edit, which branch) went to
+  `mcp__claude__send`, and the bridge port, the runbook and the deployed folder
+  stayed on the local tools.  At most six lines of 400 characters; every one
+  is sent on every turn (`tests/agent_tools_test.py`).
 
 ## Progress, and why it is opt-in
 

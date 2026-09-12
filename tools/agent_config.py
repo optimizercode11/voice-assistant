@@ -100,9 +100,28 @@ class ApprovalsConfig:
     file: Path = Path("var/approvals.json")
 
 
+MAX_PROMPT_WHERE = 6
+MAX_PROMPT_WHERE_CHARS = 400
+
+
+@dataclass
+class PromptConfig:
+    """Operator-written lines the model reads after the capability manifest.
+
+    `where` says where things ARE, which the tool schemas cannot: on the live
+    bridge the file tools read the bridge host's disk while the user's
+    repositories sit on another machine behind Claude Code, and "look up my
+    inference engine project in /mnt" went to the file tools twelve times out
+    of twelve (2026-09-12).  Nothing about a tool's shape says which machine it
+    sees; only the operator knows, so the operator writes it down here.
+    """
+    where: list[str] = field(default_factory=list)
+
+
 @dataclass
 class AgentConfig:
     limits: ToolLimits = field(default_factory=ToolLimits)
+    prompt: PromptConfig = field(default_factory=PromptConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     fetch: FetchConfig = field(default_factory=FetchConfig)
     approvals: ApprovalsConfig = field(default_factory=ApprovalsConfig)
@@ -153,6 +172,28 @@ def _paths(value, label: str) -> list[Path]:
     if not isinstance(value, list) or any(not isinstance(item, (str, Path)) for item in value):
         raise ConfigError(f"{label} must be a path or a list of paths")
     return [Path(item) for item in value]
+
+
+def _prompt(raw: dict) -> PromptConfig:
+    if not raw:
+        return PromptConfig()
+    unknown = set(raw) - {"where"}
+    if unknown:
+        raise ConfigError(f"[prompt] unknown keys: {sorted(unknown)}")
+    where = raw.get("where", [])
+    if not isinstance(where, list) or any(not isinstance(line, str) for line in where):
+        raise ConfigError("[prompt] where must be a list of strings")
+    lines = [" ".join(line.split()) for line in where]
+    if any(not line for line in lines):
+        raise ConfigError("[prompt] where must not contain empty lines")
+    if len(lines) > MAX_PROMPT_WHERE:
+        raise ConfigError(f"[prompt] where has {len(lines)} lines; at most {MAX_PROMPT_WHERE} -- "
+                          "the manifest is sent on every turn")
+    long = [line for line in lines if len(line) > MAX_PROMPT_WHERE_CHARS]
+    if long:
+        raise ConfigError(f"[prompt] where lines must be at most {MAX_PROMPT_WHERE_CHARS} characters: "
+                          f"{long[0][:60]!r}...")
+    return PromptConfig(where=lines)
 
 
 def _retrieval(raw: dict) -> RetrievalConfig:
@@ -263,7 +304,7 @@ def load(path: Path | None) -> AgentConfig:
         raw = tomllib.loads(path.read_text(encoding="utf-8"))
     except Exception as error:
         raise ConfigError(f"{path} is not readable TOML: {error}") from error
-    unknown = set(raw) - {"limits", "retrieval", "fetch", "approvals", "mcp", "builtins"}
+    unknown = set(raw) - {"limits", "retrieval", "fetch", "approvals", "mcp", "builtins", "prompt"}
     if unknown:
         raise ConfigError(f"{path}: unknown top-level keys: {sorted(unknown)}")
     limits_raw = _table(raw, "limits")
@@ -280,7 +321,8 @@ def load(path: Path | None) -> AgentConfig:
     for key, value in limits_raw.items():
         if not isinstance(value, (int, float)) or isinstance(value, bool):
             raise ConfigError(f"[limits] {key} must be a number, got {value!r}")
-    config = AgentConfig(limits=ToolLimits(**limits_raw), retrieval=_retrieval(_table(raw, "retrieval")),
+    config = AgentConfig(limits=ToolLimits(**limits_raw), prompt=_prompt(_table(raw, "prompt")),
+                         retrieval=_retrieval(_table(raw, "retrieval")),
                          fetch=_fetch(_table(raw, "fetch")),
                          approvals=_approvals(_table(raw, "approvals")), mcp=_mcp(raw.get("mcp", {}).get("server", [])
                                                                       if isinstance(raw.get("mcp"), dict)

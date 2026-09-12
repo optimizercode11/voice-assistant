@@ -932,3 +932,36 @@ tool reported Flash-Next serving.  Then the 27B: supervisor 2298 SIGKILLed
 qasr and g2p alive; TTS then STT of "The 27B is off." round-tripped through
 the bridge; GPU 2 at 5.8 GB.  The GPU unit stays `failed`; RUNBOOK "The model
 behind the bridge" records what a `start` would now do.
+
+## The file tools were on the wrong machine (2026-09-12, campaign voice-claude-20260912-d)
+
+The user reported two misses by voice: "can you look up my inference engine
+project in slash mnt" could not find it, and "can you read the readme of the
+inference engine project" talked about this repository's README.  Both were
+answered by the `files` MCP server, which runs on vllm and reads vllm's disk:
+the `/mnt` a person had approved on the page is vllm's directory of model
+weights, so the model found `/mnt/engine2` there and called it the project,
+and the only README under its roots is the deployed voice tree's.  The
+repositories are on codex, reachable only through the `claude` server, and
+nothing in a tool schema or a `purpose` line says which machine a server sees.
+When the request did reach Claude Code (an earlier voice turn at 01:33Z) it
+found `/mnt/inference-engine` at once.
+
+Measured with a routing probe (`Registry.build` on a scratch tree with the
+live tool set, one generation against Flash-Next on 8038 with reasoning off,
+four samples per phrasing, no tool executed):
+
+| wording | project requests to Claude Code | local questions kept local |
+|---|---|---|
+| shipped `-c` | 0 of 12 (one edit request 1 of 4) | yes |
+| purposes reworded only | 5 of 16 (edits 4 of 4, reads 1 of 12) | yes |
+| purposes plus `[prompt] where` | 16 of 16 | yes (bridge port, runbook, deployed folder, the time) |
+
+Change: `config/host.toml` gains a `[prompt]` table whose `where` lines the
+registry appends to the capability manifest under *Where things are*
+(`tools/agent_config.py`, `tools/agent_tools.py`; bounded to six lines of 400
+characters, whitespace folded, unknown keys fatal; `tests/agent_tools_test.py`).
+The `claude` and `files` purposes now say which machine each reaches.  Not
+changed: the `/mnt` grant in the live `var/approvals.json` on vllm, which still
+exposes that host's model directory to the file tools; it is harmless and a
+person's decision to revoke on the page.

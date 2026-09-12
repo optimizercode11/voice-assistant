@@ -496,6 +496,18 @@ class Registry:
         for server, names in by_server.items():
             purpose = purposes.get(server) or f"tools from the {server} server"
             lines.append(f"- {', '.join(names)}: {purpose}")
+        # Where things are.  A purpose says what a server is for; it cannot say
+        # which machine a server sees, and on the live bridge that is the whole
+        # question: the file tools read this host, the repositories are on the
+        # user's computer behind Claude Code.  Measured 2026-09-12 against
+        # Qwen3.8-Flash-Next with reasoning off: purposes alone sent "look up my
+        # inference engine project in /mnt" to the file tools 12/12; with these
+        # lines, 16/16 project requests went to Claude Code and the local
+        # questions (bridge port, runbook, the deployed folder) stayed local.
+        where = getattr(getattr(self.config, "prompt", None), "where", None) or []
+        if where:
+            lines.append("Where things are:")
+            lines.extend(f"- {line}" for line in where)
         return "\n".join(lines)
 
     def execute(self, name: str, arguments, deadline: float | None = None) -> ToolResult:

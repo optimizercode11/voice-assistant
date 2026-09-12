@@ -16,7 +16,9 @@ from urllib.parse import urlsplit
 
 ENDPOINTS = {
     "tts": ("http://127.0.0.1:8090/health", "Kokoro TTS"),
-    "llm": ("http://127.0.0.1:8080/health", "Qwen3.8-27B"),
+    # 2026-09-12: the bridge answers from the four-GPU Flash-Next server
+    # (q38f-server.service, port 8038); the 27B on 8080 was shut down.
+    "llm": ("http://127.0.0.1:8038/health", "Qwen3.8-Flash-Next"),
     "stt": ("http://127.0.0.1:8095/health", "Qwen3-ASR (resident)"),
     # 8091/8093 are the HTTP listeners; 8092/8094 are the TLS ones.  Probing a
     # TLS port over plain http gets a connection reset and the tool then tells

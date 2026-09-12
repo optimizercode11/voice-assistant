@@ -31,5 +31,5 @@ exec ./.guarded-run --campaign "$campaign" --label bridge-start --cpu --cpus "$c
     --host 0.0.0.0 --port "$http" --https-port "$https" \
     --tls-cert "$cert" --tls-key "$key" --ffmpeg "$ffmpeg" \
     --asr-url "http://127.0.0.1:8095" \
-    --llm-url "http://127.0.0.1:8080" \
+    --llm-url "http://127.0.0.1:8038" \
     --tools-config config/host.toml

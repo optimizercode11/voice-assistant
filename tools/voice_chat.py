@@ -121,7 +121,7 @@ def parse_messages(body):
 
 def payload(body, tools=None, system=None):
     clean = parse_messages(body)
-    request = {'model': 'qwen3.8-27b',
+    request = {'model': 'qwen3.8-flash-next-nvfp4',
                'messages': [{'role': 'system', 'content': system or SYSTEM}, *clean],
                'reasoning_effort': 'none', 'temperature': 0.6, 'max_tokens': 384, 'stream': False}
     if tools:
@@ -323,7 +323,7 @@ def turn(url, body, disconnected, *, registry=None, limits=None, on_event=None):
 
     for round_number in range(1, rounds + 1):
         last = round_number == rounds
-        request = {'model': 'qwen3.8-27b', 'messages': messages, 'reasoning_effort': 'none',
+        request = {'model': 'qwen3.8-flash-next-nvfp4', 'messages': messages, 'reasoning_effort': 'none',
                    'temperature': 0.6, 'max_tokens': 384, 'stream': False}
         if specs and not last:
             request['tools'] = specs

@@ -29,6 +29,14 @@ the page's `/events` stream without being asked; the bridge on `vllm` must be
 at or after campaign `voice-claude-20260911-b` to have that route.  `TOOLS.md`,
 "Guiding Claude Code by voice" and "Updates that arrive on their own".
 
+A fourth piece, also on codex (2026-09-12): the Codex MCP server
+(`tools/mcp_codex.py`, the `codex` server in `config/host.toml`), reached the
+same way over a second key (`vllm:~/.ssh/id_ed25519_voice_codex`, alias
+`codex-codex`, forced command in `codex:~/.ssh/authorized_keys`).  It runs
+`codex exec` with the `q38f` profile, so its model is the Flash-Next server on
+8038: if that server is down, Codex turns fail and so does the voice turn.
+Everything said above about the split between server and bridge applies.
+
 Gate caveat (2026-09-11): `voice-stack-gpu2.service` reports `failed` while
 its engines run on as orphans (see `PROVENANCE.md`, "Guiding Claude Code by
 voice").  Until an operator sorts that unit out, the install step's

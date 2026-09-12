@@ -965,3 +965,51 @@ The `claude` and `files` purposes now say which machine each reaches.  Not
 changed: the `/mnt` grant in the live `var/approvals.json` on vllm, which still
 exposes that host's model directory to the file tools; it is harmless and a
 person's decision to revoke on the page.
+
+## Codex on the local model, by voice (2026-09-12, campaign voice-claude-20260912-e)
+
+Asked for: "a tool call to have codex with q38f profile".  Codex CLI 0.154.0
+is installed on codex and `~/.codex/q38f.config.toml` is a profile that points
+it at Qwen3.8-Flash-Next on `vllm:8038`, the server that also answers the voice
+turn.  Shipped as the MCP server `codex` (`tools/mcp_codex.py`): the same
+`send`/`updates` contract and push route as the Claude Code server, fronting
+`codex exec`.
+
+Measured before writing it, against the real CLI and the real profile:
+
+- `codex exec --profile q38f --json` answers in under two seconds with JSONL
+  events `thread.started`, `turn.started`, `item.completed`
+  (`agent_message`), `turn.completed`.
+- `codex exec resume` rejects `--profile`, `-C` and `--add-dir` (usage error,
+  exit 2).  With the profile flattened into nine `-c key=value` overrides the
+  resumed thread answered from memory ("The single word I replied with was
+  ready") on the same model.  The server therefore passes the flattened
+  profile to both forms, re-read on every spawn.
+- Codex's sandbox cannot start on codex: under `--sandbox workspace-write`
+  every command failed before running with `bwrap: loopback: Failed
+  RTM_NEWADDR: Operation not permitted` and the model reported the shell as
+  unusable (68k prompt tokens spent finding that out).  With
+  `--dangerously-bypass-approvals-and-sandbox` the same request ran `echo hi`
+  and wrote the file (`command_execution` items with `command`,
+  `aggregated_output`, `exit_code`).  Default `--access full` records that
+  decision; `--access workspace` remains for a host where the sandbox works.
+- `codex exec` blocks on an open stdin ("Reading additional input from
+  stdin"), as the inference-engine cookbook already notes; the child's stdin
+  is `/dev/null`.
+
+Routing, same probe as the previous entry (Flash-Next, reasoning off, four
+samples per phrasing, no tool executed), with the third `[prompt] where` line:
+"ask codex to list the files…", "have the local model summarize the readme…",
+"tell codex to run the tests…" went to `mcp__codex__send` 12 of 12; "look up
+my inference engine project" and the `main.c` edit stayed on
+`mcp__claude__send` 8 of 8; the bridge port stayed on the stack tool 4 of 4.
+
+Tests: `make test-codex`, 18 tests over `tests/fixtures/fake_codex.py`, which
+refuses `--profile` on argv and an open stdin; the sabotage arm fails on
+exactly `test_updates_carry_no_code_unless_asked`.  `voice_push_browser.mjs`
+now pushes a `codex` update and asserts the bubble, the note and the status
+say Codex.  Transport: `vllm:~/.ssh/id_ed25519_voice_codex` (alias
+`codex-codex`) authorized on codex with the forced command
+`python3 /mnt/voice-assistant/tools/mcp_codex.py --codex /usr/local/bin/codex
+--profile q38f --cwd /home/ambudsharma --add-dir /mnt --push`; the hop
+answered `initialize` and `tools/list` from vllm before the config was staged.

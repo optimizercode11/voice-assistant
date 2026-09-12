@@ -39,6 +39,7 @@ generation_seconds = 45
 where = [
   "The user's own projects, repositories and code (the inference engine, everything under /mnt and the home directory on the user's computer) live on the user's computer, which only Claude Code reaches. Any request about them, even just finding a project, reading its README or a file, or summarising it, goes to mcp__claude__send; the files tools cannot see them.",
   "The files tools and search_notes see only this bridge host: the deployed voice-stack tree, its docs, and folders approved on the page.",
+  "Two coding agents run on the user's computer: Claude Code (mcp__claude__send) and Codex on the local Flash-Next model (mcp__codex__send). Use Codex only when the user says Codex or asks for the local model; otherwise use Claude Code.",
 ]
 
 [builtins]
@@ -184,6 +185,27 @@ name = "claude"
 purpose = "the user's own projects, repositories and code live on the user's computer, which only Claude Code reaches: send hands it any request to find, look up, read, summarise, explain or change them (the answer is pushed back and spoken when ready); updates says what it has done since; use detail only when the user asks for specifics"
 command = "ssh"
 args = ["-T", "codex-claude"]
+timeout_seconds = 20
+enabled = true
+
+# Guiding Codex by voice, on the local model (2026-09-12).
+#
+# The same two tools as the `claude` server, folded as mcp__codex__send and
+# mcp__codex__updates, fronting `codex exec` on codex with the `q38f` profile:
+# Qwen3.8-Flash-Next on this host's port 8038, the model that also answers the
+# voice turn.  Same transport (a second single-purpose key, alias
+# `codex-codex`, forced to `python3 .../tools/mcp_codex.py --codex ... --profile
+# q38f --cwd ~ --add-dir /mnt --push`), same push route to the page.  Codex's
+# own sandbox cannot start on codex (bubblewrap is refused by the kernel), so
+# the server runs it with approvals and sandbox bypassed, the operator's
+# decision as for Claude Code.  The model picks between the two agents from
+# the `where` lines above: Codex only when named or when the local model is
+# asked for.  TOOLS.md, "Guiding Codex by voice".
+[[mcp.server]]
+name = "codex"
+purpose = "hand a spoken instruction to Codex, the coding agent on the user's computer that runs on the local Flash-Next model (send), and hear what it has done since (updates); only when the user says Codex or asks for the local model"
+command = "ssh"
+args = ["-T", "codex-codex"]
 timeout_seconds = 20
 enabled = true
 

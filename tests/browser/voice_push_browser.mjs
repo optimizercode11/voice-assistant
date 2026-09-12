@@ -107,6 +107,17 @@ try{
   assert.equal(tts.filter(text=>text.includes('The tests pass')).length,1,'the update went through the TTS path once');
   assert.ok(tts.every(text=>!text.includes('make test')),'the report never reaches the speaker');
   assert.equal(posts.length,0,'speaking an update is not a turn: nothing was sent to the model');
+  // 1b. The same route carries Codex (2026-09-12): the bubble is labelled by the
+  //     server that sent it, and the note and status say Codex, never Claude Code.
+  push({type:'working',server:'codex',instruction:'build it'});
+  await page.waitForFunction(()=>document.querySelectorAll('.message.claude.pending').length===1);
+  assert.equal(await page.locator('.message.claude.pending .role').textContent(),'Codex');
+  push({type:'update',server:'codex',spoken:'The build is green on the local model.',instruction:'build it',is_error:false,seconds:5,activity:{commands:2,files_edited:0,files_read:0,other_tools:0}});
+  await page.waitForFunction(()=>document.querySelectorAll('.message.claude').length===2&&!document.querySelector('.message.claude.pending'));
+  assert.equal(await page.locator('.message.claude .role').last().textContent(),'Codex');
+  assert.match(await page.locator('.message.claude .toolnote').last().textContent(),/Update from Codex · 5 s · 2 commands/);
+  await page.waitForFunction(()=>document.querySelector('#state').textContent==='Ready');
+  assert.equal(tts.filter(text=>text.includes('build is green')).length,1,'the Codex update went through the TTS path once');
 
   // 2. A live conversation.  Push while the reply is PLAYING: the update must
   //    wait for the reply to end, then be spoken before listening resumes.
@@ -115,8 +126,8 @@ try{
   await page.waitForFunction(()=>document.querySelector('#state').textContent==='Speaking',null,{timeout:40000});
   const ttsBeforePush=tts.length;
   push({type:'update',server:'claude',spoken:'I finished the second job while you were talking.',instruction:'second job',is_error:false,seconds:7,activity:{commands:1,files_edited:0,files_read:0,other_tools:0}});
-  assert.equal(await page.locator('.message.claude').count(),1,'an update must not interrupt a reply');
-  await page.waitForFunction(()=>document.querySelectorAll('.message.claude').length===2,null,{timeout:40000});
+  assert.equal(await page.locator('.message.claude').count(),2,'an update must not interrupt a reply');
+  await page.waitForFunction(()=>document.querySelectorAll('.message.claude').length===3,null,{timeout:40000});
   const replyIndex=tts.findIndex((text,index)=>index>=ttsBeforePush-1&&text.includes('You said: Hello there'));
   const updateIndex=tts.findIndex(text=>text.includes('second job'));
   assert.ok(replyIndex>=0&&updateIndex>replyIndex,`the update's speech (${updateIndex}) must come after the reply's (${replyIndex})`);

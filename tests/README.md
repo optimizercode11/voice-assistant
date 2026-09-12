@@ -13,6 +13,7 @@ CUDA_VISIBLE_DEVICES="" python3 tests/retrieval_test.py     # 11 tests   FTS5 in
 CUDA_VISIBLE_DEVICES="" python3 tests/mcp_test.py           # 12 tests   real stdio MCP peer
 CUDA_VISIBLE_DEVICES="" python3 tests/tool_loop_test.py     # 12 tests   the loop, over a real TLS bridge
 CUDA_VISIBLE_DEVICES="" python3 tests/mcp_claude_test.py    # 16 tests   Claude Code session server, over a fake `claude`
+CUDA_VISIBLE_DEVICES="" python3 tests/mcp_codex_test.py     # 18 tests   Codex-on-the-local-model server, over a fake `codex exec --json`
 CUDA_VISIBLE_DEVICES="" python3 tests/events_test.py        #  8 tests   /events: a finished turn pushed through the real bridge
 ```
 

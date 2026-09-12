@@ -282,6 +282,46 @@ codex), and a verbatim path that would let a *tool result* be spoken without
 the local model — measure how faithfully it relays `spoken` first.  (A pushed
 update is spoken without the model, but it is not a tool result: see below.)
 
+### Guiding Codex by voice, on the local model: `tools/mcp_codex.py`
+
+The same two tools, `send` and `updates`, folded as `mcp__codex__send` and
+`mcp__codex__updates`, shipped 2026-09-12 as the MCP server named `codex`.
+Behind them is Codex CLI (`codex exec`) on codex, running the **`q38f`
+profile**: Qwen3.8-Flash-Next on `vllm:8038`, the same server that answers
+the voice turn.  The point is a coding agent that costs nothing per token and
+never leaves the network; the trade is the model.  The speech frame, the
+`SPOKEN:` line asked for at the source, the report as `detail` only when asked,
+`--push` to `/events`: all inherited, the helpers are imported from
+`mcp_claude.py` rather than copied.  What differs is the process shape:
+
+| Codex fact | What the server does |
+|---|---|
+| `codex exec` is one process per turn | One child per instruction.  The first turn's `thread.started` id is kept and every later instruction is `codex exec resume <thread> <prompt>`, so the conversation continues.  A death or a `turn.failed` resets the thread, as a dying Claude child does. |
+| `exec resume` rejects `--profile`, `-C` and `--add-dir` | The profile file `$CODEX_HOME/<name>.config.toml` is read on every spawn and flattened into `-c key=value` overrides passed to **both** forms (`[projects]` trust tables dropped, `--skip-git-repo-check` instead).  Without this a resumed turn would silently run on the user's default profile, a paid remote model.  `--doctor` prints both argv forms. |
+| `codex exec` blocks forever on an open stdin | The child's stdin is `/dev/null`; the prompt is an argument and begins with the speech frame, so it can never parse as a flag. |
+| Events are JSONL: `item.started`/`item.completed` with `command_execution`, `file_change`, `agent_message`, …; `turn.completed`/`turn.failed` | Each item id is counted once (started and completed are one command), `file_change` counts its changes, the last `agent_message` is the reply. |
+| Its sandbox (bubblewrap) cannot start on codex: `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`, every command fails before running | `--access full` (default): `--dangerously-bypass-approvals-and-sandbox`, the operator's decision as for Claude Code.  `--access workspace` keeps Codex's workspace-write sandbox with approvals never asked, for a host where it works. |
+
+The fixture `tests/fixtures/fake_codex.py` speaks the observed JSONL shapes
+and *refuses* the two mistakes the real CLI punishes (`--profile` on argv, an
+open stdin); `make test-codex` drives 18 tests through it, and the sabotage
+arm (`updates` returning the report unasked) goes red on exactly one.
+
+**Transport** is the Claude one again: a second single-purpose key on `vllm`
+(`~/.ssh/id_ed25519_voice_codex`, alias `codex-codex`), authorized on codex
+with `restrict,command="python3 /mnt/voice-assistant/tools/mcp_codex.py --codex
+/usr/local/bin/codex --profile q38f --cwd ~ --add-dir /mnt --push"`.  On codex:
+
+```bash
+python3 tools/mcp_codex.py --doctor --codex /usr/local/bin/codex --profile q38f --cwd ~ --add-dir /mnt --push
+```
+
+**Choosing the agent** is the model's, from a `[prompt] where` line: Codex
+only when the user says Codex or asks for the local model, Claude Code
+otherwise.  On the page an update is labelled by the server that sent it
+(`agentName()` in `chat.js`; `voice_push_browser.mjs` asserts a Codex bubble
+is never shown as Claude Code).
+
 ### Updates that arrive on their own: `/events`
 
 Asking "any news?" was the first version.  Polling was ruled out, so the

@@ -504,7 +504,7 @@ window.addEventListener('storage', event => {
 function message(role, text, original = null, evidence = null) {
   $('messages').querySelector('.empty')?.remove();
   const item = document.createElement('div'); item.className = `message ${role}`;
-  const label = document.createElement('span'); label.className = 'role'; label.textContent = role === 'user' ? 'You' : role === 'claude' ? 'Claude Code' : 'Qwen';
+  const label = document.createElement('span'); label.className = 'role'; label.textContent = role === 'user' ? 'You' : role === 'claude' ? (evidence?.agent || 'Claude Code') : 'Qwen';
   const body = document.createElement('p'); body.textContent = text; item.append(label, body); $('messages').append(item);
   if(original!==null){const note=document.createElement('p');note.className='transcript-note';note.textContent='Speech correction · STT heard: '+original;item.append(note);}
   // Provenance stays visible after the reply: "which of my notes said that" is
@@ -798,6 +798,9 @@ function listen() {
 // open by the browser, reconnected by the browser, and an update is spoken
 // through the same TTS path as a reply.  What is spoken is the line the coding
 // agent wrote for speech, so no code reaches the speaker.
+// Which coding agent spoke: the bridge names the MCP server an update came
+// from, and two of them exist (Claude Code, and Codex on the local model).
+function agentName(server) { return server === 'codex' ? 'Codex' : 'Claude Code'; }
 function connectUpdates() {
   if (updateSource || typeof EventSource !== 'function') return;
   updateSource = new EventSource('/events');
@@ -809,7 +812,7 @@ function connectUpdates() {
     document.querySelector('.message.claude.pending')?.remove();
     $('messages').querySelector('.empty')?.remove();
     const item = document.createElement('div'); item.className = 'message claude pending';
-    const label = document.createElement('span'); label.className = 'role'; label.textContent = 'Claude Code';
+    const label = document.createElement('span'); label.className = 'role'; label.textContent = agentName(notice?.server);
     const body = document.createElement('p'); body.textContent = instruction ? `Working on it: ${instruction}` : 'Working on it…';
     item.append(label, body); $('messages').append(item); $('messages').scrollTop = $('messages').scrollHeight;
   });
@@ -819,13 +822,13 @@ function connectUpdates() {
     if (!spoken) return;
     const activity = update.activity && typeof update.activity === 'object' ? update.activity : {};
     pendingUpdates.push({spoken, detail: typeof update.detail === 'string' ? update.detail.slice(0, 4500) : '', isError: update.is_error === true,
-                         seconds: Number.isFinite(update.seconds) ? update.seconds : null,
+                         seconds: Number.isFinite(update.seconds) ? update.seconds : null, agent: agentName(update.server),
                          commands: Number(activity.commands) || 0, filesEdited: Number(activity.files_edited) || 0});
     drainUpdates();
   });
 }
 function updateNote(update) {
-  const bits = [update.isError ? 'Claude Code stopped' : 'Update from Claude Code'];
+  const bits = [update.isError ? `${update.agent} stopped` : `Update from ${update.agent}`];
   if (update.seconds !== null) bits.push(`${Math.round(update.seconds)} s`);
   if (update.commands) bits.push(`${update.commands} command${update.commands === 1 ? '' : 's'}`);
   if (update.filesEdited) bits.push(`${update.filesEdited} file${update.filesEdited === 1 ? '' : 's'} edited`);
@@ -852,7 +855,7 @@ function noteUpdateInHistory(update) {
   // the last assistant turn as a bracketed note; before any turn it is shown only.
   const last = transcript.at(-1);
   if (!last) return;
-  const note = `\n[Claude Code reported: ${update.spoken}]`;
+  const note = `\n[${update.agent} reported: ${update.spoken}]`;
   if (last.a.length + note.length > MAX_MESSAGE) return;
   transcript = [...transcript.slice(0, -1), {...last, a: last.a + note}];
   history = historyFrom(transcript);
@@ -863,12 +866,12 @@ async function announceUpdate(update) {
   const check = () => {if(id !== epoch || controller.signal.aborted) throw new DOMException('Stopped','AbortError');};
   try {
     document.querySelector('.message.claude.pending')?.remove();
-    message('claude', update.spoken, null, {note: updateNote(update), detail: update.detail});
+    message('claude', update.spoken, null, {note: updateNote(update), detail: update.detail, agent: update.agent});
     noteUpdateInHistory(update);
     saveConversation();
-    setState('synthesizing', 'Claude Code has an update…');
+    setState('synthesizing', `${update.agent} has an update…`);
     await speakReply(update.spoken, controller.signal,
-      () => setState('speaking', active ? 'Claude Code has an update. Press Space to interrupt; listening resumes after.' : 'Claude Code has an update.'));
+      () => setState('speaking', active ? `${update.agent} has an update. Press Space to interrupt; listening resumes after.` : `${update.agent} has an update.`));
     check(); busy = false;
     if (active) listen(); else setState('idle', 'Send another message, or start a voice conversation.');
   } catch (error) {

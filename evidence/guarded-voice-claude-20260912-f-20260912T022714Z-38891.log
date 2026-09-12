@@ -1,0 +1,6 @@
+guarded-run: campaign=voice-claude-20260912-f label=install mode=cpu cpus=24-27
+command: bash -c $'\n    set -euo pipefail\n    live="$HOME/qwen36/voice-stack/voice-tools-20260910"\n    test ! -e rollback\n    for p in 8038/health 8090/health 8095/health; do code=$(curl -s -m 5 -o /dev/null -w "%{http_code}" "http://127.0.0.1:$p"); echo "engine $p -> $code"; test "$code" = 200; done\n    systemctl --user --job-mode=ignore-dependencies stop voice-tools-bridge.service\n    mkdir rollback; rsync -a "$live/" rollback/; touch rollback-complete\n    rsync -aR web tools deploy scripts config README.md ARCHITECTURE.md RUNBOOK.md TOOLS.md PROVENANCE.md tests/README.md .guarded-run "$live/"\n    cd "$live"; python3 tools/voicectl.py --config config/host.toml index build >/dev/null; python3 tools/voicectl.py --config config/host.toml doctor | tail -1'
+engine 8038/health -> 200
+engine 8090/health -> 200
+engine 8095/health -> 200
+doctor: ok

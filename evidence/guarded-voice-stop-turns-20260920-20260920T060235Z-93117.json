@@ -1,0 +1,30 @@
+{
+  "campaign": "voice-stop-turns-20260920",
+  "command": [
+    "bash",
+    "deploy/update-service.sh"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "28-31",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stack/voice-stop-turns-20260920",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-20T06:02:56.170258174Z",
+  "git_head": "e24198e8d2cbfc02d5755ba6f81c2f313aac7860",
+  "inputs": [],
+  "label": "update",
+  "log": "/home/ambudsharma/qwen36/voice-stack/voice-stop-turns-20260920/evidence/guarded-voice-stop-turns-20260920-20260920T060235Z-93117.log",
+  "run_id": "voice-stop-turns-20260920-20260920T060235Z-93117",
+  "schema_version": 2,
+  "source_fingerprint": "55aeaa1fefacad891bbe71217a1871e2e2b709730da4893e4c2165f72dd44807",
+  "started_utc": "2026-09-20T06:02:37.446576555Z",
+  "status": "PASS"
+}

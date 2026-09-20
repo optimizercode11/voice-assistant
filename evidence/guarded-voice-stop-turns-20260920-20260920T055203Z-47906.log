@@ -1,0 +1,23 @@
+guarded-run: campaign=voice-stop-turns-20260920 label=browser-negative mode=cpu cpus=4-7
+command: env PLAYWRIGHT=/tmp/fork-stability-browser-zu50jkow/node_modules/playwright/index.mjs /tmp/fork-stability-browser-zu50jkow/node_modules/node/bin/node tests/browser/voice_recovery_browser.mjs --sabotage
+{
+  heldText: 'Maybe.',
+  heldFlushTimer: 0,
+  active: true,
+  busy: false,
+  epoch: 2,
+  phase: 'listening',
+  voiced: 0,
+  status: 'I heard “Maybe.”. Keep talking, or press Send now.'
+}
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+
+page.waitForFunction: Timeout 6000ms exceeded.
+    at /mnt/data/voice-stop-turns-20260920/tests/browser/voice_recovery_browser.mjs:40:14 {
+  log: [],
+  name: 'TimeoutError'
+}
+
+Node.js v22.23.2

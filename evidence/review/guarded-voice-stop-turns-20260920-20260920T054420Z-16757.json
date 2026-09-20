@@ -1,0 +1,38 @@
+{
+  "campaign": "voice-stop-turns-20260920",
+  "command": [
+    "/tmp/fork-stability-browser-zu50jkow/node_modules/node/bin/node",
+    "/tmp/voice-stability-review-20260920.mjs"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "0-3",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/mnt/data/voice-stop-turns-20260920",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-20T05:44:20.877041423Z",
+  "git_head": "39f6466a44e71b5bf80d2ce9b8a3c00f4c8c2276",
+  "inputs": [
+    {
+      "bytes": 110789,
+      "exists": true,
+      "path": "web/chat.js",
+      "sha256": "96076e5ffa91f67f8f93f4fe0c33fc429e8522f7a82dd8e7db0e417cdf617053",
+      "verification": "current_local"
+    }
+  ],
+  "label": "review-reproduce",
+  "log": "/mnt/data/voice-stop-turns-20260920/evidence/guarded-voice-stop-turns-20260920-20260920T054420Z-16757.log",
+  "run_id": "voice-stop-turns-20260920-20260920T054420Z-16757",
+  "schema_version": 2,
+  "source_fingerprint": "fceb9c829f67c30cc6c50757cd198c2906e27473dcde16d833af433694a1fed1",
+  "started_utc": "2026-09-20T05:44:20.814184520Z",
+  "status": "PASS"
+}

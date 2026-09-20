@@ -1,0 +1,8 @@
+guarded-run: campaign=voice-stop-turns-20260920 label=gpu-acceptance mode=gpu gpu=4 uuid=GPU-343fd1b6-cbc3-c6e0-1ed8-78fcf8d0942e cpus=28-31
+command: python3 -u deploy/voice_stack.py start
+VOICE STACK ACCEPTANCE PASS {"transcript": "The quick brown fox jumps over the lazy dog.", "reply": "That\u2019s a classic pangram\u2014it uses every letter of the alphabet. Did you want me to check something specific, or were you just testing the audio?", "english": {"frames": 187800, "rms": 0.0490695212419417}, "hindi": {"frames": 42600, "rms": 0.11133724070648571}, "context_correction": ["Four.", "Five."], "asr": {"backend": "qasr", "engine": {"audio_ms": 2.105, "prefill_ms": 6.241, "decode_ms": 26.184, "total_ms": 34.631, "audio_rows": 35, "prompt_len": 50, "steps": 14, "gemm_wide": 0, "gemm_narrow": 0, "gemv": 0, "weight_bytes_read": 0}, "frontend_ms": 2.945, "frames": 272}, "tls_verified": true, "source": "55aeaa1fefacad891bbe71217a1871e2e2b709730da4893e4c2165f72dd44807", "pgid": 3238372, "gpu": 4, "llm_url": "http://127.0.0.1:8080", "time": 1789884173.1138546}
+VOICE STACK READY supervisor= 3238379
+GPU CONTAINMENT: CLEAN -- new process identities were confined to GPU-343fd1b6-cbc3-c6e0-1ed8-78fcf8d0942e
+  attributed pid=3238767 uuid=GPU-343fd1b6-cbc3-c6e0-1ed8-78fcf8d0942e via=live_ps (pgid=3238372)
+  attributed pid=3239092 uuid=GPU-343fd1b6-cbc3-c6e0-1ed8-78fcf8d0942e via=live_ps (pgid=3238372)
+  0 unattributed; 2 owned process(es) attributed; 842 (pid,pgid) observations

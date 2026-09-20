@@ -1,0 +1,5 @@
+guarded-run: campaign=voice-stop-turns-20260920 label=review-reproduce mode=cpu cpus=0-3
+command: /tmp/fork-stability-browser-zu50jkow/node_modules/node/bin/node /tmp/voice-stability-review-20260920.mjs
+chat.js SHA256 96076e5ffa91f67f8f93f4fe0c33fc429e8522f7a82dd8e7db0e417cdf617053
+REPRODUCED: non-final autoplay block leaves pending playback with no resume control
+REPRODUCED: plain JSON stream fallback sends two POSTs for one request

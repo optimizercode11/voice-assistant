@@ -1,0 +1,8 @@
+guarded-run: campaign=voice-stop-turns-20260920 label=reproduce mode=cpu cpus=0-3
+command: python3 evidence/reproduce-turn-stall.py
+42 {'complete': False, 'reason': 'filler-only', 'extra_silence_ms': 900, 'words': 0, 'speech_ms': 800, 'open': False, 'hold': True}
+Traceback (most recent call last):
+  File "/mnt/data/voice-stop-turns-20260920/evidence/reproduce-turn-stall.py", line 9, in <module>
+    assert not verdict['hold'], 'A completed numeric/multilingual answer waits indefinitely for another utterance'
+           ^^^^^^^^^^^^^^^^^^^
+AssertionError: A completed numeric/multilingual answer waits indefinitely for another utterance

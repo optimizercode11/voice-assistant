@@ -1,0 +1,33 @@
+{
+  "campaign": "voice-stop-turns-20260920",
+  "command": [
+    "env",
+    "PLAYWRIGHT=/tmp/fork-stability-browser-zu50jkow/node_modules/playwright/index.mjs",
+    "/tmp/fork-stability-browser-zu50jkow/node_modules/node/bin/node",
+    "tests/browser/voice_recovery_browser.mjs",
+    "--sabotage"
+  ],
+  "command_exit_code": 1,
+  "containment": {
+    "cpus": "4-7",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/mnt/data/voice-stop-turns-20260920",
+  "expected_exit_code": 1,
+  "finished_utc": "2026-09-20T05:52:10.642820177Z",
+  "git_head": "39f6466a44e71b5bf80d2ce9b8a3c00f4c8c2276",
+  "inputs": [],
+  "label": "browser-negative",
+  "log": "/mnt/data/voice-stop-turns-20260920/evidence/guarded-voice-stop-turns-20260920-20260920T055203Z-47906.log",
+  "run_id": "voice-stop-turns-20260920-20260920T055203Z-47906",
+  "schema_version": 2,
+  "source_fingerprint": "fd1cc7f6b4876dae8365861fdd7fc80714e7b2ff175f5edf65de1145730c7da8",
+  "started_utc": "2026-09-20T05:52:03.598018203Z",
+  "status": "PASS"
+}

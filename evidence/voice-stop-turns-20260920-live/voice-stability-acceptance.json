@@ -1,0 +1,32 @@
+{
+  "stop_reply": {
+    "text": "Done. Claude Code is stopped. The microphone stays on.",
+    "usage": {
+      "prompt_tokens": 7676,
+      "completion_tokens": 30,
+      "total_tokens": 7706
+    },
+    "tools": [
+      {
+        "name": "mcp__claude__stop",
+        "ok": true,
+        "ms": 81,
+        "source": "mcp:claude",
+        "call_id": "call_51_0"
+      }
+    ],
+    "sources": [],
+    "controls": {}
+  },
+  "hindi_transcript": "\u092e\u0941\u091d\u0947 \u0938\u092e\u092f \u092c\u0924\u093e\u0913\u0964",
+  "turn": {
+    "complete": true,
+    "reason": "use acoustic endpoint for numeric or non-Latin speech",
+    "extra_silence_ms": 0,
+    "words": 3,
+    "speech_ms": null,
+    "discard": false,
+    "open": false,
+    "hold": false
+  }
+}

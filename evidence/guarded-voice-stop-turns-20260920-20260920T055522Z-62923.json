@@ -1,0 +1,32 @@
+{
+  "campaign": "voice-stop-turns-20260920",
+  "command": [
+    "make",
+    "test-turn",
+    "test-claude",
+    "NODE=/tmp/fork-stability-browser-zu50jkow/node_modules/node/bin/node"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "0-3",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/mnt/data/voice-stop-turns-20260920",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-20T05:55:34.771370990Z",
+  "git_head": "39f6466a44e71b5bf80d2ce9b8a3c00f4c8c2276",
+  "inputs": [],
+  "label": "positive",
+  "log": "/mnt/data/voice-stop-turns-20260920/evidence/guarded-voice-stop-turns-20260920-20260920T055522Z-62923.log",
+  "run_id": "voice-stop-turns-20260920-20260920T055522Z-62923",
+  "schema_version": 2,
+  "source_fingerprint": "55aeaa1fefacad891bbe71217a1871e2e2b709730da4893e4c2165f72dd44807",
+  "started_utc": "2026-09-20T05:55:22.728360535Z",
+  "status": "PASS"
+}

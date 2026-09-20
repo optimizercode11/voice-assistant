@@ -1,0 +1,3 @@
+guarded-run: campaign=voice-stop-turns-20260920 label=prepare mode=cpu cpus=28-31
+command: python3 deploy/prepare-service.py
+Speech asset hashes verified; staged source fingerprint: fd1cc7f6b4876dae8365861fdd7fc80714e7b2ff175f5edf65de1145730c7da8

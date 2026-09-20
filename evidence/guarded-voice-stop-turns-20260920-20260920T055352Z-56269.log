@@ -1,0 +1,81 @@
+guarded-run: campaign=voice-stop-turns-20260920 label=negative mode=cpu cpus=4-7
+command: python3 evidence/negative-turn-sabotage.py
+test_noise_is_discarded_but_english_fragments_are_kept (turn_control_test.CompletedShortAnswers.test_noise_is_discarded_but_english_fragments_are_kept) ... ok
+test_numeric_and_non_latin_answers_do_not_wait_for_another_clip (turn_control_test.CompletedShortAnswers.test_numeric_and_non_latin_answers_do_not_wait_for_another_clip) ... 
+  test_numeric_and_non_latin_answers_do_not_wait_for_another_clip (turn_control_test.CompletedShortAnswers.test_numeric_and_non_latin_answers_do_not_wait_for_another_clip) (text='42') ... FAIL
+  test_numeric_and_non_latin_answers_do_not_wait_for_another_clip (turn_control_test.CompletedShortAnswers.test_numeric_and_non_latin_answers_do_not_wait_for_another_clip) (text='3.14') ... FAIL
+  test_numeric_and_non_latin_answers_do_not_wait_for_another_clip (turn_control_test.CompletedShortAnswers.test_numeric_and_non_latin_answers_do_not_wait_for_another_clip) (text='२०') ... FAIL
+  test_numeric_and_non_latin_answers_do_not_wait_for_another_clip (turn_control_test.CompletedShortAnswers.test_numeric_and_non_latin_answers_do_not_wait_for_another_clip) (text='मुझे समय बताओ।') ... FAIL
+  test_numeric_and_non_latin_answers_do_not_wait_for_another_clip (turn_control_test.CompletedShortAnswers.test_numeric_and_non_latin_answers_do_not_wait_for_another_clip) (text='हाँ') ... FAIL
+  test_numeric_and_non_latin_answers_do_not_wait_for_another_clip (turn_control_test.CompletedShortAnswers.test_numeric_and_non_latin_answers_do_not_wait_for_another_clip) (text='你好。') ... FAIL
+  test_numeric_and_non_latin_answers_do_not_wait_for_another_clip (turn_control_test.CompletedShortAnswers.test_numeric_and_non_latin_answers_do_not_wait_for_another_clip) (text='ありがとう') ... FAIL
+  test_numeric_and_non_latin_answers_do_not_wait_for_another_clip (turn_control_test.CompletedShortAnswers.test_numeric_and_non_latin_answers_do_not_wait_for_another_clip) (text='今何時？') ... FAIL
+
+======================================================================
+FAIL: test_numeric_and_non_latin_answers_do_not_wait_for_another_clip (turn_control_test.CompletedShortAnswers.test_numeric_and_non_latin_answers_do_not_wait_for_another_clip) (text='42')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/voice-stop-turns-20260920/tests/turn_control_test.py", line 70, in test_numeric_and_non_latin_answers_do_not_wait_for_another_clip
+    self.assertTrue(result['complete'])
+AssertionError: False is not true
+
+======================================================================
+FAIL: test_numeric_and_non_latin_answers_do_not_wait_for_another_clip (turn_control_test.CompletedShortAnswers.test_numeric_and_non_latin_answers_do_not_wait_for_another_clip) (text='3.14')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/voice-stop-turns-20260920/tests/turn_control_test.py", line 70, in test_numeric_and_non_latin_answers_do_not_wait_for_another_clip
+    self.assertTrue(result['complete'])
+AssertionError: False is not true
+
+======================================================================
+FAIL: test_numeric_and_non_latin_answers_do_not_wait_for_another_clip (turn_control_test.CompletedShortAnswers.test_numeric_and_non_latin_answers_do_not_wait_for_another_clip) (text='२०')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/voice-stop-turns-20260920/tests/turn_control_test.py", line 70, in test_numeric_and_non_latin_answers_do_not_wait_for_another_clip
+    self.assertTrue(result['complete'])
+AssertionError: False is not true
+
+======================================================================
+FAIL: test_numeric_and_non_latin_answers_do_not_wait_for_another_clip (turn_control_test.CompletedShortAnswers.test_numeric_and_non_latin_answers_do_not_wait_for_another_clip) (text='मुझे समय बताओ।')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/voice-stop-turns-20260920/tests/turn_control_test.py", line 70, in test_numeric_and_non_latin_answers_do_not_wait_for_another_clip
+    self.assertTrue(result['complete'])
+AssertionError: False is not true
+
+======================================================================
+FAIL: test_numeric_and_non_latin_answers_do_not_wait_for_another_clip (turn_control_test.CompletedShortAnswers.test_numeric_and_non_latin_answers_do_not_wait_for_another_clip) (text='हाँ')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/voice-stop-turns-20260920/tests/turn_control_test.py", line 70, in test_numeric_and_non_latin_answers_do_not_wait_for_another_clip
+    self.assertTrue(result['complete'])
+AssertionError: False is not true
+
+======================================================================
+FAIL: test_numeric_and_non_latin_answers_do_not_wait_for_another_clip (turn_control_test.CompletedShortAnswers.test_numeric_and_non_latin_answers_do_not_wait_for_another_clip) (text='你好。')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/voice-stop-turns-20260920/tests/turn_control_test.py", line 70, in test_numeric_and_non_latin_answers_do_not_wait_for_another_clip
+    self.assertTrue(result['complete'])
+AssertionError: False is not true
+
+======================================================================
+FAIL: test_numeric_and_non_latin_answers_do_not_wait_for_another_clip (turn_control_test.CompletedShortAnswers.test_numeric_and_non_latin_answers_do_not_wait_for_another_clip) (text='ありがとう')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/voice-stop-turns-20260920/tests/turn_control_test.py", line 70, in test_numeric_and_non_latin_answers_do_not_wait_for_another_clip
+    self.assertTrue(result['complete'])
+AssertionError: False is not true
+
+======================================================================
+FAIL: test_numeric_and_non_latin_answers_do_not_wait_for_another_clip (turn_control_test.CompletedShortAnswers.test_numeric_and_non_latin_answers_do_not_wait_for_another_clip) (text='今何時？')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/voice-stop-turns-20260920/tests/turn_control_test.py", line 70, in test_numeric_and_non_latin_answers_do_not_wait_for_another_clip
+    self.assertTrue(result['complete'])
+AssertionError: False is not true
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.002s
+
+FAILED (failures=8)

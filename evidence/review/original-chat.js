@@ -1,0 +1,1917 @@
+'use strict';
+const $ = id => document.getElementById(id);
+const player = $('player');
+let resumePlayback = null;
+function setTheme(theme){
+  document.documentElement.dataset.theme=theme;
+  const next=theme==='dark'?'light':'dark';
+  $('theme').textContent=next==='light'?'Light mode':'Dark mode';
+  $('theme').setAttribute('aria-label','Switch to '+next+' mode');
+  try{localStorage.setItem('voice-theme',theme);}catch(_){}
+}
+$('theme').onclick=()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark');
+setTheme(document.documentElement.dataset.theme==='light'?'light':'dark');
+let active = false, busy = false, ready = false, epoch = 0, abort = null;
+let stream = null, context = null, source = null, analyser = null, recorder = null, raf = 0;
+let history = [], voiceList = [], audioURL = null, secureURL = null, phase = 'idle', streaming = false;
+let fragmentHolds = 0, heldText = '';
+// The one control a reply may carry: "stop listening after this".  It is set
+// only from a tool result the bridge aggregated into the answer, and it is
+// cleared only by a person -- the Resume button, the space bar, or ending the
+// conversation.  Nothing the model says later can clear it, because a paused
+// microphone hears nothing for the model to say it about.
+let paused = false, pauseReason = '';
+// Asleep (2026-09-12): the microphone closed because nobody spoke for the
+// silence timeout.  Unlike `paused`, which means "be quiet", being asleep only
+// means "nobody is talking": an agent's finished update is still spoken, and
+// listening returns after it, after the next reply, or with Resume or Space.
+let asleep = false, silenceFrom = 0;
+// Updates the bridge pushes on its own (a finished Claude Code turn).  They
+// queue here until it is safe to speak: never over a reply, never over a
+// person mid-sentence, and never while the microphone is paused.
+let updateSource = null, pendingUpdates = [], updateTimer = 0, micLastVoiceAt = 0;
+// Wake word.  While `dormant` the microphone is open but a clip is acted on
+// only if it begins with the wake phrase; after the quiet period with no turn
+// the page goes dormant again on its own.  Only speech is gated: typing and
+// Send now are a person's explicit acts.
+let dormant = false, dormantTimer = 0, lastTurnAt = 0;   // lastTurnAt: the quiet clock runs from the last real turn
+let bargeRaf = 0, bargeVoiced = 0, bargeLast = 0, playbackStartedAt = 0, playbackEndedAt = 0;
+// A reply is played as several clips (one per sentence).  For the barge-in gate
+// the whole reply is ONE playback: the settle window opens once, when the first
+// clip starts, and closes once, when the last clip ends.  Bumping the
+// timestamps at every sentence seam re-closed the gate for 350 ms per sentence
+// and reset the voiced counter each time, which is what made interruption fail
+// on multi-sentence replies after the per-sentence pipeline landed (d753f87).
+let replySeam = false;   // true between the first clip's start and the last clip's end
+const canRecord = !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
+// ------------------------------------------------------------ barge-in (AEC3)
+// The browser's own echo canceller -- libwebrtc AEC3 -- is ALREADY requested:
+// getUserMedia below passes echoCancellation:true.  What stopped you interrupting
+// was never the echo.  This page mutes the microphone for the whole reply
+// (clearCapture sets track.enabled=false), so AEC3 has nothing to cancel and
+// nobody is listening.  Opening the mic is the easy half; the hard half is not
+// mistaking the reply for your voice.
+//
+// Two facts make that safe enough to try.  The reply is already tapped for the
+// orb glow (playbackAnalyser), so the page knows how loud it is being right now
+// -- echo is a scaled copy of that, and a person talking over it is energy ABOVE
+// it.  And getSettings().echoCancellation reports whether the canceller is
+// actually engaged: if the browser says false -- Bluetooth, some Linux capture
+// paths -- barge-in is refused outright rather than left to guess.
+//
+// The bias is deliberate.  A missed interruption costs one more try; a false one
+// makes the assistant talk over you and then act on words nobody said.
+// BARGE-GATE-BEGIN: extracted verbatim by tests/barge_gate_test.mjs.
+const BARGE = {
+  settleMs: 350,   // AEC3 re-converges when playback starts AND when it stops
+  floor: 0.020,    // never trust mic energy below this, echo or no echo
+  echoGain: 0.5,   // assume ~6 dB of return loss, not AEC3's best case
+  holdMs: 220,     // sustained near-end speech before the reply is cut
+};
+function nearEndSpeech(mic, playback, sincePlayback) {
+  // Fail closed on every input.  A playback level we cannot measure is an echo
+  // we cannot cancel, and the safe answer to "was that me or them?" is then
+  // "probably me -- do not act on it".  The first version of this coerced a
+  // missing playback level to zero, which silently degraded the gate to "any
+  // loud microphone interrupts", i.e. the assistant interrupting itself.
+  if (typeof mic !== 'number' || !Number.isFinite(mic) || mic <= 0) return false;
+  if (typeof playback !== 'number' || !Number.isFinite(playback) || playback < 0) return false;
+  if (typeof sincePlayback !== 'number' || !Number.isFinite(sincePlayback) || sincePlayback < 0) return false;
+  if (sincePlayback < BARGE.settleMs) return false;           // still converging
+  // playback === 0 is not junk, it is a gap between words: there is no echo to
+  // cancel right now, so the absolute floor alone decides.
+  return mic > Math.max(BARGE.floor, playback * BARGE.echoGain);
+}
+// BARGE-GATE-END
+function setState(value, message) {
+  phase = value; $('orb').dataset.state = value;
+  $('state').textContent = ({idle:'Ready',listening:'Listening',transcribing:'Hearing you',thinking:'Thinking',synthesizing:'Finding its voice',speaking:'Speaking',paused:'Paused',error:'Something went wrong'})[value] || value;
+  if (message !== undefined) $('status').textContent = message;
+  $('start').hidden = active; $('start').disabled = !ready || busy || (!canRecord && !secureURL);
+  $('end').hidden = !active && !busy;
+  $('finish').hidden = value !== 'listening';
+  $('interrupt').hidden = !busy;
+  $('resume-listening').hidden = !((paused || asleep) && active && !busy);
+  $('send').disabled = !ready || busy;
+  $('language').disabled = busy; $('voice').disabled = busy;
+  $('corrections').disabled=busy;$('corrections-enabled').disabled=busy;
+  renderTurnCount();
+}
+function shortPath(path) { const parts = String(path).split('/').filter(Boolean); return parts.slice(-2).join('/'); }
+// ------------------------------------------------------------- chat history
+// The full archive is stored per conversation in IndexedDB. Compaction changes
+// only the context sent to Qwen; no quota handler deletes chats or old turns.
+const CHAT_INDEX = 'voice-chats';
+const CHAT_PREFIX = 'voice-chat-';
+const LEGACY_KEY = 'voice-chat';
+const CHAT_DB = 'voice-conversations';
+const MAX_TITLE = 90;
+const MAX_MESSAGE = 8000;
+const MAX_SUMMARY = 16000;
+let transcript = [], conversationId = '', conversationTitle = '', conversationAt = 0;
+let conversationSummary = '', summaryThrough = 0, conversationRevision = '';
+let saving = true, savePending = false, chatsOpen = false, chatDB = null;
+const chatRecords = new Map();
+const unsavedChats = new Set();
+let storageChannel = null;
+try { storageChannel = new BroadcastChannel('voice-conversations'); } catch (_) {}
+function newConversationId() {
+  try { if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID(); } catch (_) {}
+  return `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+function byteLength(text) {
+  // A Hindi reply is three bytes a character, so a character count would let a
+  // byte budget be exceeded by a third and turn a save into a quota exception.
+  try { return new TextEncoder().encode(text).length; } catch (_) { return text.length * 3; }
+}
+function usableTurn(value) {
+  // Storage is attacker-writable: a hand-edited or half-written record must not
+  // be able to author an assistant turn or push a request over the bridge's own
+  // per-message ceiling.  Anything unusable is dropped, never repaired.
+  if (!value || typeof value !== 'object') return null;
+  const q = typeof value.q === 'string' ? value.q.trim() : '';
+  const a = typeof value.a === 'string' ? value.a.trim() : '';
+  if (!q || !a) return null;                       // a half turn is not a turn
+  const turn = {q: q.slice(0, MAX_MESSAGE), a: a.slice(0, MAX_MESSAGE)};
+  if (typeof value.original === 'string' && value.original.trim())
+    turn.original = value.original.slice(0, MAX_MESSAGE);
+  if (Array.isArray(value.tools)) turn.tools = value.tools.slice(0, 8)
+    .filter(tool => tool && typeof tool.name === 'string')
+    .map(tool => ({name: tool.name.slice(0, 120), ok: tool.ok !== false, ms: Number(tool.ms) || 0}));
+  if (Array.isArray(value.sources)) turn.sources = value.sources.slice(0, 8)
+    .filter(source => source && typeof source.path === 'string')
+    .map(source => ({path: source.path.slice(0, 400),
+                     heading: typeof source.heading === 'string' ? source.heading.slice(0, 200) : ''}));
+  return turn;
+}
+function turnFrom(question, answer, original, evidence) {
+  return usableTurn({q: question, a: answer, original,
+                     tools: evidence?.tools, sources: evidence?.sources});
+}
+function messagesOf(turn) {
+  return [{role: 'user', content: turn.q}, {role: 'assistant', content: turn.a}];
+}
+function historyFrom(turns) { return turns.slice(summaryThrough).flatMap(messagesOf); }
+function chatKey(id) { return CHAT_PREFIX + id; }
+function titleFor(turns) {
+  // The first thing the person actually said, not a summary: a summary would be
+  // a second model call, and would be wrong in a way nobody can argue with.
+  const first = turns.find(turn => turn && turn.q);
+  if (!first) return 'New conversation';
+  const flat = first.q.replace(/\s+/g, ' ').trim();
+  return flat.length > MAX_TITLE ? flat.slice(0, MAX_TITLE - 1) + '\u2026' : flat;
+}
+function whenIs(millis) {
+  const stamp = Number(millis);
+  if (!Number.isFinite(stamp) || stamp <= 0) return 'unknown time';
+  const minutes = Math.floor((Date.now() - stamp) / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} day${days === 1 ? '' : 's'} ago`;
+  try { return new Date(stamp).toLocaleDateString(); } catch (_) { return 'a while ago'; }
+}
+function parseRecord(raw, expectId) {
+  if (typeof raw !== 'string' || !raw) return null;
+  let parsed = null;
+  try { parsed = JSON.parse(raw); } catch (_) { return null; }
+  if (!parsed || typeof parsed !== 'object' || typeof parsed.id !== 'string') return null;
+  if (expectId && parsed.id !== expectId) return null;
+  if (!Array.isArray(parsed.turns)) return null;
+  const turns = parsed.turns.map(usableTurn).filter(Boolean);
+  // A summary is usable only with its exact archive boundary. Reject the pair
+  // if sanitizing the archive changed its positions or either field is invalid.
+  const summaryValid = typeof parsed.summary === 'string' && parsed.summary.trim()
+    && parsed.summary.length <= MAX_SUMMARY && Number.isInteger(parsed.summaryThrough)
+    && parsed.summaryThrough > 0 && parsed.summaryThrough <= turns.length
+    && turns.length === parsed.turns.length;
+  return {id: parsed.id, turns,
+          title: typeof parsed.title === 'string' && parsed.title.trim() ? parsed.title.slice(0, MAX_TITLE) : titleFor(turns),
+          at: Number(parsed.at) || 0, revision: typeof parsed.revision === 'string' ? parsed.revision : '',
+          summary: summaryValid ? parsed.summary.trim() : '',
+          summaryThrough: summaryValid ? parsed.summaryThrough : 0};
+}
+function readConversation(id) { return chatRecords.get(id) || null; }
+function readIndex() {
+  return [...chatRecords.values()].map(record => ({id: record.id, title: record.title,
+    at: record.at, turns: record.turns.length})).sort((a, b) => b.at - a.at);
+}
+function databaseTransaction(mode, act) {
+  return new Promise((resolve, reject) => {
+    if (!chatDB) { reject(new Error('Browser storage is unavailable')); return; }
+    const tx = chatDB.transaction('chats', mode);
+    const request = act(tx.objectStore('chats'));
+    tx.oncomplete = () => resolve(request?.result);
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error('Browser storage is unavailable'));
+  });
+}
+function currentRecord() {
+  return {v: 3, id: conversationId, title: conversationTitle || titleFor(transcript),
+    at: conversationAt, turns: transcript.slice(), summary: conversationSummary, summaryThrough, revision: conversationRevision};
+}
+async function saveConversation() {
+  if (!transcript.length) return true;
+  if (!conversationTitle) conversationTitle = titleFor(transcript);
+  conversationAt = Math.max(Date.now(), conversationAt + 1);
+  const record = currentRecord(), originalId = record.id, expectedRevision = conversationRevision;
+  record.revision = newConversationId(); conversationRevision = record.revision;
+  chatRecords.set(record.id, record);  // a failed save remains switchable in this tab
+  unsavedChats.add(record.id);
+  savePending = true;
+  replaceHash(`#/chat/${encodeURIComponent(record.id)}`);
+  renderTurnCount(); renderChatList();
+  try {
+    // Summary and covered-through position share the same atomic record write.
+    const result = await new Promise((resolve, reject) => {
+      if (!chatDB) {reject(new Error('Browser storage is unavailable')); return;}
+      const tx = chatDB.transaction('chats', 'readwrite'), store = tx.objectStore('chats');
+      const request = store.get(originalId);
+      let savedRecord = record, existing = null;
+      request.onsuccess = () => {
+        existing = request.result;
+        // Read-and-write inside one transaction: two tabs can never both pass
+        // the revision check and silently overwrite one another's conversation.
+        if ((existing?.revision || '') !== expectedRevision || (!existing && expectedRevision)) {
+          savedRecord = {...record, id: newConversationId(), title: record.title + ' (this tab)'};
+        }
+        store.put(savedRecord);
+      };
+      tx.oncomplete = () => resolve({savedRecord, existing});
+      tx.onerror = tx.onabort = () => reject(tx.error || new Error('Browser storage is unavailable'));
+    });
+    if (result.savedRecord.id !== originalId) {
+      if (result.existing) chatRecords.set(originalId, parseRecord(JSON.stringify(result.existing)));
+      else chatRecords.delete(originalId);
+      unsavedChats.delete(originalId);
+      chatRecords.set(result.savedRecord.id, result.savedRecord);
+      if (conversationId === originalId && conversationRevision === record.revision) {
+        conversationId = result.savedRecord.id; conversationTitle = result.savedRecord.title;
+        replaceHash(`#/chat/${encodeURIComponent(conversationId)}`);
+        $('compact-status').textContent = 'Another tab changed this chat. Your changes were saved as a separate conversation.';
+      }
+    } else if (chatRecords.get(record.id) === record) unsavedChats.delete(record.id);
+    storageChannel?.postMessage({id: result.savedRecord.id});
+    renderChatList();
+    return true;
+  } catch (_) {
+    record.revision = expectedRevision;
+    if (conversationId === originalId) conversationRevision = expectedRevision;
+    return false;  // preserve the full transcript and offer an export; never evict
+  } finally {
+    if (record.revision === conversationRevision) {
+      savePending = false;
+      saving = !unsavedChats.has(conversationId);
+      renderTurnCount();
+    }
+  }
+}
+async function deleteConversation(id) {
+  if (!readConversation(id)) return false;
+  try {
+    if (chatDB) await databaseTransaction('readwrite', store => store.delete(id));
+    else throw new Error('Browser storage is unavailable; deletion was not saved.');
+    chatRecords.delete(id); unsavedChats.delete(id);
+    storageChannel?.postMessage({id});
+    renderChatList();
+    return true;
+  } catch (error) { setState('idle', error.message); return false; }
+}
+async function initializeChatStore() {
+  // Keep legacy keys intact until every corresponding destination write commits.
+  // This also makes an interrupted migration safe to retry on the next reload.
+  const legacy = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key === LEGACY_KEY || (key.startsWith(CHAT_PREFIX) && key !== 'voice-chat-probe')) {
+        const raw = localStorage.getItem(key), record = parseRecord(raw);
+        if (record?.turns.length) legacy.push({key, raw, record});
+      }
+    }
+  } catch (_) {}
+  try {
+    chatDB = await new Promise((resolve, reject) => {
+      const request = indexedDB.open(CHAT_DB, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore('chats', {keyPath: 'id'});
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+      request.onblocked = () => reject(new Error('Browser storage is blocked'));
+    });
+    chatDB.onversionchange = () => {chatDB.close(); chatDB = null; saving = false; renderTurnCount();};
+    const stored = await databaseTransaction('readonly', store => store.getAll());
+    for (const value of stored) {
+      const record = parseRecord(JSON.stringify(value));
+      if (record) chatRecords.set(record.id, record);
+    }
+    for (const entry of legacy) {
+      if (chatRecords.has(entry.record.id)) continue; // preserve a conflicting legacy copy
+      const imported = await new Promise((resolve, reject) => {
+        const tx = chatDB.transaction('chats', 'readwrite'), store = tx.objectStore('chats');
+        const request = store.get(entry.record.id);
+        let inserted = false, existing = null;
+        request.onsuccess = () => {
+          existing = request.result;
+          if (!existing) {store.add(entry.record); inserted = true;}
+        };
+        tx.oncomplete = () => resolve({inserted, existing});
+        tx.onerror = tx.onabort = () => reject(tx.error || new Error('Migration failed'));
+      });
+      if (!imported.inserted) {
+        const existing = parseRecord(JSON.stringify(imported.existing), entry.record.id);
+        if (existing) chatRecords.set(existing.id, existing);
+        continue; // another tab won the transaction; retain the legacy copy
+      }
+      chatRecords.set(entry.record.id, entry.record);
+      // Re-read before deleting: another tab may have just updated the old key.
+      if (localStorage.getItem(entry.key) === entry.raw) localStorage.removeItem(entry.key);
+    }
+  } catch (_) {
+    for (const {record} of legacy) if (!chatRecords.has(record.id)) {
+      chatRecords.set(record.id, record); unsavedChats.add(record.id);
+    }
+    saving = false;
+  }
+}
+if (storageChannel) storageChannel.onmessage = async event => {
+  const id = event.data?.id;
+  if (typeof id !== 'string' || id === conversationId || unsavedChats.has(id)) return;
+  try {
+    const value = await databaseTransaction('readonly', store => store.get(id));
+    const record = value && parseRecord(JSON.stringify(value), id);
+    if (record) chatRecords.set(id, record); else chatRecords.delete(id);
+    renderChatList();
+  } catch (_) {}
+};
+function renderTranscript() {
+  const host = $('messages');
+  host.replaceChildren();
+  if (!transcript.length) {
+    // The empty state is markup in the document, so a repaint that clears the
+    // list has to put it back -- otherwise a fresh chat and a wiped chat both
+    // stare at a blank panel instead of asking what is on your mind.
+    const empty = document.createElement('div'); empty.className = 'empty';
+    const ask = document.createElement('strong'); ask.textContent = 'What\u2019s on your mind?';
+    const hint = document.createElement('p'); hint.textContent = 'Start talking, or write a message below.';
+    empty.append(ask, hint); host.append(empty);
+    return;
+  }
+  for (const turn of transcript) {
+    message('user', turn.q, turn.original ?? null);
+    message('assistant', turn.a, null, {tools: turn.tools, sources: turn.sources});
+  }
+}
+function renderTurnCount() {
+  const turns = transcript.length;
+  const where = savePending ? 'saving in this browser' : !saving ? 'not saved in this browser — export to keep a copy'
+    : turns ? 'saved in this browser' : 'nothing saved yet';
+  const remembered = summaryThrough ? `${summaryThrough} turns summarized + ${turns - summaryThrough} recent turns in context`
+    : turns ? 'all turns in context' : '';
+  $('turns').textContent = [turns ? `${turns} ${turns === 1 ? 'turn' : 'turns'}` : 'No conversation yet', where, remembered].filter(Boolean).join(' · ');
+  $('compact').disabled = !ready || busy || turns - summaryThrough < 3;
+  $('export-chat').disabled = turns === 0;
+  $('compact-summary').hidden = !conversationSummary;
+  $('compact-summary-text').textContent = conversationSummary;
+}
+async function compactConversation() {
+  if (busy || !ready || transcript.length - summaryThrough < 3) return;
+  const recent = transcript.length - summaryThrough;
+  const keep = recent > 6 ? 6 : 2;
+  // Bound one request by the bridge's message/body limits. Very large archives
+  // compact incrementally; the status shows how many turns remain verbatim.
+  let through = summaryThrough;
+  let bytes = byteLength(conversationSummary) + 256;
+  const messages = [];
+  for (let i = summaryThrough; i < transcript.length - keep && messages.length < 4000; i++) {
+    const pair = messagesOf(transcript[i]);
+    const size = byteLength(JSON.stringify(pair)) + 2;
+    if (bytes + size > 3 * 1024 * 1024) break;
+    messages.push(...pair); bytes += size; through = i + 1;
+  }
+  const payload = {messages, ...(conversationSummary ? {summary: conversationSummary} : {})};
+  const chatId = conversationId, id = ++epoch, controller = new AbortController();
+  abort = controller; busy = true; clearCapture(); player.pause();
+  setState('thinking', 'Compacting older turns. Your full transcript stays in this browser.');
+  $('compact-status').textContent = 'Compacting… Use Interrupt to cancel.';
+  try {
+    const result = await responseJSON('/chat/compact', JSON.stringify(payload), controller.signal);
+    if (id !== epoch || chatId !== conversationId || controller.signal.aborted) return;
+    if (typeof result.summary !== 'string' || !result.summary.trim() || result.summary.length > MAX_SUMMARY
+        || result.finish_reason === 'length' || result.truncated === true)
+      throw new Error('Compaction returned an empty or incomplete summary. Previous context was kept.');
+    conversationSummary = result.summary.trim(); summaryThrough = through;
+    history = historyFrom(transcript);
+    const saved = await saveConversation();
+    if (id !== epoch) return;
+    $('compact-status').textContent = saved
+      ? 'Compacted. Summaries can omit details; the full transcript is preserved below.'
+      : 'Compacted in this tab only. Export this conversation now to keep the summary and full transcript.';
+  } catch (error) {
+    if (id !== epoch || chatId !== conversationId) return;
+    $('compact-status').textContent = error.name === 'AbortError' ? 'Compaction cancelled. Previous context was kept.'
+      : `Compaction failed: ${error.message} Previous context was kept.`;
+  } finally {
+    if (id === epoch) {
+      abort = null; busy = false;
+      if (active) listen(); else setState('idle', 'Send another message when ready.');
+    }
+  }
+}
+$('compact').onclick = compactConversation;
+$('export-chat').onclick = () => {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(currentRecord(), null, 2)], {type: 'application/json'}));
+  const link = document.createElement('a'); link.href = url; link.download = `conversation-${conversationId}.json`;
+  link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+function chatRow(entry) {
+  const row = document.createElement('div'); row.className = 'chat-entry'; row.dataset.id = entry.id;
+  const open = document.createElement('button');
+  open.type = 'button'; open.className = 'chat-open';
+  open.append(document.createElement('span'));
+  open.firstChild.textContent = entry.title || 'Untitled conversation';
+  open.title = entry.title || 'Untitled conversation';
+  if (entry.id === conversationId) open.setAttribute('aria-current', 'true');
+  open.onclick = () => openChat(entry.id);
+  const meta = document.createElement('span'); meta.className = 'chat-meta';
+  meta.textContent = `${entry.turns} ${entry.turns === 1 ? 'turn' : 'turns'} \u00b7 ${whenIs(entry.at)}`;
+  const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'chat-remove';
+  remove.textContent = '\u00d7';
+  remove.setAttribute('aria-label', `Delete this conversation: ${entry.title || 'untitled'}`);
+  remove.onclick = async () => {
+    // Deleting the chat you are looking at has to land somewhere, so it starts a
+    // fresh one instead of leaving a panel full of bubbles that no longer exist.
+    if (!window.confirm(`Delete this conversation?\n\n${entry.title || 'Untitled'}\n\nIt is gone from this browser and cannot be recovered.`)) return;
+    if (!await deleteConversation(entry.id)) return;
+    if (entry.id === conversationId) startFreshChat(); else setState('idle', 'Conversation deleted.');
+  };
+  row.append(open, meta, remove);
+  return row;
+}
+function renderChatList() {
+  const card = $('chats'), toggle = $('chats-toggle');
+  if (!card || !toggle) return;
+  const entries = readIndex(true);
+  toggle.textContent = `Chats (${entries.length})`;
+  card.hidden = !chatsOpen;
+  if (!chatsOpen) return;
+  card.replaceChildren();
+  if (!entries.length) {
+    const none = document.createElement('p'); none.className = 'chat-none';
+    none.textContent = 'No saved conversations yet.';
+    card.append(none);
+    return;
+  }
+  for (const entry of entries) card.append(chatRow(entry));
+}
+function setChatsOpen(open) {
+  chatsOpen = open === undefined ? !chatsOpen : open === true;
+  $('chats-toggle')?.setAttribute('aria-expanded', String(chatsOpen));
+  renderChatList();
+}
+function chatIdFromHash() {
+  const match = /^#\/chat\/(.+)$/.exec(location.hash || '');
+  return match ? decodeURIComponent(match[1]) : '';
+}
+function openChat(id) {
+  const stored = readConversation(id);
+  if (!stored) {
+    // The record may have been explicitly deleted in another tab.
+    renderChatList();
+    setState('idle', 'That conversation is no longer in this browser.');
+    return 0;
+  }
+  if (busy) interruptReply();   // never swap the transcript out from under a live turn
+  heldText = ''; fragmentHolds = 0;   // a half-heard sentence belongs to the chat it was said in
+  saving = !!chatDB && !unsavedChats.has(id);
+  savePending = false;
+  conversationId = stored.id;
+  conversationTitle = stored.title;
+  conversationAt = stored.at; conversationRevision = stored.revision || '';
+  transcript = stored.turns.slice();
+  conversationSummary = stored.summary || ''; summaryThrough = stored.summaryThrough || 0;
+  $('compact-status').textContent = '';
+  history = historyFrom(transcript);
+  renderTranscript();
+  renderTurnCount();
+  if (chatsOpen) renderChatList();
+  const wanted = `#/chat/${encodeURIComponent(stored.id)}`;
+  if (location.hash !== wanted) replaceHash(wanted);
+  renderChatList();
+  return transcript.length;
+}
+function replaceHash(hash) {
+  // Replacing rather than assigning means browsing back through chats does not
+  // stack up an entry for every click.  `history` is this page's message array,
+  // so the browser's own object has to be named in full.
+  try { window.history.replaceState(null, '', hash || location.pathname + location.search); }
+  catch (_) { if (hash) location.hash = hash; }
+}
+function startFreshChat() {
+  // A fresh chat is only an id until its first turn is committed: nothing is
+  // written, so pressing "New chat" twice cannot fill the list with blanks, and
+  // the old conversation stays in the list untouched.
+  if (transcript.length || !conversationId) {
+    conversationId = newConversationId();
+    conversationTitle = '';
+    conversationAt = 0;
+    transcript = [];
+    history = [];
+    conversationSummary = ''; summaryThrough = 0; conversationRevision = '';
+  }
+  saving = !!chatDB; savePending = false;
+  $('compact-status').textContent = '';
+  heldText = ''; fragmentHolds = 0;
+  renderTranscript();
+  renderTurnCount();
+  renderChatList();
+  replaceHash('');
+}
+function restoreChat() {
+  const wanted = chatIdFromHash();
+  if (wanted && readConversation(wanted)) return openChat(wanted);
+  const first = readIndex()[0];
+  if (first) return openChat(first.id);
+  startFreshChat();
+  return 0;
+}
+window.addEventListener('hashchange', () => {
+  // Back/forward and pasted links land on the chat they name; an unknown or
+  // empty fragment leaves the conversation on screen alone.
+  const wanted = chatIdFromHash();
+  if (wanted && wanted !== conversationId && readConversation(wanted)) openChat(wanted);
+});
+
+function message(role, text, original = null, evidence = null) {
+  $('messages').querySelector('.empty')?.remove();
+  const item = document.createElement('div'); item.className = `message ${role}`;
+  const label = document.createElement('span'); label.className = 'role'; label.textContent = role === 'user' ? 'You' : role === 'claude' ? (evidence?.agent || 'Claude Code') : 'Qwen';
+  const body = document.createElement('p'); body.textContent = text; item.append(label, body); $('messages').append(item);
+  if(original!==null){const note=document.createElement('p');note.className='transcript-note';note.textContent='Speech correction · STT heard: '+original;item.append(note);}
+  // Provenance stays visible after the reply: "which of my notes said that" is
+  // the question a person asks next, and it must not require asking again.
+  if (evidence?.note) {
+    const note = document.createElement('p'); note.className = 'toolnote'; note.textContent = evidence.note; item.append(note);
+  }
+  // The coding agent's own report, verbatim, as text: a person reading wants
+  // the raw output, the speaker never gets it, and Markdown from a tool is
+  // not something this page renders as HTML.
+  if (evidence?.detail) {
+    const report = document.createElement('details'); report.className = 'report';
+    const summary = document.createElement('summary'); summary.textContent = 'Full report';
+    const pre = document.createElement('pre'); pre.textContent = evidence.detail;
+    report.append(summary, pre); item.append(report);
+  }
+  if (evidence?.tools?.length) {
+    const used = document.createElement('p'); used.className = 'toolnote';
+    used.textContent = 'Looked up · ' + evidence.tools.map(tool =>
+      tool.name === 'pause_listening' ? 'paused listening' :
+      `${tool.name.replace(/^mcp__[^_]+__/, '')}${tool.ok === false ? ' (did not work)' : ''} ${tool.ms}ms`).join(' · ');
+    item.append(used);
+  }
+  if (evidence?.sources?.length) {
+    const from = document.createElement('p'); from.className = 'sources';
+    from.textContent = 'From your notes · ' + evidence.sources.map(source =>
+      source.heading ? `${source.heading} · ${shortPath(source.path)}` : shortPath(source.path)).join(' · ');
+    item.append(from);
+  }
+  $('messages').scrollTop = $('messages').scrollHeight;
+}
+function clearCapture() {
+  cancelAnimationFrame(raf); raf = 0;
+  clearTimeout(dormantTimer); dormantTimer = 0;
+  stopBargeWatch();
+  if (recorder) { recorder.onstop = null; recorder.ondataavailable = null; if (recorder.state !== 'inactive') recorder.stop(); recorder = null; }
+  if (stream) stream.getTracks().forEach(track => {track.enabled = false;});
+  $('level').style.width = '0%';
+  setGlow(0);
+}
+// ---------------------------------------------------------------- the orb glow
+// --glow is the orb's single source of truth for "I am hearing/speaking right
+// now".  It is written once per animation frame from measured audio energy, so
+// a silent room leaves it at zero instead of breathing on a timer.  Attack is
+// fast (a syllable should light up immediately) and release is slow (a word's
+// consonant gaps should not strobe).
+let glowRaf = 0, glowSmooth = 0, glowArmed = false, mediaSource = null, playbackAnalyser = null;
+function setGlow(target) {
+  const wanted = Math.max(0, Math.min(1, Number(target) || 0));
+  glowSmooth = wanted > glowSmooth ? glowSmooth + (wanted - glowSmooth) * .55
+                                   : glowSmooth * .86 + wanted * .14;
+  if (glowSmooth < .004) glowSmooth = 0;
+  $('orb').style.setProperty('--glow', glowSmooth.toFixed(3));
+}
+function rmsOf(samples, scale) {
+  let sum = 0;
+  for (let i = 0; i < samples.length; i++) { const x = samples[i] * scale; sum += x * x; }
+  return Math.sqrt(sum / samples.length);
+}
+function startPlaybackGlow() {
+  if (!playbackAnalyser) return;              // no graph, no glow: audio still plays
+  stopPlaybackGlow();
+  const bytes = new Uint8Array(playbackAnalyser.fftSize);
+  const step = () => {
+    if (!gapless.playing && (player.paused || player.ended)) { glowRaf = 0; setGlow(0); return; }
+    playbackAnalyser.getByteTimeDomainData(bytes);
+    setGlow(rmsOf(bytes.map ? Array.from(bytes, v => (v - 128) / 128) : bytes, 1) * 4.5);
+    glowRaf = requestAnimationFrame(step);
+  };
+  glowRaf = requestAnimationFrame(step);
+}
+function stopPlaybackGlow() { if (glowRaf) cancelAnimationFrame(glowRaf); glowRaf = 0; }
+async function armGlow() {
+  // Routing the reply through WebAudio is the only way to see its waveform, and
+  // it is also the only way to *lose* it: a MediaElementSource attached to a
+  // suspended context feeds a graph that never renders, so the reply goes
+  // silent.  So build it only from a user gesture, only once the context says
+  // it is running, and only ever once per media element.  Anything less
+  // ambitious leaves the element on the native output -- no glow beats no audio.
+  if (glowArmed) return;
+  try {
+    const Audio = window.AudioContext || window.webkitAudioContext;
+    if (!Audio || !window.AnalyserNode) return;
+    if (!context || context.state === 'closed') context = new Audio();
+    const ctx = context;
+    // createMediaElementSource is a method of the AudioContext, not of the media
+    // element, so this capability check is one no browser can pass.  Asking the
+    // element made armGlow return before building the graph, which silently
+    // killed three things at once: the glow while the assistant speaks, the
+    // echo reference barge-in needs, and barge-in itself.
+    if (typeof ctx.createMediaElementSource !== 'function') return;
+    if (ctx.state === 'suspended') await ctx.resume();
+    if (ctx.state !== 'running') return;
+    glowArmed = true;
+    mediaSource = ctx.createMediaElementSource(player);
+    playbackAnalyser = ctx.createAnalyser(); playbackAnalyser.fftSize = 1024;
+    mediaSource.connect(playbackAnalyser); playbackAnalyser.connect(ctx.destination);
+  } catch (_) {
+    // Already armed by an earlier gesture, or the browser refused: either way
+    // the reply keeps playing through the element's own output.
+    if (!playbackAnalyser) { glowArmed = false; mediaSource = null; }
+  }
+}
+function releaseAudioContext() {
+  stopPlaybackGlow(); setGlow(0);
+  source?.disconnect(); source = null; analyser = null;
+  mediaSource = null; playbackAnalyser = null; glowArmed = false;
+  if (context) {context.close().catch(()=>{}); context = null;}
+}
+function replaceAudio(blob) {
+  if (audioURL) URL.revokeObjectURL(audioURL);
+  audioURL = URL.createObjectURL(blob); player.src = audioURL;
+}
+// ------------------------------------------------ gapless playback (2026-09-11)
+// Swapping the <audio> element's src between the clips of one reply costs a
+// media load, a decode and a restart at every seam: 50-150 ms of dead air and
+// an audible jolt between sentences, which is what "the pauses sound
+// unnatural" meant.  With the reply's AudioContext already built for the glow,
+// each clip is decoded the moment its bytes arrive and scheduled to start at
+// the sample where the previous one ends.  The element path stays as the
+// fallback when the context is not running (no gesture yet, or refused).
+const gapless = {
+  playing: false, sources: new Set(), nextAt: 0, clips: 0,
+  available() { return !!(context && context.state === 'running' && playbackAnalyser); },
+  async decode(blob) { return context.decodeAudioData(await blob.arrayBuffer()); },
+  remainingMs() { return context ? Math.max(0, (this.nextAt - context.currentTime) * 1000) : 0; },
+  play(buffer, signal, onStart) {
+    return new Promise((resolve, reject) => {
+      const src = context.createBufferSource(); src.buffer = buffer;
+      src.connect(playbackAnalyser);
+      const now = context.currentTime;
+      const at = Math.max(now + 0.01, this.nextAt);
+      this.nextAt = at + buffer.duration;
+      this.sources.add(src); this.clips++;
+      let done = false;
+      const settle = () => { this.sources.delete(src); if (!this.sources.size) this.playing = false; signal?.removeEventListener('abort', cancel); };
+      const finish = () => { if (done) return; done = true; settle(); resolve(); };
+      const cancel = () => { if (done) return; done = true; try { src.stop(); } catch (_) {} settle(); reject(new DOMException('Stopped', 'AbortError')); };
+      src.onended = finish;
+      signal?.addEventListener('abort', cancel, {once: true});
+      src.start(at);
+      setTimeout(() => { if (!done) { this.playing = true; onStart?.(); } }, Math.max(0, (at - now) * 1000));
+    });
+  },
+  stop() { for (const src of this.sources) { try { src.stop(); } catch (_) {} } this.sources.clear(); this.playing = false; this.nextAt = 0; },
+};
+window.__speechStats = {gapless: 0, element: 0};   // read by the browser suites
+function primeAudio() {
+  // Safari authorizes this same native media element in the initiating gesture.
+  const wav = new ArrayBuffer(4844), d = new DataView(wav);
+  const str = (at, value) => [...value].forEach((c,i) => d.setUint8(at+i,c.charCodeAt(0)));
+  str(0,'RIFF');d.setUint32(4,4836,true);str(8,'WAVE');str(12,'fmt ');d.setUint32(16,16,true);
+  d.setUint16(20,1,true);d.setUint16(22,1,true);d.setUint32(24,24000,true);d.setUint32(28,48000,true);d.setUint16(32,2,true);d.setUint16(34,16,true);str(36,'data');d.setUint32(40,4800,true);
+  replaceAudio(new Blob([wav],{type:'audio/wav'})); player.play().catch(()=>{});
+}
+function stopSession(note = 'Conversation ended. Start again whenever you like.') {
+  if ($('compact-status').textContent.startsWith('Compacting')) $('compact-status').textContent = 'Compaction cancelled. Previous context was kept.';
+  stopBargeWatch(); stopThinkingAloud(); replySeam = false;
+  heldText = ''; fragmentHolds = 0; paused = false; pauseReason = ''; dormant = false;
+  active = false; epoch++; abort?.abort(); abort = null; busy = false;
+  clearCapture(); player.pause(); gapless.stop(); stopPlaybackGlow(); setGlow(0);
+  if (stream) {stream.getTracks().forEach(track=>track.stop()); stream = null;}
+  source?.disconnect(); source = null; analyser = null;
+  // The AudioContext deliberately survives: the reply's glow is wired with
+  // createMediaElementSource, which may only be called once per element ever,
+  // so closing the context here would silently give up on it for good.
+  setState('idle', note);
+}
+async function responseJSON(url, body, signal, headers) {
+  const response = await fetch(url,{method:'POST',body,signal,
+    headers:{...(typeof body==='string'?{'Content-Type':'application/json'}:{}),...(headers||{})}});
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || 'The request failed. Please try again.');
+  return result;
+}
+async function responseProgress(url, body, signal, onEvent) {
+  // The bridge owns the tool loop, so one request can take several generations.
+  // Progress arrives as newline-delimited JSON so the page can say so out loud;
+  // a server without tools keeps replying with one plain JSON object.
+  const response = await fetch(url, {method: 'POST', body, signal,
+    headers: {'Content-Type': 'application/json', 'Accept': 'application/x-ndjson'}});
+  const type = response.headers.get('Content-Type') || '';
+  if (!type.includes('x-ndjson')) return responseJSON(url, body, signal);
+  const reader = response.body.getReader(), decoder = new TextDecoder();
+  let buffer = '', answer = null;
+  for (;;) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, {stream: true});
+    let at;
+    while ((at = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, at).trim(); buffer = buffer.slice(at + 1);
+      if (!line) continue;
+      let event; try { event = JSON.parse(line); } catch (_) { continue; }
+      if (event.type === 'answer') answer = event;
+      else if (event.type === 'error') throw new Error(event.error || 'The reply failed. Please try again.');
+      else onEvent?.(event);
+    }
+  }
+  if (!answer) throw new Error('The reply ended before it finished. Please try again.');
+  return answer;
+}
+// Every path that would reopen the microphone goes through listen(), so the
+// pause is enforced here and nowhere else: a reply that ended, an interrupted
+// reply, a refused reply, a replayed clip -- all of them ask to listen, and all
+// of them are told to hold instead.  The microphone track stays in the stream
+// (getUserMedia is not re-asked on resume) but is disabled, which is the same
+// muting the page already does during a reply.
+function holdListening() {
+  clearCapture(); player.pause(); busy = false;
+  if (stream) stream.getTracks().forEach(track=>{track.enabled=false;});
+  $('level').style.width = '0%'; setGlow(0);
+  if (paused) {
+    const why = pauseReason ? ` (${pauseReason})` : '';
+    setState('paused', `Paused${why}. Qwen is not listening and will not take a turn. Press Resume listening, or Space, to continue; typing still works.`);
+  } else {
+    setState('paused', `Quiet for ${silenceSeconds()} s, so I stopped listening. Press Resume listening or Space, or type; I listen again after the next reply or update.`);
+  }
+}
+function resumeListening() {
+  if (!paused && !asleep) return;
+  paused = false; asleep = false; pauseReason = '';
+  if (active && !busy) listen();
+  else setState(active ? phase : 'idle', 'Listening resumes after this reply.');
+  drainUpdates();   // whatever finished while the microphone was paused is spoken now, not never
+}
+function listen() {
+  if (!active || !stream) return;
+  if (paused || asleep) { holdListening(); return; }
+  // The seam after a reply, before the microphone reopens, is the one moment
+  // that is certainly nobody's turn: whatever Claude Code finished meanwhile
+  // is said here, and listening resumes after it.
+  if (pendingUpdates.length && performance.now() - micLastVoiceAt >= UPDATE_QUIET_MS) { clearTimeout(updateTimer); updateTimer = 0; announceUpdate(pendingUpdates.shift()); return; }
+  clearCapture(); player.pause(); stream.getTracks().forEach(track=>{track.enabled=true;});
+  const mime = ['audio/webm;codecs=opus','audio/mp4','audio/webm','audio/ogg;codecs=opus'].find(value=>MediaRecorder.isTypeSupported(value));
+  const rec = new MediaRecorder(stream,mime?{mimeType:mime}:{}); recorder = rec;
+  const chunks = []; let bytes = 0, voiced = 0, lastVoice = 0, lastTick = performance.now(), started = lastTick;
+  const thisEpoch = epoch;
+  rec.ondataavailable = event => { if (event.data.size) {chunks.push(event.data);bytes+=event.data.size;} if (bytes>20*1024*1024) stopSession('Recording is too large. Please try a shorter message.'); };
+  rec.onerror = () => stopSession('Microphone recording failed. Try again or type your message.');
+  rec.onstop = () => {
+    if (!active || thisEpoch !== epoch) return;
+    recorder = null; cancelAnimationFrame(raf); stream.getTracks().forEach(track=>{track.enabled=false;});
+    if (!chunks.length || (voiced < 120 && !rec.sendNow)) {listen.continuing = true; listen(); return;}   // the same silence goes on
+    runTurn(new Blob(chunks,{type:rec.mimeType || 'audio/webm'}), rec.sendNow === true, voiced);
+  };
+  if (!listen.continuing) silenceFrom = performance.now();   // the silence clock runs from when listening began, or the last voice
+  listen.continuing = false;
+  rec.start(250); busy = false;
+  setState('listening', dormant ? `Waiting for “${wakePhrase()}”. Say it first, and I will answer.` : 'I’m listening. A short pause sends your message.');
+  // Awake and nothing happening: after the quiet period, go back to waiting
+  // for the name.  clearCapture() cancels this, so a turn that starts (even
+  // one that is then dropped or held) restarts the clock from the next listen().
+  clearTimeout(dormantTimer); dormantTimer = 0;
+  // Measured from the last turn, not from this listen(): a clip that turned out
+  // to be nothing (no speech, or a hold) must not keep the assistant awake.
+  if (wakeWanted() && !dormant) dormantTimer = setTimeout(() => {
+    dormantTimer = 0;
+    if (active && !busy && phase === 'listening' && wakeWanted()) { dormant = true; setState('listening', `Gone quiet. Say “${wakePhrase()}” to continue.`); }
+  }, Math.max(250, wakeQuietMs() - (performance.now() - lastTurnAt)));
+  // AEC3 is still re-converging right after a reply, and the tail of that reply
+  // is the likeliest thing to be mistaken for your voice -- it is the assistant
+  // answering itself.  Charge the settle window only while the reply is actually
+  // still settling.  playbackEndedAt is a timestamp, not a flag: reading it as a
+  // flag made every later clip pay 350 ms of dead endpointing forever after the
+  // first reply, which is patience charged to turns that earned none.
+  const sincePlayback = playbackEndedAt ? performance.now() - playbackEndedAt : Infinity;
+  let settleUntil = sincePlayback < BARGE.settleMs
+    ? performance.now() + (BARGE.settleMs - sincePlayback) : 0;
+  const samples = new Float32Array(analyser.fftSize);
+  function tick() {
+    if (recorder !== rec || rec.state !== 'recording') return;
+    analyser.getFloatTimeDomainData(samples);
+    const rms = Math.sqrt(samples.reduce((sum,x)=>sum+x*x,0)/samples.length), now=performance.now();
+    $('level').style.width = `${Math.min(100,rms*1000)}%`;
+    setGlow(rms * 7);                       // same measurement, one shared meter
+    if (now < settleUntil) {raf = requestAnimationFrame(tick); return;}
+    if (rms > .015) {voiced += Math.min(100,now-lastTick);lastVoice=now;micLastVoiceAt=now;}
+    lastTick=now;
+    // Nobody has spoken for the silence timeout: close the microphone and go to
+    // sleep (not while the wake word is on: waiting for the name IS listening
+    // to silence).  The clip is dropped as speechless, and listen() then holds.
+    const quietMs = silenceMs();
+    if (quietMs && !wakeWanted() && voiced < 180 && now - Math.max(silenceFrom, micLastVoiceAt) >= quietMs) { asleep = true; rec.stop(); return; }
+    // 20 s, not the engine's 30 s ceiling: measured against known ground truth,
+// a 19.5 s upload keeps 96% of its words and a 29.3 s upload keeps 19% -- the
+// engine returns its first sentence and then degenerates.  Stopping earlier
+// loses the end of a long sentence; stopping here loses almost all of it.
+    // The window stays a flat 1000 ms deliberately. Lengthening it for short
+    // utterances looks like the fix for "I" -- one word followed by a pause is
+    // more often a comma than a period -- but it charges that delay to every
+    // short reply, including a real "Yes.", and it is not needed: the cut is no
+    // longer the bug. What was broken is what happened *after* the cut, so see
+    // the carry-below and turn_control._should_hold.
+    if ((voiced >= 180 && now-lastVoice > 1000) || now-started > 20000) {rec.stop();return;}
+    raf = requestAnimationFrame(tick);
+  }
+  raf = requestAnimationFrame(tick);
+}
+// ---------------------------------------------------------------- pushed updates
+// The bridge speaks first exactly once per finished Claude Code turn, over
+// /events (server-sent events).  Nothing here polls: the connection is held
+// open by the browser, reconnected by the browser, and an update is spoken
+// through the same TTS path as a reply.  What is spoken is the line the coding
+// agent wrote for speech, so no code reaches the speaker.
+// Which coding agent spoke: the bridge names the MCP server an update came
+// from, and two of them exist (Claude Code, and Codex on the local model).
+function agentName(server) { return server === 'codex' ? 'Codex' : 'Claude Code'; }
+// The agent console (2026-09-12): the raw output of a Claude Code or Codex turn
+// as it happens -- every command, edit, tool call and reply, one clipped line
+// each, from the bridge's `trace` events.  It is a window, not a voice: nothing
+// here is ever spoken, and a line arriving while the page speaks changes
+// nothing about the speech.  Bounded, newest at the bottom, cleared by hand.
+const CONSOLE_MAX_LINES = 400;
+function consoleLine(agent, kind, line) {
+  const box = $('console'), log = $('console-log'), note = $('console-note');
+  if (!box || !log) return;
+  const row = document.createElement('div'); row.className = `line ${kind}`;
+  const who = document.createElement('span'); who.className = 'agent'; who.textContent = `${agent} `;
+  const what = document.createElement('span'); what.className = 'k'; what.textContent = `${kind}: `;
+  row.append(who, what, document.createTextNode(line));
+  log.append(row);
+  while (log.childElementCount > CONSOLE_MAX_LINES) log.firstElementChild.remove();
+  if (box.hidden) { box.hidden = false; box.open = true; }
+  if (note) note.textContent = `${log.childElementCount} line${log.childElementCount === 1 ? '' : 's'}`;
+  log.scrollTop = log.scrollHeight;
+}
+$('console-clear')?.addEventListener('click', event => {
+  event.preventDefault(); event.stopPropagation();          // a click on Clear must not fold the panel
+  $('console-log').replaceChildren(); $('console-note').textContent = '';
+});
+function connectUpdates() {
+  if (updateSource || typeof EventSource !== 'function') return;
+  updateSource = new EventSource('/events');
+  updateSource.addEventListener('trace', event => {
+    let trace; try { trace = JSON.parse(event.data); } catch (_) { return; }
+    const line = typeof trace?.line === 'string' ? trace.line.slice(0, 400) : '';
+    if (!line.trim()) return;
+    consoleLine(agentName(trace.server), typeof trace.kind === 'string' ? trace.kind.slice(0, 16) : 'text', line);
+  });
+  updateSource.addEventListener('working', event => {
+    // The agent has the job.  Shown, not spoken: a person waiting wants to see
+    // that the instruction landed, not to be told so out loud.
+    let notice; try { notice = JSON.parse(event.data); } catch (_) { return; }
+    const instruction = typeof notice?.instruction === 'string' ? notice.instruction.trim().slice(0, 200) : '';
+    consoleLine(agentName(notice?.server), 'instruction', instruction || '(none)');
+    document.querySelector('.message.claude.pending')?.remove();
+    $('messages').querySelector('.empty')?.remove();
+    const item = document.createElement('div'); item.className = 'message claude pending';
+    const label = document.createElement('span'); label.className = 'role'; label.textContent = agentName(notice?.server);
+    const body = document.createElement('p'); body.textContent = instruction ? `Working on it: ${instruction}` : 'Working on it…';
+    item.append(label, body); $('messages').append(item); $('messages').scrollTop = $('messages').scrollHeight;
+  });
+  updateSource.addEventListener('update', event => {
+    let update; try { update = JSON.parse(event.data); } catch (_) { return; }
+    const spoken = typeof update?.spoken === 'string' ? update.spoken.trim().slice(0, 600) : '';
+    if (!spoken) return;
+    const activity = update.activity && typeof update.activity === 'object' ? update.activity : {};
+    consoleLine(agentName(update.server), update.is_error === true ? 'error' : 'done', spoken);
+    pendingUpdates.push({spoken, detail: typeof update.detail === 'string' ? update.detail.slice(0, 4500) : '', isError: update.is_error === true,
+                         seconds: Number.isFinite(update.seconds) ? update.seconds : null, agent: agentName(update.server),
+                         commands: Number(activity.commands) || 0, filesEdited: Number(activity.files_edited) || 0});
+    drainUpdates();
+  });
+}
+function updateNote(update) {
+  const bits = [update.isError ? `${update.agent} stopped` : `Update from ${update.agent}`];
+  if (update.seconds !== null) bits.push(`${Math.round(update.seconds)} s`);
+  if (update.commands) bits.push(`${update.commands} command${update.commands === 1 ? '' : 's'}`);
+  if (update.filesEdited) bits.push(`${update.filesEdited} file${update.filesEdited === 1 ? '' : 's'} edited`);
+  return bits.join(' · ');
+}
+// When is it safe to speak?  Not over a reply or a turn in progress (busy), not
+// while the person is talking (the endpointer heard a voice within 1.5 s), and
+// never while the microphone is paused: paused means "be quiet", and the update
+// waits for Resume.  The retry timer exists only while something is pending.
+// Quiet for as long as the endpointer needs to call a turn finished: if the
+// microphone would have cut here, the person has stopped talking.
+const UPDATE_QUIET_MS = 1000;
+function drainUpdates() {
+  clearTimeout(updateTimer); updateTimer = 0;
+  if (!pendingUpdates.length) return;
+  if (paused) return;
+  const talking = active && phase === 'listening' && performance.now() - micLastVoiceAt < UPDATE_QUIET_MS;
+  if (busy || talking) { updateTimer = setTimeout(drainUpdates, 500); return; }
+  announceUpdate(pendingUpdates.shift());
+}
+function noteUpdateInHistory(update) {
+  // Qwen must know what Claude Code said, or "tell it to also do X" has no
+  // referent.  The note says the user already heard it: measured 2026-09-12, a
+  // bare "[Claude Code reported: ...]" was re-read to the user as news, and once
+  // imitated ("[Codex reported: ...]" written into a reply and spoken).  History alternates roles and a turn is q/a, so the update rides on
+  // the last assistant turn as a bracketed note; before any turn it is shown only.
+  const last = transcript.at(-1);
+  if (!last) return;
+  const note = `\n[${update.agent} reported this and the user already heard it spoken: ${update.spoken}]`;
+  if (last.a.length + note.length > MAX_MESSAGE) return;
+  transcript = [...transcript.slice(0, -1), {...last, a: last.a + note}];
+  history = historyFrom(transcript);
+}
+async function announceUpdate(update) {
+  asleep = false;                      // an update wakes the page: it is spoken, then listening returns
+  clearCapture(); player.pause(); busy = true;
+  const id = ++epoch, controller = new AbortController(); abort = controller;
+  const check = () => {if(id !== epoch || controller.signal.aborted) throw new DOMException('Stopped','AbortError');};
+  try {
+    document.querySelector('.message.claude.pending')?.remove();
+    message('claude', update.spoken, null, {note: updateNote(update), detail: update.detail, agent: update.agent});
+    noteUpdateInHistory(update);
+    saveConversation();
+    setState('synthesizing', `${update.agent} has an update…`);
+    await speakReply(update.spoken, controller.signal,
+      () => setState('speaking', active ? `${update.agent} has an update. Press Space to interrupt; listening resumes after.` : `${update.agent} has an update.`));
+    check(); busy = false;
+    if (active) listen(); else setState('idle', 'Send another message, or start a voice conversation.');
+  } catch (error) {
+    if (id !== epoch) return;
+    busy = false;
+    if (active) listen(); else setState('idle', error.name === 'AbortError' ? 'Update interrupted.' : error.message);
+  } finally {
+    if (id === epoch) abort = null;
+    drainUpdates();
+  }
+}
+function bargeWanted() {
+  const box = $('barge-in');
+  return !(box && box.checked === false);              // on unless switched off
+}
+function bargeAvailable() {
+  // Chromium reports whether the canceller is actually engaged.  A Bluetooth
+  // output or a raw Linux capture path answers false, and on those devices the
+  // assistant really would hear itself -- so refuse instead of guessing.
+  const settings = stream?.getAudioTracks?.()[0]?.getSettings?.();
+  return settings ? settings.echoCancellation === true : false;
+}
+function stopBargeWatch() {
+  if (bargeRaf) cancelAnimationFrame(bargeRaf);
+  bargeRaf = 0; bargeVoiced = 0;
+}
+function startBargeWatch() {
+  // Already watching and still speaking: keep the loop and its voiced counter.
+  // Restarting per clip discarded an interruption that spanned a sentence seam.
+  if (bargeRaf && phase === 'speaking') return true;
+  stopBargeWatch();
+  if (!active || !analyser || !bargeWanted()) return false;
+  if (!playbackAnalyser) {
+    // Without the glow's WebAudio tap there is no reference signal, and a gate
+    // with no reference is a loudness trigger wearing a security costume.
+    const note = $('barge-note');
+    if (note) note.textContent = 'Unavailable: the reply is not routed through WebAudio.';
+    return false;
+  }
+  if (!bargeAvailable()) {
+    // Say it out loud rather than failing quietly: "it would not let me
+    // interrupt" is a far worse mystery than a device that says it cannot
+    // cancel its own echo.
+    const note = $('barge-note');
+    if (note) note.textContent = 'Unavailable on this audio device: no echo cancellation.';
+    return false;
+  }
+  // Re-entrant on purpose.  A reply is now played as several clips, and the
+  // gate has to survive the seam between them; a frame where the element is
+  // briefly paused makes the loop bail out, so it must be safe to start again.
+  // The whole point: capture stays open while the reply plays.
+  stream.getTracks().forEach(track => { track.enabled = true; });
+  const samples = new Float32Array(analyser.fftSize);
+  const bytes = playbackAnalyser ? new Uint8Array(playbackAnalyser.fftSize) : null;
+  bargeLast = performance.now();
+  const step = () => {
+    if (!active || phase !== 'speaking') { stopBargeWatch(); return; }
+    const now = performance.now();
+    analyser.getFloatTimeDomainData(samples);
+    const mic = Math.sqrt(samples.reduce((sum, x) => sum + x * x, 0) / samples.length);
+    let playback = 0;
+    if (bytes && (gapless.playing || (!player.paused && !player.ended))) {
+      playbackAnalyser.getByteTimeDomainData(bytes);
+      playback = rmsOf(Array.from(bytes, value => (value - 128) / 128), 1);
+    }
+    // Whichever happened last: AEC3 re-converges on a stop as well as a start.
+    const since = now - Math.max(playbackStartedAt, playbackEndedAt);
+    if (nearEndSpeech(mic, playback, since)) bargeVoiced += Math.min(100, now - bargeLast);
+    else bargeVoiced = 0;
+    bargeLast = now;
+    if (bargeVoiced >= BARGE.holdMs) { stopBargeWatch(); interruptReply(); return; }
+    bargeRaf = requestAnimationFrame(step);
+  };
+  bargeRaf = requestAnimationFrame(step);
+  return true;
+}
+// ------------------------------------------------------ thinking aloud
+// A tool round costs a second full generation, so the gap between the last
+// word of the question and the first word of the answer can be several seconds
+// of nothing.  Silence there is indistinguishable from a hang -- the user
+// cannot tell "it is reading your notes" from "it died" -- so say which it is,
+// in the same voice, and get out of the way the moment the reply is ready.
+//
+// Two rules keep this honest.  It never claims more than is happening: the
+// wording comes from the tool the server actually reported running, and the
+// fallback is deliberately generic.  And it never delays the answer: the clip
+// is fetched in parallel with the generation, dropped if the answer wins the
+// race, and stopped mid-syllable if the answer arrives while it is playing.
+const THINK = {afterMs: 900};
+const THINK_LINES = {
+  search_notes: 'Let me check your notes.',
+  fetch_url: 'Let me look that up.',
+  request_directory: 'I need permission for that folder first.',
+  mcp__stack__health: 'Let me check how the stack is doing.',
+};
+let thinkTimer = 0, thinkToken = 0, thinkSpoken = false, thinkPlaying = false;
+
+// ---------------------------------------------------------------- wake word
+function wakeWanted() { const box = $('wake-enabled'); return !!(box && box.checked); }
+function wakePhrase() { return String($('wake-word').value || '').trim().slice(0, 40) || 'Qwen'; }
+function wakeQuietMs() {
+  const seconds = Number($('wake-quiet').value);
+  return (Number.isFinite(seconds) && seconds >= 5 ? Math.min(600, seconds) : 30) * 1000;
+}
+// ---------------------------------------------------------------- silence timeout
+function silenceSeconds() {
+  const seconds = Number($('silence-timeout').value);
+  return Number.isFinite(seconds) && seconds > 0 ? Math.min(600, Math.max(1, Math.round(seconds))) : 0;   // 0: keep listening
+}
+function silenceMs() { return silenceSeconds() * 1000; }
+const CALL_WORDS = new Set(['hey', 'hi', 'hello', 'ok', 'okay', 'yo']);
+function plainWord(token) { return token.toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu, ''); }
+function editDistance(a, b) {
+  const rows = Array.from({length: a.length + 1}, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) rows[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+    rows[i][j] = Math.min(rows[i - 1][j] + 1, rows[i][j - 1] + 1, rows[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return rows[a.length][b.length];
+}
+// The consonants of a word, in order.  qasr spells an unfamiliar name the way
+// it sounds -- "Qwen" alone came back as "Q N.", "Qn," and "Q. When." on
+// 2026-09-12 -- and what survives that is the consonant skeleton, not the
+// letters: qwen -> qwn, qn -> qn, qwhen -> qwhn.
+function skeleton(word) { return word.replace(/[aeiouy]/g, ''); }
+// WAKE-MATCH-BEGIN: extracted verbatim by tests/browser/voice_wake_browser.mjs.
+// The words after the wake phrase, or null when the clip did not start with it.
+// "Hey Qwen, what time is it?" -> "what time is it?"; "Qwen" -> ""; "What time is it?" -> null.
+// The name is matched three ways, strictest first: spelled as written; spelled
+// as the ASR spells it (the same consonants, allowing one slip, and the same
+// first letter -- "Q N", "Qn" and "Q. When" are all "Qwen", while "when" is
+// not, because it does not start with a q); and, only after a call word such
+// as "hey", one letter off ("Hey Gwen").  Bare "when" must never wake it.  The
+// ASR may split the name over two tokens ("Q N"), so one extra leading token
+// may be absorbed into the name.
+function afterWakeWord(text, phrase) {
+  const tokens = String(text).trim().split(/\s+/).filter(Boolean);
+  const wanted = String(phrase).trim().split(/\s+/).map(plainWord).filter(Boolean);
+  if (!wanted.length) return null;
+  const name = wanted.join(''), loose = name.length >= 4;
+  // One consonant slip is allowed only when the name has consonants to spare:
+  // "qwn" may be heard as "qn" or "qwhn", but "bb" (Bubu) heard as "b" or "bk"
+  // would make "Boo hoo" and "Book" the name.
+  const slips = skeleton(name).length >= 3 ? 1 : 0;
+  // The phrase may itself begin with a call word ("Hey Jarvis"), so try it
+  // where it stands first, then after up to two call words.
+  let skippable = 0;
+  while (skippable < tokens.length && skippable < 2 && CALL_WORDS.has(plainWord(tokens[skippable]))) skippable++;
+  // How far a run of tokens is from the name under each rule; Infinity is no
+  // match.  Within a rule the closer run wins, and a tie goes to the shorter
+  // one: "Boo boo! What time" is all of "Bubu" (both halves, distance 0), while
+  // "Quen, I want" is "Qwen" alone (absorbing "I" would not get closer).
+  const distance = {
+    exact: heard => heard === name ? 0 : Infinity,
+    spelled: heard => loose && heard[0] === name[0] ? editDistance(skeleton(heard), skeleton(name)) : Infinity,
+    called: (heard, at) => loose && at > 0 ? editDistance(heard, name) : Infinity,
+  };
+  for (const rule of ['exact', 'spelled', 'called'])
+    for (let at = 0; at <= skippable; at++) {
+      let best = null, bestDistance = rule === 'spelled' ? slips : 1;
+      for (let count = wanted.length; count <= wanted.length + 1 && at + count <= tokens.length; count++) {
+        const heard = tokens.slice(at, at + count).map(plainWord).join('');
+        const d = distance[rule](heard, at);
+        if (d < bestDistance || (d === bestDistance && best === null)) { best = count; bestDistance = d; }
+      }
+      if (best !== null) return tokens.slice(at + best).join(' ').replace(/^[\s,.:;!?—-]+/, '').trim();
+    }
+  return null;
+}
+// WAKE-MATCH-END
+function thinkingAloudWanted() {
+  const box = $('think-aloud');
+  return !(box && box.checked === false);              // on unless switched off
+}
+function thinkLine(calls) {
+  for (const call of calls || []) {
+    if (call === 'now') continue;                      // instant; never worth a word
+    if (THINK_LINES[call]) return THINK_LINES[call];
+    if (call.startsWith('mcp__files__')) return 'Let me have a look at the files.';
+  }
+  return 'One moment.';
+}
+function cancelThinkingAloud() {
+  thinkToken++;                                        // any in-flight clip is now stale
+  if (thinkTimer) { clearTimeout(thinkTimer); thinkTimer = 0; }
+  thinkSpoken = false;
+}
+function stopThinkingAloud() {
+  // Called when the reply exists, and from every path that ends a turn.
+  cancelThinkingAloud();
+  if (!thinkPlaying) return;
+  thinkPlaying = false;
+  player.pause();
+  stopPlaybackGlow(); setGlow(0);
+}
+function armThinkingAloud(id, signal) {
+  cancelThinkingAloud();
+  if (!thinkingAloudWanted()) return;                  // every reply here is spoken, so this one is too
+  const token = thinkToken;
+  thinkTimer = setTimeout(() => {
+    thinkTimer = 0;
+    if (id !== epoch || thinkToken !== token || signal.aborted) return;
+    mentionThinking('One moment.', id, signal);
+  }, THINK.afterMs);
+}
+function mentionThinking(text, id, signal) {
+  if (!thinkingAloudWanted()) return;                  // both throats answer to the same switch
+  if (thinkSpoken) return;                             // one per turn, not one per tool round
+  thinkSpoken = true;
+  let spoken;
+  try { spoken = replyVoice(text); } catch (_) { return; }
+  const token = thinkToken;
+  const query = new URLSearchParams({format:'wav', language:spoken.language,
+                                     voice:spoken.voice, speed:String(speechSpeed())});
+  const filler = new AbortController();
+  signal.addEventListener('abort', () => filler.abort(), {once: true});
+  fetch('/tts?' + query, {method:'POST', body:text, signal:filler.signal})
+    .then(response => response.ok ? response.blob() : null)
+    .then(audio => {
+      if (!audio || audio.size <= 44) return;
+      // The answer won the race, or the turn moved on: throw the clip away.
+      if (id !== epoch || thinkToken !== token || signal.aborted) return;
+      // Deliberately NOT phase 'speaking': barge-in stays disarmed for an
+      // acknowledgment, so a room can never interrupt its own filler and be
+      // credited with interrupting the reply.  Space still stops everything.
+      thinkPlaying = true;
+      const finish = () => {
+        player.removeEventListener('ended', finish);
+        player.removeEventListener('error', finish);
+        if (thinkToken !== token) return;
+        thinkPlaying = false; stopPlaybackGlow(); setGlow(0);
+      };
+      replaceAudio(audio);
+      startPlaybackGlow();
+      player.addEventListener('ended', finish);
+      player.addEventListener('error', finish);
+      player.play().catch(() => { finish(); });
+    })
+    .catch(() => {});
+}
+async function playReply(blob, signal, final = true, first = true, onStart = null) {
+  // A continuation clip must not reopen the settle window (see replySeam).
+  replySeam = !first;
+  replaceAudio(blob);
+  await new Promise((resolve,reject)=>{
+    let settled = false;
+    const cleanup = () => {
+      settled = true;
+      // Between two sentences of the same reply the voice is not finished, so
+      // the glow and the interruption gate stay up.  Tearing them down per clip
+      // would blink the orb out and disarm barge-in at every comma.
+      if (final) { stopPlaybackGlow(); stopBargeWatch(); setGlow(0); }
+      if (final || signal.aborted) replySeam = false;
+      player.removeEventListener('ended',ended);player.removeEventListener('error',failed);signal.removeEventListener('abort',cancelled);
+      if(resumePlayback===attempt)resumePlayback=null;
+      $('resume').hidden=true;
+    };
+    const ended = () => {cleanup();resolve();};
+    const failed = () => {cleanup();reject(new Error('Audio playback failed. The reply is shown in the conversation.'));};
+    const cancelled = () => {cleanup();player.pause();reject(new DOMException('Stopped','AbortError'));};
+    const attempt = () => {
+      if(settled || signal.aborted)return;
+      $('resume').hidden=true;
+      player.play().then(()=>{replySeam = !final;if(!settled && !player.paused){startPlaybackGlow();startBargeWatch();onStart?.();}},error=>{
+        if(settled || signal.aborted)return;
+        if(error.name!=='NotAllowedError'){failed();return;}
+        if(!final){startBargeWatch();return;}   // re-entrant: attempt() is already the retry path
+        resumePlayback=attempt;$('resume').hidden=false;
+        setState('speaking','Choose Play reply to allow audio in your browser.');
+      });
+    };
+    player.addEventListener('ended',ended);player.addEventListener('error',failed);signal.addEventListener('abort',cancelled,{once:true});
+    if(signal.aborted){cancelled();return;}
+    attempt();
+  });
+}
+
+// ---------------------------------------------------------------- speaking a reply
+// The engine synthesizes an entire request before it returns a single byte of
+// audio.  Measured live against the deployed Kokoro: 32 characters take 0.10 s,
+// 108 take 0.29 s, 441 take 0.93 s, 774 take 1.16 s -- about 2 ms per character
+// with no fixed cost to amortize.  Asking for a whole answer in one request is
+// therefore a promise that the listener waits the full 1.2 s *after* the words
+// are already on the screen.  That gap is what people call "slow TTS": the
+// engine is not slow, the page asked for too much at once.
+//
+// The first sentence is its own request so the first word is audible after
+// ~0.1 s.  What follows is NOT one request per sentence (2026-09-11): every
+// request is a fresh connection, a serialized G2P pass and its own GPU step, and
+// every clip boundary is a source swap the ear hears as a 50-150 ms hiccup, so a
+// reply cut into sentences cost 3-4x the synthesis and a stutter at every full
+// stop.  Instead the remainder is grouped into a few requests that grow
+// geometrically: a clip only has to be synthesized while the previous one is
+// being spoken, and speech is ~25x slower than synthesis, so each group may be
+// `growth` times the one before it.  The engine batches the sentences inside
+// one request itself.
+// SPEECH-CHUNK-BEGIN
+const SPEECH_CHUNK = {minChars: 24, maxChars: 420, prefetch: 2, growth: 8, groupMax: 4000};
+
+function speechChunks(text) {
+  // Only words can be spoken.  A number or an object reaching here is a bug
+  // somewhere upstream, and saying "NaN" or "object Object" aloud to a person
+  // is a worse outcome than saying nothing at all.
+  const clean = typeof text === 'string' ? text.replace(/\s+/g, ' ').trim() : '';
+  if (!clean) return [];
+  // A sentence ends at a full stop, bang, question mark or ellipsis and may
+  // carry a closing quote or bracket with it.  Anything after the last mark is
+  // a sentence the engine left unpunctuated, and it still has to be spoken.
+  const sentences = clean.match(/[^.!?\u2026]+[.!?\u2026]+["'\u201d\u2019)\]]*|[^.!?\u2026]+$/g) ?? [clean];
+  const chunks = [];
+  for (let piece of sentences.map(value => value.trim())) {
+    if (!piece) continue;
+    // A run-on clause with no full stop in it is still too long to hold the
+    // voice hostage.  Break at the last comma or semicolon that fits, then at
+    // the last space: a seam mid-word is audible as a word cut in half, which
+    // is a worse defect than the pause we are trying to remove.
+    while (piece.length > SPEECH_CHUNK.maxChars) {
+      const room = SPEECH_CHUNK.maxChars;
+      const clause = Math.max(piece.lastIndexOf(',', room), piece.lastIndexOf(';', room));
+      const space = piece.lastIndexOf(' ', room);
+      // Cut after punctuation when there is punctuation to cut after, otherwise
+      // on a space, and only as a last resort through the middle of a word.
+      const at = clause > SPEECH_CHUNK.minChars ? clause + 1
+               : space > SPEECH_CHUNK.minChars ? space
+               : room;
+      chunks.push(piece.slice(0, at).trim());
+      piece = piece.slice(at).trim();
+    }
+    if (!piece) continue;
+    // "Yes." is a real turn of speech; a stray "\u2026" is a click.  A fragment too
+    // short to be worth its own request joins the sentence before it -- but the
+    // first sentence never waits for anyone, because that is the one the
+    // listener is waiting for.
+    if (piece.length < SPEECH_CHUNK.minChars && chunks.length) chunks[chunks.length - 1] += ' ' + piece;
+    else chunks.push(piece);
+  }
+  const pieces = chunks.filter(Boolean);
+  if (pieces.length < 2) return pieces;
+  // Group everything after the first bite.  Group k may hold up to `growth`
+  // times the characters of group k-1 (never less than one run-on ceiling,
+  // never more than groupMax), which keeps its synthesis inside the previous
+  // clip's playback and leaves one or two seams instead of one per sentence.
+  const groups = [pieces[0]];
+  for (const piece of pieces.slice(1)) {
+    const k = groups.length - 1;
+    const budget = k === 0 ? 0
+      : Math.min(SPEECH_CHUNK.groupMax, Math.max(SPEECH_CHUNK.maxChars, groups[k - 1].length * SPEECH_CHUNK.growth));
+    if (k === 0 || groups[k].length + 1 + piece.length > budget) groups.push(piece);
+    else groups[k] += ' ' + piece;
+  }
+  return groups;
+}
+// SPEECH-CHUNK-END
+
+// ------------------------------------------------ streamed speech (2026-09-11)
+// The bridge now forwards the model's prose as it is generated ('delta'
+// events).  Waiting for the whole answer before speaking cost the entire
+// generation -- ~2 s for a typical reply -- in silence after the question.
+// Sentences are spoken as they complete: the first one alone, then whatever
+// has arrived by the time the current clip is about to end, so generation
+// (~45 chars/s) stays ahead of speech (~17 chars/s) and the engine still
+// batches the bulk.  The 'answer' event at the end is authoritative: what it
+// says beyond what was already spoken is spoken, and nothing is committed to
+// the transcript from the stream itself.
+function sentenceSource() {
+  const src = {queue: [], closed: false, buffer: '', round: 0, taken: '', all: '', waiter: null};
+  const wake = () => { const w = src.waiter; src.waiter = null; if (w) w(); };
+  src.wait = signal => new Promise((resolve, reject) => {
+    if (src.queue.length || src.closed) return resolve();
+    src.waiter = resolve;
+    signal?.addEventListener('abort', () => { src.waiter = null; reject(new DOMException('Stopped', 'AbortError')); }, {once: true});
+  });
+  const drain = final => {
+    const text = src.buffer.replace(/\s+/g, ' ');
+    const done = text.match(/[^.!?\u2026]+[.!?\u2026]+["'\u201d\u2019)\]]*/g) ?? [];
+    let used = 0;
+    for (const sentence of done) { used += sentence.length; const piece = sentence.trim(); if (piece) src.queue.push(piece); }
+    src.buffer = text.slice(used);
+    if (final) { const tail = src.buffer.trim(); if (tail) src.queue.push(tail); src.buffer = ''; }
+    if (src.queue.length || final) wake();
+  };
+  src.push = (round, text) => {
+    if (round !== src.round) { src.buffer = ''; src.all = ''; src.round = round; }   // a new generation
+    src.buffer += text; src.all += text;
+    drain(false);
+  };
+  src.finish = answer => {
+    // What the stream said must be what the answer says; if the two differ the
+    // unspoken remainder of the answer wins and the stale queue is dropped.
+    drain(true);
+    const same = (a, b) => a.replace(/\s+/g, '') === b.replace(/\s+/g, '');
+    if (!same(src.all, answer)) {
+      src.queue.length = 0;
+      const rest = remainderAfter(answer, src.taken);
+      if (rest === null) console.warn('streamed speech diverged from the answer; the rest is not re-spoken');
+      else for (const piece of speechChunks(rest)) src.queue.push(piece);
+    }
+    src.closed = true; wake();
+  };
+  src.close = () => { src.closed = true; wake(); };
+  return src;
+}
+function remainderAfter(answer, spoken) {
+  // The part of `answer` after `spoken`, ignoring whitespace; null if `spoken`
+  // is not a prefix of it.
+  let i = 0, j = 0;
+  while (j < spoken.length) {
+    if (/\s/.test(spoken[j])) { j++; continue; }
+    while (i < answer.length && /\s/.test(answer[i])) i++;
+    if (i >= answer.length || answer[i] !== spoken[j]) return null;
+    i++; j++;
+  }
+  return answer.slice(i).trim();
+}
+async function speakStreamed(src, signal, onFirstClip) {
+  let query = null;
+  const clipFor = text => {
+    if (!query) {
+      const spoken = replyVoice(text);   // the first sentence decides the voice for the reply
+      query = new URLSearchParams({format: 'wav', language: spoken.language, voice: spoken.voice, speed: String(speechSpeed())});
+    }
+    return fetch('/tts?' + query, {method: 'POST', body: text, signal})
+      .then(response => { if (!response.ok) throw new Error('Speech synthesis failed. Your reply is shown above.'); return response.blob(); })
+      .then(audio => { if (audio.size <= 44) throw new Error('The reply audio was empty.'); return audio; })
+      .catch(error => { if (error.name !== 'AbortError') error.keepSession = true; throw error; });
+  };
+  let first = true, prevLen = 0;
+  const budget = () => first ? Infinity : Math.min(SPEECH_CHUNK.groupMax, Math.max(SPEECH_CHUNK.maxChars, prevLen * SPEECH_CHUNK.growth));
+  const queuedChars = () => src.queue.reduce((sum, piece) => sum + piece.length + 1, 0);
+  const take = () => {
+    if (!src.queue.length) return null;
+    let group;
+    if (first) { first = false; group = src.queue.shift(); }
+    else {
+      const cap = budget();
+      group = '';
+      while (src.queue.length && (!group || group.length + 1 + src.queue[0].length <= cap))
+        group = group ? group + ' ' + src.queue.shift() : src.queue.shift();
+    }
+    prevLen = group.length; src.taken += (src.taken ? ' ' : '') + group;
+    return group;
+  };
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  // The next group is taken when its synthesis must start to land before the
+  // seam: ~3 ms per queued character plus a fixed 400 ms, measured against
+  // how much scheduled audio is left -- or at once when the text is complete
+  // or a whole group's worth has already arrived.
+  const nextGroup = async () => {
+    for (;;) {
+      const chars = queuedChars();
+      if (src.closed) return take();
+      if (first || chars >= budget() || gapless.remainingMs() <= 400 + 3 * chars) { const g = take(); if (g) return g; }
+      if (!src.queue.length && !src.closed) { await src.wait(signal); continue; }
+      await sleep(50);
+    }
+  };
+  const useGapless = gapless.available();
+  let group = await nextGroup();
+  if (!group) return false;
+  let index = 0;
+  let pending = clipFor(group).then(async audio => useGapless ? gapless.decode(audio) : audio);
+  try {
+    while (group) {
+      const clip = await pending;
+      if (signal.aborted) throw new DOMException('Stopped', 'AbortError');
+      const started = () => {
+        if (!index) { onFirstClip?.(); playbackStartedAt = performance.now(); startPlaybackGlow(); startBargeWatch(); }
+        else if (!glowRaf) startPlaybackGlow();   // a late clip after a gap re-lights the orb
+      };
+      let playing;
+      if (useGapless) { window.__speechStats.gapless++; playing = gapless.play(clip, signal, started); }
+      else { window.__speechStats.element++; if (!index) onFirstClip?.(); playing = playReply(clip, signal, false, index === 0); }
+      const following = nextGroup().then(g => g ? {g, clip: clipFor(g).then(audio => useGapless ? gapless.decode(audio) : audio)} : null);
+      const item = await following;          // resolves as soon as the next group is taken and fetched...
+      if (!item) { await playing; break; }   // ...or when the text is finished
+      if (!useGapless) await playing;        // the element can only hold one clip
+      group = item.g; pending = item.clip; index++;
+      if (useGapless) playing.catch(() => {});
+    }
+  } finally {
+    // Every clip was played as a continuation: close the settle window and the
+    // gate here, when the whole reply is over (or was cut).
+    replySeam = false; playbackEndedAt = performance.now();
+    stopPlaybackGlow(); stopBargeWatch(); setGlow(0);
+    if (useGapless) gapless.nextAt = 0;
+  }
+  return true;
+}
+
+async function speakReply(answer, signal, onFirstClip) {
+  const spoken = replyVoice(answer);
+  const query = new URLSearchParams({format: 'wav', language: spoken.language,
+                                     voice: spoken.voice, speed: String(speechSpeed())});
+  const parts = speechChunks(answer);
+  if (!parts.length) {
+    const empty = new Error('The reply audio was empty.');
+    empty.keepSession = true;
+    throw empty;
+  }
+  const clips = new Map();
+  const clip = index => {
+    if (!clips.has(index)) {
+      clips.set(index, fetch('/tts?' + query, {method: 'POST', body: parts[index], signal})
+        .then(response => {
+          if (!response.ok) throw new Error('Speech synthesis failed. Your reply is shown above.');
+          return response.blob();
+        })
+        .then(audio => {
+          if (audio.size <= 44) throw new Error('The reply audio was empty.');
+          return audio;
+        })
+        .catch(error => {
+          // The words are already on the screen and the microphone is still
+          // good: a synthesis failure is a lost sentence, not a dead session.
+          if (error.name !== 'AbortError') error.keepSession = true;
+          throw error;
+        }));
+    }
+    return clips.get(index);
+  };
+  // Fire ahead, but only a little: enough that the voice never waits on the
+  // engine, few enough that a long answer does not stampede a GPU that is
+  // already carrying the 27B model and the ASR worker.
+  const ahead = index => { if (index >= 0 && index < parts.length) clip(index).catch(() => {}); };
+  for (let index = 0; index < SPEECH_CHUNK.prefetch; index++) ahead(index);
+  for (let index = 0; index < parts.length; index++) {
+    const audio = await clip(index);
+    ahead(index + SPEECH_CHUNK.prefetch);
+    // The acknowledgment gets exactly as much air as the first sentence took to
+    // synthesize, and is cut at the last moment before real speech begins.
+    if (!index) onFirstClip?.();
+    await playReply(audio, signal, index === parts.length - 1, index === 0);
+  }
+}
+async function runTurn(input, forced = false, voicedMs = null) {
+  if (!(input instanceof Blob)) { heldText = ''; fragmentHolds = 0; }
+  clearCapture(); player.pause(); busy = true;
+  const id = ++epoch, controller = new AbortController(); abort = controller;
+  const check = () => {if(id !== epoch || controller.signal.aborted) throw new DOMException('Stopped','AbortError');};
+  const before = history.slice(), was = transcript.slice(); let committed = false;
+  try {
+    let text = input, original = null;
+    if (input instanceof Blob) {
+      setState('transcribing','Turning your speech into text…');
+      // Tell the bridge how long we actually heard a voice.  It cannot recover
+      // that from the clip: the clip also carries the silence the endpointer
+      // waits for before it is allowed to stop.
+      const heard = await responseJSON('/stt', input, controller.signal,
+        Number.isFinite(voicedMs) ? {'X-Voiced-Ms': String(Math.round(voicedMs))} : undefined);
+      text = String(heard.text || '').trim(); check();
+      // A breath between two halves of a sentence must not throw away the first half, so heldText deliberately survives this path.
+      if (!text) {busy=false;if(active)listen();else setState('idle','No speech was detected. Please try again.');return;}
+      const corrected=correctSpeech(text);if(corrected!==text){original=text;text=corrected;}
+      // A one-word clip is not a question.  qasr punctuates fragments -- a 0.6 s
+      // clip of one syllable comes back as "I." -- so the transcript cannot be
+      // trusted to say when a turn is finished, and answering "I." produced a
+      // confident reply to a question nobody asked.  Hold it, stay open, and
+      // bound the holds: this may add patience, it may never wedge a turn.
+      // Half a sentence is not a question. The server decides this -- it has the
+      // words and the voiced duration this page measured -- and the page only
+      // obeys, bounds the patience, and critically KEEPS the words. Dropping a
+      // held fragment was its own bug: "I" then "want to go to the museum" used to
+      // dispatch the second clip on its own, so the reply was about wanting.
+      const judged = heard.turn, carried = heldText;
+      if (!forced && judged?.hold && fragmentHolds < 3) {
+        fragmentHolds++;
+        if (!dormant) lastTurnAt = performance.now();   // half a sentence is still a person talking to it
+        heldText = (carried ? carried + ' ' : '') + text;
+        busy = false;
+        if (active) { listen(); setState('listening', `I heard “${heldText}”. Keep talking, or press Send now.`); }
+        else setState('idle', `Only “${heldText}” so far. Say more, or press Send.`);
+        return;
+      }
+      // The fragment was judged unfinished, so the full stop qasr put on it is not
+      // real.  "I. want to go to the museum." reads as two sentences and makes the
+      // voice stop in the middle of a clause, so only the carried half loses its
+      // punctuation; whatever closed the last clip is the transcript's own.
+      if (carried) text = `${carried.replace(/[.!?\u2026]+\s*$/, '')} ${text}`.trim();
+      fragmentHolds = 0; heldText = '';
+      if (wakeWanted() && active && !forced) {
+        const rest = afterWakeWord(text, wakePhrase());
+        if (dormant) {
+          // WAKE-GATE: not addressed to the assistant.  Heard, transcribed, dropped.
+          if (rest === null) { busy = false; listen(); setState('listening', `Heard “${text}”, not “${wakePhrase()}”. Waiting for “${wakePhrase()}”: say it first, and I will answer.`); return; }
+          dormant = false; lastTurnAt = performance.now();
+          if (!rest) {
+            // Just the name: answer it, then listen for the actual question.
+            setState('synthesizing', 'Yes?');
+            await speakReply('Yes?', controller.signal, () => setState('speaking', 'Yes?')).catch(() => {});
+            check(); busy = false; listen(); setState('listening', 'Yes? I’m listening.'); return;
+          }
+          text = rest;
+        } else if (rest) text = rest;      // awake, and named anyway: the name is not part of the question
+      }
+    }
+    lastTurnAt = performance.now();
+    message('user',text,original); setState('thinking','Qwen is preparing a reply…');
+    armThinkingAloud(id, controller.signal);
+    const pending = [...before,{role:'user',content:text}];
+    const source = streaming ? sentenceSource() : null;
+    let speaking = null, speechError = null;
+    const spoken = () => {
+      stopThinkingAloud();        // the reply is in hand: it never waits behind the acknowledgment
+      setState('speaking',!active?'Press Space to stop the reply.':paused?'Listening pauses after this reply.':'Press Space to interrupt and speak. Listening resumes after the reply.');
+    };
+    const progress = event => {
+      if (event.type === 'delta' && source) {
+        source.push(Number(event.round) || 0, String(event.text ?? ''));
+        if (!speaking && source.queue.length) {
+          cancelThinkingAloud();
+          setState('synthesizing','Your reply is becoming speech\u2026');
+          speaking = speakStreamed(source, controller.signal, spoken).catch(error => { speechError = error; return false; });
+        }
+        return;
+      }
+      check();
+      if (event.type === 'status') {
+        setState('thinking', `Looking that up — ${event.calls.join(', ')}…`);
+        // A tool round is a second full generation, so this is exactly where the
+        // silence would otherwise start: name the tool instead of waiting for it.
+        mentionThinking(thinkLine(event.calls), id, controller.signal);
+      }
+      else if (event.type === 'tool') setState('thinking', event.ok
+        ? (event.citations?.length ? `Found ${event.citations.length} passage${event.citations.length > 1 ? 's' : ''} in your notes…` : 'Read it. Thinking…')
+        : 'That did not work. Answering from what it has…');
+    };
+    let reply;
+    try {
+      reply = streaming
+        ? await responseProgress('/chat/completions', JSON.stringify({messages: pending, ...(conversationSummary ? {summary: conversationSummary} : {})}), controller.signal, progress)
+        : await responseJSON('/chat/completions', JSON.stringify({messages: pending, ...(conversationSummary ? {summary: conversationSummary} : {})}), controller.signal);
+    } catch (error) {
+      // A refusal from the bridge ("ran out of room", "too long", "busy") is a
+      // turn that failed, not a conversation that ended.  Measured live
+      // (2026-09-11): a multi-step folder question hit the round budget, the
+      // page showed "Something went wrong" and closed the microphone, and the
+      // person had to reload and press Start to ask again.  Keep the session;
+      // the message goes on the status line and the next sentence is heard.
+      if (error?.name !== 'AbortError') error.keepSession = true;
+      throw error;
+    }
+    check();
+    // No further acknowledgment may start from here, but one already playing
+    // keeps playing: the reply's own audio still needs a few hundred ms of
+    // synthesis, and cutting the line now would trade one silence for another.
+    cancelThinkingAloud();
+    // The engine can answer with zero tokens -- measured live: prompt 3646 tok,
+    // "gen 0 tok | stop", HTTP 200, empty body.  Committing that as an assistant
+    // turn puts an empty turn into every later prompt, and asking the TTS to speak
+    // it asks for silence.  That is how a working conversation stopped dead with no
+    // error recorded on any server.  Refuse it, keep the history clean, and let the
+    // person ask again.
+    const answer = String(reply.text ?? '').trim();
+    if (!answer) {
+      const empty = new Error('That came back empty. Please ask it again.');
+      empty.keepSession = true;
+      throw empty;
+    }
+    // One commit point for both memories.  `history` is derived from the
+    // transcript rather than maintained beside it, so the model can never be
+    // shown a turn the browser would lose on refresh, or forget one it kept.
+    const turn = turnFrom(text, answer, original, reply);
+    if (turn) transcript = [...transcript, turn];
+    history = historyFrom(transcript);
+    committed = true;
+    // The bridge aggregated a pause_listening tool call into the answer.  Arm
+    // it now, before the reply is spoken: whether the reply plays out, is
+    // interrupted by Space or by a voice in the room, every route back to the
+    // microphone goes through listen(), and listen() holds while `paused`.
+    // Only ever set here, and only from the bridge's own answer -- a saved
+    // transcript record cannot carry it (turnFrom keeps no controls).
+    if (reply.controls && reply.controls.pause_listening === true) {
+      paused = true; pauseReason = String(reply.controls.pause_reason || '').slice(0, 200);
+    }
+    message('assistant',answer,null,{tools:reply.tools,sources:reply.sources});
+    // A request_directory call happened during that generation, so the card the
+    // user needs to see is one poll overdue.  Fetch it now, not in four seconds.
+    refreshApprovals();
+    await saveConversation();   // commit the full archive before reporting the turn saved
+    check();
+    if (speaking) {
+      source.finish(answer);
+      const spokeAny = await speaking;
+      check();
+      if (speechError) throw speechError;
+      if (!spokeAny) { setState('synthesizing','Your reply is becoming speech\u2026'); await speakReply(answer, controller.signal, spoken); }
+    } else {
+      if (source) source.close();
+      setState('synthesizing','Your reply is becoming speech\u2026');
+      await speakReply(answer, controller.signal, spoken);
+    }
+    check();busy=false;
+    asleep=false;if(active)listen();else setState('idle','Send another message, or start a voice conversation.');
+  } catch(error) {
+    if(id !== epoch) return;
+    if(!committed){ history=before; transcript=was; }   // a refused reply leaves no trace
+    controller.abort();          // a streamed reply that failed must not keep talking
+    stopThinkingAloud();
+    // A refusal is not the end of a conversation.  Anything that merely declined
+    // to answer keeps the microphone, so the next sentence needs no second click
+    // on Start.
+    if (error.keepSession && active) {
+      busy = false; listen();
+      setState('listening', error.message);
+    } else {
+      stopSession(error.name==='AbortError'?'Reply stopped.':error.message);
+      if(error.name!=='AbortError')setState('error',error.message);
+    }
+  } finally {if(id===epoch)abort=null;}
+}
+$('start').onclick = async () => {
+  if(secureURL){location.assign(secureURL);return;}
+  if(active || busy) return;
+  active=true;const id=++epoch;primeAudio();dormant=wakeWanted();asleep=false;lastTurnAt=performance.now();setState('listening','Allow microphone access to begin.');$('finish').hidden=true;
+  try {
+    const acquired=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:!bargeWanted()}});
+    if(id!==epoch){acquired.getTracks().forEach(track=>track.stop());return;}
+    stream=acquired;
+    armGlow();
+    const Audio = window.AudioContext || window.webkitAudioContext;
+    if(!context || context.state==='closed')context=new Audio();
+    await context.resume();
+    if(id!==epoch)return;
+    analyser=context.createAnalyser();analyser.fftSize=2048;source=context.createMediaStreamSource(stream);source.connect(analyser);
+    listen();
+  } catch(error){if(id===epoch)stopSession(error.name==='NotAllowedError'?'Microphone permission was denied. Allow access in your browser, or type below.':error.message);}
+};
+player.addEventListener('play',()=>{
+  if (!replySeam) playbackStartedAt = performance.now();
+  // Replaying an older reply through the native controls must also mute capture.
+  if(active && stream && phase==='listening'){
+    clearCapture();busy=true;setState('speaking','Playing your reply. Interrupt to speak again.');
+    player.addEventListener('ended',()=>{if(active && phase==='speaking'){busy=false;listen();}},{once:true});
+  }
+});
+player.addEventListener('pause',()=>{if (!replySeam) playbackEndedAt = performance.now();});
+player.addEventListener('ended',()=>{if (!replySeam) playbackEndedAt = performance.now();});
+$('end').onclick=()=>stopSession();
+$('finish').onclick=()=>{if(recorder?.state==='recording'){recorder.sendNow=true;recorder.stop();}};
+function interruptReply() {
+  if(!busy)return;
+  epoch++;abort?.abort();abort=null;busy=false;clearCapture();replySeam=false;player.pause();gapless.stop();
+  if ($('compact-status').textContent.startsWith('Compacting')) $('compact-status').textContent = 'Compaction cancelled. Previous context was kept.';
+  playbackEndedAt = performance.now();
+  asleep=false;if(active)listen();else setState('idle','Reply interrupted. Send another message when ready.');
+}
+$('interrupt').onclick=interruptReply;
+$('resume').onclick=()=>resumePlayback?.();
+$('resume-listening').onclick=resumeListening;
+let spaceHeld=false;
+window.addEventListener('keydown',event=>{
+  if(event.code!=='Space' && event.key!==' ')return;
+  const target=event.target;
+  if(event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey ||
+     target?.isContentEditable || target?.closest?.('input,textarea,select,button,a,summary,[role="button"],[role="textbox"]'))return;
+  if(spaceHeld){event.preventDefault();return;}
+  if(event.repeat)return;
+  // Space is the one key the page owns: it interrupts a reply, and while the
+  // microphone is paused it is the way back.  Both are human actions.
+  if((paused || asleep) && active && !busy){event.preventDefault();spaceHeld=true;resumeListening();return;}
+  if(!busy)return;
+  event.preventDefault();spaceHeld=true;interruptReply();
+});
+window.addEventListener('keyup',event=>{if(spaceHeld && (event.code==='Space'||event.key===' ')){event.preventDefault();spaceHeld=false;}});
+window.addEventListener('blur',()=>{spaceHeld=false;});
+function speechSpeed(){const value=Number($('speed').value);return Number.isFinite(value)?Math.min(2,Math.max(.5,value)):1.2;}
+$('speed').oninput=()=>{const value=speechSpeed().toFixed(1);$('speed-value').value=value+'×';$('speed').setAttribute('aria-valuetext',value+' times');};
+$('new').onclick=()=>{stopSession('A fresh conversation. Start talking or type below.');setGlow(0);startFreshChat();renderChatList();player.removeAttribute('src');if(audioURL){URL.revokeObjectURL(audioURL);audioURL=null;}};
+if($('chats-toggle'))$('chats-toggle').onclick=()=>setChatsOpen();
+$('compose').onsubmit=event=>{event.preventDefault();const text=$('text').value.trim();if(!text||busy||!ready)return;primeAudio();armGlow();$('text').value='';runTurn(text);};
+let languageList=[],autoLanguage='a',speechPreferences={voices:{}};
+try{const saved=JSON.parse(localStorage.getItem('voice-speech')||'null');if(saved && typeof saved==='object' && !Array.isArray(saved))speechPreferences={...saved,voices:saved.voices&&typeof saved.voices==='object'?saved.voices:{}};}catch(_){}
+function saveSpeech(){
+  speechPreferences.language=$('language').value;
+  speechPreferences.corrections=$('corrections').value;
+  speechPreferences.enabled=$('corrections-enabled').checked;
+  speechPreferences.barge=$('barge-in').checked;
+  speechPreferences.think=$('think-aloud').checked;
+  speechPreferences.wake=$('wake-enabled').checked;
+  speechPreferences.wakeWord=$('wake-word').value.slice(0,40);
+  speechPreferences.wakeQuiet=$('wake-quiet').value;
+  speechPreferences.silence=$('silence-timeout').value;
+  try{localStorage.setItem('voice-speech',JSON.stringify(speechPreferences));}catch(_){}
+}
+function effectiveLanguage(){return $('language').value==='auto'?autoLanguage:$('language').value;}
+function voices(){
+  const language=effectiveLanguage(), selected=speechPreferences.voices[language];
+  $('voice').replaceChildren();
+  for(const voice of voiceList.filter(v=>v.startsWith(language))){const option=document.createElement('option');option.value=voice;option.textContent=voice.replace(/^[a-z]+_/,'').replaceAll('_',' ');$('voice').append(option);}
+  const preferred=selected||languageList.find(x=>x.code===language)?.default_voice;
+  if([...$('voice').options].some(x=>x.value===preferred))$('voice').value=preferred;
+  $('voice-note').textContent=(languageList.find(x=>x.code===language)?.name||language)+' voice';
+}
+function replyVoice(text){
+  if($('language').value==='auto'){
+    autoLanguage=/[\u0900-\u097f]/u.test(text)?'h':'a';
+    if(!languageList.some(x=>x.code===autoLanguage))throw new Error('This reply needs a language that the TTS service does not offer.');
+    voices();
+  }
+  if(!$('voice').value)throw new Error('No voice is available for the selected TTS language.');
+  return {language:effectiveLanguage(),voice:$('voice').value};
+}
+function correctionRules(){
+  const lines=$('corrections').value.split('\n').map(s=>s.trim()).filter(Boolean),rules=[];
+  let error=lines.length>20?'Use at most 20 corrections.':'';
+  for(const line of lines){const at=line.indexOf('=');const from=line.slice(0,at).trim(),to=line.slice(at+1).trim();
+    if(at<1||!from||!to||from.length>120||to.length>120){error='Use heard phrase = intended phrase, up to 120 characters each.';break;}
+    rules.push([from,to]);
+  }
+  $('corrections').setAttribute('aria-invalid',String(!!error));
+  $('corrections-note').textContent=error?'Corrections paused. '+error:'Applied after STT, before Qwen. Original text stays visible. Saved in this browser.';
+  return error?[]:rules;
+}
+function correctSpeech(text){
+  const rules=correctionRules();if(!$('corrections-enabled').checked||!rules.length)return text;
+  const replacements=new Map(rules.map(([from,to])=>[from.toLocaleLowerCase(),to]));
+  const escaped=[...replacements.keys()].sort((a,b)=>b.length-a.length).map(s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
+  const expression=new RegExp('(^|[^\\p{L}\\p{N}_])('+escaped.join('|')+')(?=$|[^\\p{L}\\p{N}_])','giu');
+  return text.replace(expression,(_,prefix,phrase)=>prefix+replacements.get(phrase.toLocaleLowerCase()));
+}
+$('language').onchange=()=>{voices();saveSpeech();};
+$('voice').onchange=()=>{speechPreferences.voices[effectiveLanguage()]=$('voice').value;saveSpeech();};
+$('corrections').oninput=()=>{correctionRules();saveSpeech();};
+$('corrections-enabled').onchange=saveSpeech;
+if(typeof speechPreferences.corrections==='string')$('corrections').value=speechPreferences.corrections.slice(0,2400);
+if(typeof speechPreferences.enabled==='boolean')$('corrections-enabled').checked=speechPreferences.enabled;
+if(typeof speechPreferences.barge==='boolean')$('barge-in').checked=speechPreferences.barge;
+$('barge-in').onchange=saveSpeech;
+if(typeof speechPreferences.think==='boolean')$('think-aloud').checked=speechPreferences.think;
+$('think-aloud').onchange=saveSpeech;
+if(typeof speechPreferences.wake==='boolean')$('wake-enabled').checked=speechPreferences.wake;
+if(typeof speechPreferences.wakeWord==='string'&&speechPreferences.wakeWord.trim())$('wake-word').value=speechPreferences.wakeWord.slice(0,40);
+if(typeof speechPreferences.wakeQuiet==='string'&&speechPreferences.wakeQuiet)$('wake-quiet').value=speechPreferences.wakeQuiet;
+$('wake-enabled').onchange=()=>{saveSpeech();if(!wakeWanted()&&dormant){dormant=false;if(active&&!busy)listen();}};
+$('wake-word').oninput=saveSpeech;$('wake-quiet').onchange=saveSpeech;
+if(typeof speechPreferences.silence==='string'&&speechPreferences.silence!=='')$('silence-timeout').value=speechPreferences.silence;
+$('silence-timeout').onchange=saveSpeech;
+correctionRules();
+// ------------------------------------------------------------- directory access
+// Qwen can ask for a folder; only this card can hand one over.  The flow is
+// deliberately not a held-open request: request_directory files the ask and
+// returns at once, the turn ends, and on the next turn the folder is simply
+// readable.  That costs one round trip of patience and buys the property that
+// no generation is ever blocked on a click that may never come.
+let approvalsSeen = '', deciding = false;
+function decide(decision, payload, button) {
+  const card = $('approvals');
+  deciding = true;
+  for (const node of card.querySelectorAll('button')) node.disabled = true;
+  if (button) button.textContent = '…';
+  fetch('/approvals',{method:'POST',headers:{'Content-Type':'application/json'},
+                     body:JSON.stringify({decision, ...payload})})
+    .then(async response => {
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(typeof result.error === 'string' ? result.error
+        : 'That did not work. The folder list may have changed; reload the page.');
+      approvalsSeen = '';
+      renderApprovals(result);
+      if (decision === 'approve') $('status').textContent =
+        'Approved. Ask again and Qwen can read it now.';
+      if (decision === 'revoke') $('status').textContent = 'Access removed. It stops on the next read.';
+    })
+    .catch(error => { $('status').textContent = error.message; refreshApprovals(); })
+    .finally(() => { deciding = false; });
+}
+function approvalRow(entry) {
+  const row = document.createElement('div'); row.className = 'approval';
+  const path = document.createElement('code'); path.textContent = entry.realpath; row.append(path);
+  if (entry.reason) { const why = document.createElement('div'); why.className = 'why';
+    why.textContent = `Qwen asked for it because: ${entry.reason}`; row.append(why); }
+  const scope = document.createElement('div'); scope.className = 'scope';
+  scope.textContent = entry.error
+    ? `Its contents could not be checked (${entry.error}).`
+    : `Approving lets Qwen read everything under this folder — about ${entry.files}${entry.truncated ? '+' : ''} files.`;
+  row.append(scope);
+  if (Array.isArray(entry.hints) && entry.hints.length) {
+    const extra = entry.hints.length > 3 ? ` and ${entry.hints.length - 3} more` : '';
+    const risk = document.createElement('div'); risk.className = 'risk';
+    risk.textContent = `Heads up, it also contains ${entry.hints.slice(0, 3).join(', ')}${extra}. `
+      + 'Read those names before you approve.';
+    row.append(risk);
+  }
+  const actions = document.createElement('div'); actions.className = 'row';
+  const yes = document.createElement('button'); yes.type = 'button'; yes.className = 'approve';
+  yes.textContent = 'Approve'; yes.onclick = () => decide('approve', {id: entry.id}, yes);
+  const no = document.createElement('button'); no.type = 'button'; no.textContent = 'Not now';
+  no.onclick = () => decide('decline', {id: entry.id}, no);
+  actions.append(yes, no); row.append(actions);
+  return row;
+}
+function renderApprovals(state) {
+  if (deciding) return;
+  const card = $('approvals');
+  const pending = Array.isArray(state?.pending) ? state.pending : [];
+  const granted = Array.isArray(state?.granted) ? state.granted : [];
+  const shown = JSON.stringify([state?.enabled ?? false, pending, granted]);
+  // Re-rendering on every poll would rebuild the buttons and eat a click that
+  // landed in between.  Nothing changed, nothing moves.
+  if (shown === approvalsSeen) return;
+  approvalsSeen = shown;
+  card.replaceChildren();
+  if (!state?.enabled || (!pending.length && !granted.length)) { card.hidden = true; return; }
+  card.hidden = false;
+  const head = document.createElement('h3');
+  head.textContent = pending.length ? 'Qwen asked to read a folder' : 'Folders Qwen can read';
+  card.append(head);
+  for (const entry of pending) card.append(approvalRow(entry));
+  if (granted.length) {
+    const wrap = document.createElement('div'); wrap.className = 'granted';
+    const label = document.createElement('span');
+    label.textContent = `Approved: ${granted.length} folder${granted.length > 1 ? 's' : ''}`;
+    wrap.append(label);
+    for (const entry of granted) {
+      const chip = document.createElement('button'); chip.type = 'button'; chip.title = entry.realpath;
+      const leaf = String(entry.realpath).split('/').filter(Boolean).pop() || entry.realpath;
+      chip.textContent = `stop reading ${leaf}`;
+      chip.onclick = () => decide('revoke', {path: entry.realpath}, chip);
+      wrap.append(chip);
+    }
+    card.append(wrap);
+  }
+}
+function refreshApprovals() {
+  // A convenience, never a dependency: if the queue cannot be read the
+  // conversation carries on exactly as it did before this feature existed.
+  fetch('/approvals').then(response => response.ok ? response.json() : {enabled: false})
+    .then(renderApprovals).catch(() => {});
+}
+// No polling timer.  A new request can only have been filed by a generation, and
+// the turn above already refreshes when one finishes; coming back to a hidden tab
+// is the only other moment worth catching up on.  A 4 s interval was tried first
+// and it kept a background request in flight forever, which is both a timer on a
+// page whose whole job is the microphone and enough to wedge the browser suite.
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshApprovals(); });
+window.addEventListener('pagehide',()=>{stopSession();releaseAudioContext();updateSource?.close();});
+// Before the first fetch, so a reload cannot let a turn be sent against a
+// transcript the page has not rebuilt yet.
+(async()=>{
+  try{
+    await initializeChatStore();
+    const restoredTurns = restoreChat();
+    const responses=await Promise.all(['/chat/health','/languages','/voices'].map(url=>fetch(url)));
+    if(responses.some(r=>!r.ok))throw new Error('The voice service is unavailable. Please reload shortly.');
+    const [health,languages,catalogue]=await Promise.all(responses.map(r=>r.json()));
+    if(!health.available)throw new Error('The conversation model is not connected yet.');
+    streaming = health.streaming === true && Array.isArray(health.tools) && health.tools.length > 0;
+    languageList=languages.languages;autoLanguage=languages.default;
+    $('language').replaceChildren();const automatic=document.createElement('option');automatic.value='auto';automatic.textContent='Auto: English / Hindi';$('language').append(automatic);for(const lang of languageList){const option=document.createElement('option');option.value=lang.code;option.textContent=lang.name;$('language').append(option);}$('language').value=[...$('language').options].some(x=>x.value===speechPreferences.language)?speechPreferences.language:'auto';
+    voiceList=catalogue.voices;voices();ready=true;refreshApprovals();
+    if(health.events===true)connectUpdates();
+    if(!canRecord && location.protocol==='http:' && Number.isInteger(health.https_port)){
+      const url=new URL(location.href);url.protocol='https:';url.port=health.https_port;secureURL=url.href;$('start').textContent='Open secure conversation';
+    }
+    setState('idle',secureURL?'Open the secure page, accept this server’s certificate, then allow the microphone.':canRecord?'Your voice stays on your server. Start whenever you’re ready.':'This browser cannot record audio here. You can still type and hear replies.');
+    if(restoredTurns) setState('idle',`Picked up where you left off — ${restoredTurns} ${restoredTurns===1?'turn':'turns'} from this browser. Nothing was re-spoken.`);
+  }catch(error){setState('error',error.message);}
+})();

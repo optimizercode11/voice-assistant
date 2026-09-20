@@ -1,0 +1,331 @@
+guarded-run: campaign=voice-stop-turns-20260920 label=regression mode=cpu cpus=0-3
+command: make check NODE=/tmp/fork-stability-browser-zu50jkow/node_modules/node/bin/node
+CUDA_VISIBLE_DEVICES="" python3 -u tests/speech_ui_test.py
+test_browser_recording_formats (__main__.BridgeTests.test_browser_recording_formats) ... 127.0.0.1 - - [20/Sep/2026 05:51:53] "POST /stt HTTP/1.1" 200 -
+127.0.0.1 - - [20/Sep/2026 05:51:53] "POST /stt HTTP/1.1" 200 -
+ok
+test_busy_and_lock_recovery (__main__.BridgeTests.test_busy_and_lock_recovery) ... 127.0.0.1 - - [20/Sep/2026 05:51:53] "POST /stt HTTP/1.1" 503 -
+127.0.0.1 - - [20/Sep/2026 05:51:53] "POST /stt HTTP/1.1" 200 -
+ok
+test_degenerate_asr_tail_is_folded_not_spoken (__main__.BridgeTests.test_degenerate_asr_tail_is_folded_not_spoken)
+The engine sometimes decodes past the end of the utterance. ... ok
+test_disconnect_terminates_owned_asr_and_releases_slot (__main__.BridgeTests.test_disconnect_terminates_owned_asr_and_releases_slot) ... ok
+test_incomplete_truncated_and_failed_children (__main__.BridgeTests.test_incomplete_truncated_and_failed_children) ... 127.0.0.1 - - [20/Sep/2026 05:51:53] "POST /stt HTTP/1.1" 200 -
+127.0.0.1 - - [20/Sep/2026 05:51:53] "POST /stt HTTP/1.1" 502 -
+127.0.0.1 - - [20/Sep/2026 05:51:53] "POST /stt HTTP/1.1" 502 -
+
+127.0.0.1 - - [20/Sep/2026 05:51:54] "POST /stt HTTP/1.1" 502 -
+ok
+test_invalid_audio_and_limits (__main__.BridgeTests.test_invalid_audio_and_limits) ... [in#0 @ 0x5adb917b1f40] Error opening input: Invalid data found when processing input
+Error opening input file /tmp/speech-ui-fe63r5m9/upload.
+Error opening input files: Invalid data found when processing input
+
+127.0.0.1 - - [20/Sep/2026 05:51:54] "POST /stt HTTP/1.1" 400 -
+127.0.0.1 - - [20/Sep/2026 05:51:54] "POST /stt HTTP/1.1" 400 -
+127.0.0.1 - - [20/Sep/2026 05:51:54] "POST /stt HTTP/1.1" 413 -
+127.0.0.1 - - [20/Sep/2026 05:51:54] "POST /stt HTTP/1.1" 413 -
+127.0.0.1 - - [20/Sep/2026 05:51:54] "POST /stt HTTP/1.1" 403 -
+[in#0 @ 0x5b64629daf40] Error opening input: Invalid data found when processing input
+Error opening input file /tmp/speech-ui-vajn1orm/upload.
+Error opening input files: Invalid data found when processing input
+
+127.0.0.1 - - [20/Sep/2026 05:51:54] "POST /stt HTTP/1.1" 400 -
+ok
+test_native_speaker_and_silence_markers (__main__.BridgeTests.test_native_speaker_and_silence_markers) ... ok
+test_page_health_proxy (__main__.BridgeTests.test_page_health_proxy) ... 127.0.0.1 - - [20/Sep/2026 05:51:54] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [20/Sep/2026 05:51:54] "GET /stt/health HTTP/1.1" 200 -
+127.0.0.1 - - [20/Sep/2026 05:51:54] "POST /tts?language=f&voice=ff_siwis&speed=1&stream=1 HTTP/1.1" 200 -
+ok
+test_resampling_and_complete_unicode_output (__main__.BridgeTests.test_resampling_and_complete_unicode_output) ... 127.0.0.1 - - [20/Sep/2026 05:51:54] "POST /stt HTTP/1.1" 200 -
+ok
+test_tls_disconnect_releases_asr (__main__.BridgeTests.test_tls_disconnect_releases_asr) ... ok
+test_tls_upload_and_shared_busy_limit (__main__.BridgeTests.test_tls_upload_and_shared_busy_limit) ... 127.0.0.1 - - [20/Sep/2026 05:51:54] "GET /stt/health HTTP/1.1" 200 -
+127.0.0.1 - - [20/Sep/2026 05:51:54] "POST /stt HTTP/1.1" 200 -
+127.0.0.1 - - [20/Sep/2026 05:51:54] "POST /stt HTTP/1.1" 503 -
+127.0.0.1 - - [20/Sep/2026 05:51:54] "POST /tts?stream=1 HTTP/1.1" 200 -
+ok
+test_truncated_tts_stream_is_a_transport_failure (__main__.BridgeTests.test_truncated_tts_stream_is_a_transport_failure) ... 127.0.0.1 - - [20/Sep/2026 05:51:54] "POST /tts?stream=1&broken=1 HTTP/1.1" 200 -
+127.0.0.1 - - [20/Sep/2026 05:51:54] speech service error: IncompleteRead(0 bytes read)
+ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 2.596s
+
+OK
+CUDA_VISIBLE_DEVICES="" python3 -u tests/voice_chat_test.py
+test_an_empty_registry_says_so_plainly (__main__.CapabilityPromptMatchesAttachedTools.test_an_empty_registry_says_so_plainly) ... ok
+test_attached_tools_drop_the_no_capability_sentence (__main__.CapabilityPromptMatchesAttachedTools.test_attached_tools_drop_the_no_capability_sentence) ... ok
+test_busy_is_shared_across_http_tls (__main__.ChatTests.test_busy_is_shared_across_http_tls) ... 127.0.0.1 - - [20/Sep/2026 05:51:55] "POST /chat/completions HTTP/1.1" 503 -
+ok
+test_disconnect_closes_qwen_socket_and_releases_slot (__main__.ChatTests.test_disconnect_closes_qwen_socket_and_releases_slot) ... ok
+test_invalid_role_and_cross_origin_rejected (__main__.ChatTests.test_invalid_role_and_cross_origin_rejected) ... 127.0.0.1 - - [20/Sep/2026 05:51:55] "POST /chat/completions HTTP/1.1" 400 -
+127.0.0.1 - - [20/Sep/2026 05:51:55] "POST /chat/completions HTTP/1.1" 400 -
+127.0.0.1 - - [20/Sep/2026 05:51:55] "POST /chat/completions HTTP/1.1" 400 -
+127.0.0.1 - - [20/Sep/2026 05:51:55] "POST /chat/completions HTTP/1.1" 400 -
+127.0.0.1 - - [20/Sep/2026 05:51:55] "POST /chat/completions HTTP/1.1" 403 -
+ok
+test_overflow_reasoning_and_truncation_fail_closed (__main__.ChatTests.test_overflow_reasoning_and_truncation_fail_closed) ... 127.0.0.1 - - [20/Sep/2026 05:51:55] "POST /chat/completions HTTP/1.1" 400 -
+127.0.0.1 - - [20/Sep/2026 05:51:55] "POST /chat/completions HTTP/1.1" 502 -
+127.0.0.1 - - [20/Sep/2026 05:51:55] "POST /chat/completions HTTP/1.1" 502 -
+ok
+test_page_and_private_history_contract (__main__.ChatTests.test_page_and_private_history_contract) ... 127.0.0.1 - - [20/Sep/2026 05:51:55] "GET /chat HTTP/1.1" 200 -
+127.0.0.1 - - [20/Sep/2026 05:51:55] "GET /chat.js HTTP/1.1" 200 -
+127.0.0.1 - - [20/Sep/2026 05:51:55] "POST /chat/completions HTTP/1.1" 200 -
+127.0.0.1 - - [20/Sep/2026 05:51:55] "POST /chat/completions HTTP/1.1" 200 -
+ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 1.192s
+
+OK
+CUDA_VISIBLE_DEVICES="" python3 -u tests/compact_test.py
+test_compact_fails_closed_for_incomplete_or_invalid_output (__main__.CompactTests.test_compact_fails_closed_for_incomplete_or_invalid_output) ... 127.0.0.1 - - [20/Sep/2026 05:51:57] "POST /chat/compact HTTP/1.1" 502 -
+127.0.0.1 - - [20/Sep/2026 05:51:57] "POST /chat/compact HTTP/1.1" 502 -
+127.0.0.1 - - [20/Sep/2026 05:51:57] "POST /chat/compact HTTP/1.1" 502 -
+127.0.0.1 - - [20/Sep/2026 05:51:57] "POST /chat/compact HTTP/1.1" 502 -
+127.0.0.1 - - [20/Sep/2026 05:51:57] "POST /chat/compact HTTP/1.1" 502 -
+127.0.0.1 - - [20/Sep/2026 05:51:57] "POST /chat/compact HTTP/1.1" 502 -
+127.0.0.1 - - [20/Sep/2026 05:51:57] "POST /chat/compact HTTP/1.1" 502 -
+127.0.0.1 - - [20/Sep/2026 05:51:57] "POST /chat/compact HTTP/1.1" 503 -
+127.0.0.1 - - [20/Sep/2026 05:51:57] "POST /chat/compact HTTP/1.1" 400 -
+ok
+test_compact_preserves_inputs_and_never_accesses_tools (__main__.CompactTests.test_compact_preserves_inputs_and_never_accesses_tools) ... 127.0.0.1 - - [20/Sep/2026 05:51:57] "POST /chat/compact HTTP/1.1" 200 -
+ok
+test_fifo_queue_shared_by_compact_and_chat_and_full_refusal (__main__.CompactTests.test_fifo_queue_shared_by_compact_and_chat_and_full_refusal) ... 127.0.0.1 - - [20/Sep/2026 05:51:57] "POST /chat/completions HTTP/1.1" 503 -
+127.0.0.1 - - [20/Sep/2026 05:51:57] "POST /chat/compact HTTP/1.1" 200 -
+ok
+test_independent_sessions_reach_model_simultaneously (__main__.CompactTests.test_independent_sessions_reach_model_simultaneously) ... 127.0.0.1 - - [20/Sep/2026 05:51:57] "POST /chat/completions HTTP/1.1" 200 -
+127.0.0.1 - - [20/Sep/2026 05:51:57] "POST /chat/completions HTTP/1.1" 200 -
+ok
+test_invalid_input_does_not_reach_model (__main__.CompactTests.test_invalid_input_does_not_reach_model) ... 127.0.0.1 - - [20/Sep/2026 05:51:57] "POST /chat/compact HTTP/1.1" 400 -
+127.0.0.1 - - [20/Sep/2026 05:51:57] "POST /chat/compact HTTP/1.1" 400 -
+127.0.0.1 - - [20/Sep/2026 05:51:57] "POST /chat/compact HTTP/1.1" 400 -
+127.0.0.1 - - [20/Sep/2026 05:51:57] "POST /chat/compact HTTP/1.1" 400 -
+127.0.0.1 - - [20/Sep/2026 05:51:57] "POST /chat/compact HTTP/1.1" 400 -
+127.0.0.1 - - [20/Sep/2026 05:51:57] "POST /chat/compact HTTP/1.1" 400 -
+ok
+test_large_history_and_body_accepted (__main__.CompactTests.test_large_history_and_body_accepted) ... 127.0.0.1 - - [20/Sep/2026 05:51:57] "POST /chat/completions HTTP/1.1" 200 -
+127.0.0.1 - - [20/Sep/2026 05:51:57] "POST /chat/completions HTTP/1.1" 200 -
+127.0.0.1 - - [20/Sep/2026 05:51:57] "POST /chat/completions HTTP/1.1" 400 -
+ok
+test_queue_wait_is_bounded_and_slot_is_not_leaked (__main__.CompactTests.test_queue_wait_is_bounded_and_slot_is_not_leaked) ... 127.0.0.1 - - [20/Sep/2026 05:51:59] "POST /chat/compact HTTP/1.1" 504 -
+ok
+test_queued_disconnect_removes_waiter_without_upstream_call (__main__.CompactTests.test_queued_disconnect_removes_waiter_without_upstream_call) ... ok
+test_summary_is_user_data_and_system_prompt_is_unchanged (__main__.CompactTests.test_summary_is_user_data_and_system_prompt_is_unchanged) ... 127.0.0.1 - - [20/Sep/2026 05:51:59] "POST /chat/completions HTTP/1.1" 200 -
+ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 3.247s
+
+OK
+CUDA_VISIBLE_DEVICES="" python3 -u tests/retrieval_test.py
+test_a_miss_is_a_miss (__main__.RetrievalTests.test_a_miss_is_a_miss) ... ok
+test_a_missing_corpus_path_is_an_error (__main__.RetrievalTests.test_a_missing_corpus_path_is_an_error) ... ok
+test_a_missing_index_is_refused_not_ignored (__main__.RetrievalTests.test_a_missing_index_is_refused_not_ignored) ... ok
+test_bm25_finds_the_right_paragraph (__main__.RetrievalTests.test_bm25_finds_the_right_paragraph) ... ok
+test_chunks_overlap_and_stay_bounded (__main__.RetrievalTests.test_chunks_overlap_and_stay_bounded) ... ok
+test_only_supported_files_are_ingested (__main__.RetrievalTests.test_only_supported_files_are_ingested) ... ok
+test_query_grammar_cannot_throw (__main__.RetrievalTests.test_query_grammar_cannot_throw) ... ok
+test_rebuild_is_idempotent (__main__.RetrievalTests.test_rebuild_is_idempotent) ... ok
+test_results_are_bounded_by_character_budget (__main__.RetrievalTests.test_results_are_bounded_by_character_budget) ... ok
+test_status_reports_staleness_not_silence (__main__.RetrievalTests.test_status_reports_staleness_not_silence) ... ok
+test_structured_files_are_searchable_as_text (__main__.RetrievalTests.test_structured_files_are_searchable_as_text) ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 0.116s
+
+OK
+CUDA_VISIBLE_DEVICES="" python3 -u tests/agent_tools_test.py
+test_a_named_file_that_is_missing_is_fatal (__main__.ConfigTests.test_a_named_file_that_is_missing_is_fatal) ... ok
+test_an_unknown_key_is_fatal_rather_than_typo_tolerated (__main__.ConfigTests.test_an_unknown_key_is_fatal_rather_than_typo_tolerated) ... ok
+test_fetch_without_an_allow_list_refuses_to_start (__main__.ConfigTests.test_fetch_without_an_allow_list_refuses_to_start) ... ok
+test_limits_are_clamped_not_trusted (__main__.ConfigTests.test_limits_are_clamped_not_trusted) ... ok
+test_mcp_servers_are_named_checked_and_deduplicated (__main__.ConfigTests.test_mcp_servers_are_named_checked_and_deduplicated) ... ok
+test_no_file_named_means_the_conservative_defaults (__main__.ConfigTests.test_no_file_named_means_the_conservative_defaults) ... ok
+test_prompt_where_lines_are_checked_and_bounded (__main__.ConfigTests.test_prompt_where_lines_are_checked_and_bounded) ... ok
+test_the_environment_selects_the_file_and_a_broken_one_still_fails (__main__.ConfigTests.test_the_environment_selects_the_file_and_a_broken_one_still_fails) ... ok
+test_too_many_tools_is_refused_before_the_engine_sees_them (__main__.ConfigTests.test_too_many_tools_is_refused_before_the_engine_sees_them) ... ok
+test_a_disabled_builtin_is_absent_from_the_spec_list (__main__.RegistryTests.test_a_disabled_builtin_is_absent_from_the_spec_list) ... ok
+test_a_handler_that_raises_is_a_tool_error_not_a_crash (__main__.RegistryTests.test_a_handler_that_raises_is_a_tool_error_not_a_crash) ... ok
+test_a_hanging_handler_is_abandoned_within_its_budget (__main__.RegistryTests.test_a_hanging_handler_is_abandoned_within_its_budget) ... ok
+test_defaults_offer_only_now (__main__.RegistryTests.test_defaults_offer_only_now) ... ok
+test_fetch_url_is_off_unless_a_host_is_named (__main__.RegistryTests.test_fetch_url_is_off_unless_a_host_is_named) ... ok
+test_malformed_arguments_are_the_models_to_fix (__main__.RegistryTests.test_malformed_arguments_are_the_models_to_fix) ... ok
+test_pause_listening_is_a_control_on_the_answer_and_never_a_resume (__main__.RegistryTests.test_pause_listening_is_a_control_on_the_answer_and_never_a_resume) ... ok
+test_results_are_clipped_to_the_context_budget (__main__.RegistryTests.test_results_are_clipped_to_the_context_budget) ... ok
+test_search_notes_reports_a_missing_index_instead_of_inventing (__main__.RegistryTests.test_search_notes_reports_a_missing_index_instead_of_inventing) ... ok
+test_the_manifest_ends_with_where_things_are_when_the_operator_says (__main__.RegistryTests.test_the_manifest_ends_with_where_things_are_when_the_operator_says)
+A purpose says what a server is for; only the operator knows which ... ok
+test_the_manifest_says_what_each_tool_is_for (__main__.RegistryTests.test_the_manifest_says_what_each_tool_is_for) ... ok
+test_unknown_tool_names_what_does_exist (__main__.RegistryTests.test_unknown_tool_names_what_does_exist) ... ok
+test_a_tool_with_no_declared_schema_accepts_an_object (__main__.ValidatorTests.test_a_tool_with_no_declared_schema_accepts_an_object) ... ok
+test_types_enums_and_bounds (__main__.ValidatorTests.test_types_enums_and_bounds) ... ok
+test_unknown_keywords_are_ignored_but_known_ones_are_not (__main__.ValidatorTests.test_unknown_keywords_are_ignored_but_known_ones_are_not) ... ok
+
+----------------------------------------------------------------------
+Ran 24 tests in 0.308s
+
+OK
+CUDA_VISIBLE_DEVICES="" python3 -W error::ResourceWarning -u tests/mcp_test.py
+test_a_command_that_does_not_exist_is_a_clean_failure (__main__.MCPTests.test_a_command_that_does_not_exist_is_a_clean_failure) ... ok
+test_a_dead_mcp_server_degrades_the_assistant_instead_of_killing_it (__main__.MCPTests.test_a_dead_mcp_server_degrades_the_assistant_instead_of_killing_it) ... ok
+test_a_hanging_server_costs_its_timeout_not_the_turn (__main__.MCPTests.test_a_hanging_server_costs_its_timeout_not_the_turn) ... ok
+test_a_jsonrpc_error_surfaces_its_message (__main__.MCPTests.test_a_jsonrpc_error_surfaces_its_message) ... ok
+test_a_server_that_dies_mid_call_is_reported_not_swallowed (__main__.MCPTests.test_a_server_that_dies_mid_call_is_reported_not_swallowed) ... ok
+test_allow_and_deny_are_applied_before_the_model_sees_anything (__main__.MCPTests.test_allow_and_deny_are_applied_before_the_model_sees_anything) ... ok
+test_initialize_then_list_then_call (__main__.MCPTests.test_initialize_then_list_then_call) ... ok
+test_restart_is_bounded (__main__.MCPTests.test_restart_is_bounded) ... ok
+test_starting_twice_reuses_the_same_child (__main__.MCPTests.test_starting_twice_reuses_the_same_child) ... ok
+test_the_child_gets_a_small_environment (__main__.MCPTests.test_the_child_gets_a_small_environment) ... ok
+test_the_registry_turns_mcp_tools_into_ordinary_tools (__main__.MCPTests.test_the_registry_turns_mcp_tools_into_ordinary_tools) ... ok
+test_the_tool_list_is_captured_once (__main__.MCPTests.test_the_tool_list_is_captured_once) ... ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 1.193s
+
+OK
+CUDA_VISIBLE_DEVICES="" python3 -W error::ResourceWarning -u tests/mcp_concurrency_test.py
+test_failed_send_does_not_leave_pending_request (__main__.TransportTests.test_failed_send_does_not_leave_pending_request) ... ok
+test_parallel_requests_keep_ids_and_lines_separate (__main__.TransportTests.test_parallel_requests_keep_ids_and_lines_separate) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.096s
+
+OK
+CUDA_VISIBLE_DEVICES="" python3 -W error::ResourceWarning -u tests/mcp_files_test.py
+/mnt/data/voice-stop-turns-20260920/tests/mcp_files_test.py:179: SyntaxWarning: invalid escape sequence '\s'
+  'anchors and \s must be regex, not literals: one line has exactly two words')
+test_a_scope_refusal_points_at_request_directory_only_when_grants_exist (__main__.FileMCPProcessTests.test_a_scope_refusal_points_at_request_directory_only_when_grants_exist) ... ok
+test_arguments_must_be_an_object (__main__.FileMCPProcessTests.test_arguments_must_be_an_object) ... ok
+test_doctor_names_every_exposed_directory (__main__.FileMCPProcessTests.test_doctor_names_every_exposed_directory) ... ok
+test_garbage_on_stdin_does_not_kill_the_server (__main__.FileMCPProcessTests.test_garbage_on_stdin_does_not_kill_the_server) ... ok
+test_missing_root_directory_refuses (__main__.FileMCPProcessTests.test_missing_root_directory_refuses) ... ok
+test_no_roots_refuses_to_start (__main__.FileMCPProcessTests.test_no_roots_refuses_to_start) ... ok
+test_several_roots_must_be_named_by_the_caller (__main__.FileMCPProcessTests.test_several_roots_must_be_named_by_the_caller) ... ok
+test_a_huge_result_is_trimmed_not_sliced (__main__.FileMCPTests.test_a_huge_result_is_trimmed_not_sliced)
+The output cap must never hand back JSON that does not parse. ... ok
+test_absolute_and_home_refused (__main__.FileMCPTests.test_absolute_and_home_refused) ... ok
+test_binary_refused_without_content (__main__.FileMCPTests.test_binary_refused_without_content) ... ok
+test_directory_says_use_list_dir (__main__.FileMCPTests.test_directory_says_use_list_dir) ... ok
+test_dot_git_is_not_walkable (__main__.FileMCPTests.test_dot_git_is_not_walkable) ... ok
+test_dotdot_refused (__main__.FileMCPTests.test_dotdot_refused) ... ok
+test_find_by_glob (__main__.FileMCPTests.test_find_by_glob) ... ok
+test_grep_ignore_case_and_glob (__main__.FileMCPTests.test_grep_ignore_case_and_glob) ... ok
+test_grep_match_cap (__main__.FileMCPTests.test_grep_match_cap) ... ok
+test_grep_regex_metacharacters_are_regex (__main__.FileMCPTests.test_grep_regex_metacharacters_are_regex) ... ok
+test_grep_reports_file_and_line_number (__main__.FileMCPTests.test_grep_reports_file_and_line_number) ... ok
+test_grep_skips_binary_and_keeps_going (__main__.FileMCPTests.test_grep_skips_binary_and_keeps_going) ... ok
+test_invalid_regex_is_an_error_not_a_crash (__main__.FileMCPTests.test_invalid_regex_is_an_error_not_a_crash) ... ok
+test_list_dir_hides_dotfiles_by_default (__main__.FileMCPTests.test_list_dir_hides_dotfiles_by_default) ... ok
+test_read_byte_cap_is_reported_not_silent (__main__.FileMCPTests.test_read_byte_cap_is_reported_not_silent) ... ok
+test_read_file_pages_with_offset (__main__.FileMCPTests.test_read_file_pages_with_offset) ... ok
+test_read_file_returns_numbered_lines (__main__.FileMCPTests.test_read_file_returns_numbered_lines) ... ok
+test_roots_reports_what_is_exposed (__main__.FileMCPTests.test_roots_reports_what_is_exposed) ... ok
+test_symlink_to_directory_cannot_escape (__main__.FileMCPTests.test_symlink_to_directory_cannot_escape) ... ok
+test_symlink_to_file_cannot_escape (__main__.FileMCPTests.test_symlink_to_file_cannot_escape) ... ok
+test_tools_listed_are_read_only (__main__.FileMCPTests.test_tools_listed_are_read_only) ... ok
+test_unknown_tool_is_an_error_not_a_crash (__main__.FileMCPTests.test_unknown_tool_is_an_error_not_a_crash) ... ok
+test_walk_never_follows_links_out (__main__.FileMCPTests.test_walk_never_follows_links_out)
+grep over the whole root must not read through `escape` into /etc/passwd. ... ok
+
+----------------------------------------------------------------------
+Ran 30 tests in 0.279s
+
+OK
+CUDA_VISIBLE_DEVICES="" python3 -W error::ResourceWarning -u tests/mcp_web_test.py
+test_doctor_names_the_policy (__main__.WebMCPProcessTests.test_doctor_names_the_policy) ... ok
+test_there_is_no_allow_private_flag (__main__.WebMCPProcessTests.test_there_is_no_allow_private_flag) ... ok
+test_unknown_search_backend_refuses_to_start (__main__.WebMCPProcessTests.test_unknown_search_backend_refuses_to_start) ... ok
+test_allow_list_restricts (__main__.WebMCPTests.test_allow_list_restricts) ... ok
+test_arguments_must_be_an_object (__main__.WebMCPTests.test_arguments_must_be_an_object) ... ok
+test_bad_arguments_are_refusals (__main__.WebMCPTests.test_bad_arguments_are_refusals) ... ok
+test_big_page_is_truncated_not_refused (__main__.WebMCPTests.test_big_page_is_truncated_not_refused) ... ok
+test_challenge_page_falls_back_to_wikipedia (__main__.WebMCPTests.test_challenge_page_falls_back_to_wikipedia) ... ok
+test_credentials_and_other_schemes_are_refused (__main__.WebMCPTests.test_credentials_and_other_schemes_are_refused) ... ok
+test_ddg_results_are_parsed_and_ads_dropped (__main__.WebMCPTests.test_ddg_results_are_parsed_and_ads_dropped) ... ok
+test_deny_list_wins (__main__.WebMCPTests.test_deny_list_wins) ... ok
+test_garbage_on_stdin_does_not_kill_the_server (__main__.WebMCPTests.test_garbage_on_stdin_does_not_kill_the_server) ... ok
+test_gzip_is_handled (__main__.WebMCPTests.test_gzip_is_handled) ... ok
+test_links_are_capped (__main__.WebMCPTests.test_links_are_capped) ... ok
+test_local_and_private_targets_are_refused_by_the_real_server (__main__.WebMCPTests.test_local_and_private_targets_are_refused_by_the_real_server) ... ok
+test_max_results_limits_search (__main__.WebMCPTests.test_max_results_limits_search) ... ok
+test_paging_with_start (__main__.WebMCPTests.test_paging_with_start) ... ok
+test_per_minute_cap (__main__.WebMCPTests.test_per_minute_cap) ... ok
+test_plain_text_and_json_come_back_raw (__main__.WebMCPTests.test_plain_text_and_json_come_back_raw) ... ok
+test_png_is_refused_without_content (__main__.WebMCPTests.test_png_is_refused_without_content) ... ok
+test_read_page_extracts_title_text_and_links (__main__.WebMCPTests.test_read_page_extracts_title_text_and_links) ... ok
+test_redirect_chain_is_followed_and_final_url_reported (__main__.WebMCPTests.test_redirect_chain_is_followed_and_final_url_reported) ... ok
+test_redirect_into_private_range_is_refused (__main__.WebMCPTests.test_redirect_into_private_range_is_refused) ... ok
+test_redirect_loop_gives_up (__main__.WebMCPTests.test_redirect_loop_gives_up) ... ok
+test_search_is_gated_the_same_way (__main__.WebMCPTests.test_search_is_gated_the_same_way) ... ok
+test_search_query_bounds (__main__.WebMCPTests.test_search_query_bounds) ... ok
+test_searxng_backend (__main__.WebMCPTests.test_searxng_backend) ... ok
+test_tools_listed_are_read_only (__main__.WebMCPTests.test_tools_listed_are_read_only) ... ok
+test_unknown_tool_is_an_error_not_a_crash (__main__.WebMCPTests.test_unknown_tool_is_an_error_not_a_crash) ... ok
+test_windows_1252_is_decoded (__main__.WebMCPTests.test_windows_1252_is_decoded) ... ok
+
+----------------------------------------------------------------------
+Ran 30 tests in 1.022s
+
+OK
+CUDA_VISIBLE_DEVICES="" python3 -W error::ResourceWarning -u tests/mcp_claude_test.py
+................
+----------------------------------------------------------------------
+Ran 16 tests in 7.753s
+
+OK
+CUDA_VISIBLE_DEVICES="" python3 -W error::ResourceWarning -u tests/claude_stop_test.py
+.....
+----------------------------------------------------------------------
+Ran 5 tests in 4.147s
+
+OK
+CUDA_VISIBLE_DEVICES="" python3 -W error::ResourceWarning -u tests/mcp_codex_test.py
+..........F....F..
+======================================================================
+FAIL: test_the_two_tools_and_their_folded_names (__main__.CodexServerTests.test_the_two_tools_and_their_folded_names)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/voice-stop-turns-20260920/tests/mcp_codex_test.py", line 107, in test_the_two_tools_and_their_folded_names
+    self.assertEqual(sorted(self.tools), ['send', 'updates'])
+AssertionError: Lists differ: ['send', 'stop', 'updates'] != ['send', 'updates']
+
+First differing element 1:
+'stop'
+'updates'
+
+First list contains 1 additional elements.
+First extra element 2:
+'updates'
+
+- ['send', 'stop', 'updates']
+?         --------
+
++ ['send', 'updates']
+
+======================================================================
+FAIL: test_the_registry_offers_both_tools_with_the_operators_purpose (__main__.ProcessHygieneTests.test_the_registry_offers_both_tools_with_the_operators_purpose)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/voice-stop-turns-20260920/tests/mcp_codex_test.py", line 341, in test_the_registry_offers_both_tools_with_the_operators_purpose
+    self.assertEqual([name for name in registry.names() if name.startswith('mcp__codex')],
+AssertionError: Lists differ: ['mcp__codex__send', 'mcp__codex__stop', 'mcp__codex__updates'] != ['mcp__codex__send', 'mcp__codex__updates']
+
+First differing element 1:
+'mcp__codex__stop'
+'mcp__codex__updates'
+
+First list contains 1 additional elements.
+First extra element 2:
+'mcp__codex__updates'
+
+- ['mcp__codex__send', 'mcp__codex__stop', 'mcp__codex__updates']
+?                     --------------------
+
++ ['mcp__codex__send', 'mcp__codex__updates']
+
+----------------------------------------------------------------------
+Ran 18 tests in 5.958s
+
+FAILED (failures=2)
+make: *** [Makefile:68: test-codex] Error 1

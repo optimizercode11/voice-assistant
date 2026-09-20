@@ -1,0 +1,97 @@
+guarded-run: campaign=voice-stop-turns-20260920 label=positive mode=cpu cpus=0-3
+command: make test-turn test-claude test-loop NODE=/tmp/fork-stability-browser-zu50jkow/node_modules/node/bin/node
+CUDA_VISIBLE_DEVICES="" python3 -u tests/turn_control_test.py
+test_noise_is_discarded_but_english_fragments_are_kept (__main__.CompletedShortAnswers.test_noise_is_discarded_but_english_fragments_are_kept) ... ok
+test_numeric_and_non_latin_answers_do_not_wait_for_another_clip (__main__.CompletedShortAnswers.test_numeric_and_non_latin_answers_do_not_wait_for_another_clip) ... ok
+test_a_finished_turn_never_holds_however_short (__main__.HoldTests.test_a_finished_turn_never_holds_however_short) ... ok
+test_a_short_utterance_holds_at_any_clip_length (__main__.HoldTests.test_a_short_utterance_holds_at_any_clip_length) ... ok
+test_an_open_clause_holds_whatever_the_duration_says (__main__.HoldTests.test_an_open_clause_holds_whatever_the_duration_says) ... ok
+test_patience_is_bounded_by_a_duration_not_a_word_count (__main__.HoldTests.test_patience_is_bounded_by_a_duration_not_a_word_count) ... ok
+test_the_measurement_is_echoed_back_for_the_transcript_log (__main__.HoldTests.test_the_measurement_is_echoed_back_for_the_transcript_log) ... ok
+test_the_verdict_shape_is_stable_for_the_page (__main__.HoldTests.test_the_verdict_shape_is_stable_for_the_page) ... ok
+test_without_a_measurement_it_falls_back_to_the_words (__main__.HoldTests.test_without_a_measurement_it_falls_back_to_the_words) ... ok
+test_it_never_raises_on_junk (__main__.ItCanOnlyAddPatience.test_it_never_raises_on_junk) ... ok
+test_it_never_subtracts_time (__main__.ItCanOnlyAddPatience.test_it_never_subtracts_time) ... ok
+test_a_question_ending_on_an_open_word_is_still_a_question (__main__.MeasuredTranscripts.test_a_question_ending_on_an_open_word_is_still_a_question) ... ok
+test_a_real_one_word_answer_still_dispatches (__main__.MeasuredTranscripts.test_a_real_one_word_answer_still_dispatches) ... ok
+test_a_real_sentence_dispatches (__main__.MeasuredTranscripts.test_a_real_sentence_dispatches) ... ok
+test_breath_is_not_speech (__main__.MeasuredTranscripts.test_breath_is_not_speech) ... ok
+test_open_clause_waits (__main__.MeasuredTranscripts.test_open_clause_waits) ... ok
+test_punctuated_fragment_is_not_a_finished_turn (__main__.MeasuredTranscripts.test_punctuated_fragment_is_not_a_finished_turn) ... ok
+
+----------------------------------------------------------------------
+Ran 17 tests in 0.001s
+
+OK
+CUDA_VISIBLE_DEVICES="" python3 -W error::ResourceWarning -u tests/mcp_claude_test.py
+................
+----------------------------------------------------------------------
+Ran 16 tests in 7.581s
+
+OK
+CUDA_VISIBLE_DEVICES="" python3 -W error::ResourceWarning -u tests/claude_stop_test.py
+.....
+----------------------------------------------------------------------
+Ran 5 tests in 4.210s
+
+OK
+CUDA_VISIBLE_DEVICES="" python3 -u tests/tool_loop_test.py
+test_a_broken_capability_config_refuses_to_start (__main__.BridgeStartTests.test_a_broken_capability_config_refuses_to_start) ... /usr/lib/python3.12/unittest/case.py:589: ResourceWarning: unclosed file <_io.TextIOWrapper name=4 encoding='UTF-8'>
+  if method() is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_a_real_start_offers_mcp_and_rag_tools_over_http (__main__.BridgeStartTests.test_a_real_start_offers_mcp_and_rag_tools_over_http) ... ok
+test_a_plain_json_body_is_still_accepted_when_streaming_was_asked_for (__main__.ToolLoopTests.test_a_plain_json_body_is_still_accepted_when_streaming_was_asked_for) ... 127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 200 -
+ok
+test_a_stream_that_never_finishes_is_a_cut_reply (__main__.ToolLoopTests.test_a_stream_that_never_finishes_is_a_cut_reply) ... 127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 200 -
+ok
+test_a_tool_call_written_as_prose_is_not_an_answer (__main__.ToolLoopTests.test_a_tool_call_written_as_prose_is_not_an_answer) ... 127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 502 -
+ok
+test_a_truncated_final_answer_still_fails_closed (__main__.ToolLoopTests.test_a_truncated_final_answer_still_fails_closed) ... 127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 502 -
+ok
+test_busy_turn_still_shares_the_lock (__main__.ToolLoopTests.test_busy_turn_still_shares_the_lock) ... 127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 503 -
+ok
+test_client_cannot_inject_a_tool_message (__main__.ToolLoopTests.test_client_cannot_inject_a_tool_message) ... 127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 400 -
+127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 400 -
+ok
+test_health_and_tools_advertise_provenance (__main__.ToolLoopTests.test_health_and_tools_advertise_provenance) ... 127.0.0.1 - - [20/Sep/2026 05:51:29] "GET /chat/health HTTP/1.1" 200 -
+127.0.0.1 - - [20/Sep/2026 05:51:29] "GET /tools HTTP/1.1" 200 -
+127.0.0.1 - - [20/Sep/2026 05:51:29] "GET /chat/health HTTP/1.1" 200 -
+127.0.0.1 - - [20/Sep/2026 05:51:29] "GET /tools HTTP/1.1" 200 -
+ok
+test_malformed_tool_call_fails_closed (__main__.ToolLoopTests.test_malformed_tool_call_fails_closed) ... 127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 502 -
+ok
+test_model_cannot_pause_the_microphone_without_current_user_intent (__main__.ToolLoopTests.test_model_cannot_pause_the_microphone_without_current_user_intent) ... 127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 200 -
+127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 200 -
+127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 200 -
+127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 200 -
+127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 200 -
+ok
+test_no_tools_means_the_old_single_shot_contract (__main__.ToolLoopTests.test_no_tools_means_the_old_single_shot_contract) ... 127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 200 -
+ok
+test_pause_listening_rides_on_the_answer_as_a_control (__main__.ToolLoopTests.test_pause_listening_rides_on_the_answer_as_a_control) ... 127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 200 -
+127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 200 -
+127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 200 -
+ok
+test_rounds_are_bounded_and_the_last_round_has_no_tools (__main__.ToolLoopTests.test_rounds_are_bounded_and_the_last_round_has_no_tools) ... 127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 502 -
+ok
+test_streamed_tool_round_keeps_its_deltas_apart_from_the_answer (__main__.ToolLoopTests.test_streamed_tool_round_keeps_its_deltas_apart_from_the_answer) ... 127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 200 -
+ok
+test_streaming_is_opt_in (__main__.ToolLoopTests.test_streaming_is_opt_in) ... 127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 200 -
+ok
+test_streams_prose_as_deltas_before_the_answer (__main__.ToolLoopTests.test_streams_prose_as_deltas_before_the_answer) ... 127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 200 -
+ok
+test_the_model_is_told_when_its_next_round_is_the_last (__main__.ToolLoopTests.test_the_model_is_told_when_its_next_round_is_the_last) ... 127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 200 -
+ok
+test_the_system_prompt_carries_the_manifest_only_when_tools_are_attached (__main__.ToolLoopTests.test_the_system_prompt_carries_the_manifest_only_when_tools_are_attached) ... 127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 200 -
+127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 200 -
+ok
+test_tool_round_trip_is_server_owned_and_cited (__main__.ToolLoopTests.test_tool_round_trip_is_server_owned_and_cited) ... 127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 200 -
+ok
+test_unknown_tool_and_bad_arguments_come_back_as_tool_errors (__main__.ToolLoopTests.test_unknown_tool_and_bad_arguments_come_back_as_tool_errors) ... 127.0.0.1 - - [20/Sep/2026 05:51:29] "POST /chat/completions HTTP/1.1" 200 -
+ok
+
+----------------------------------------------------------------------
+Ran 21 tests in 3.363s
+
+OK

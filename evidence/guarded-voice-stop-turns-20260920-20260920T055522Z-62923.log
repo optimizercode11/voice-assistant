@@ -1,0 +1,37 @@
+guarded-run: campaign=voice-stop-turns-20260920 label=positive mode=cpu cpus=0-3
+command: make test-turn test-claude NODE=/tmp/fork-stability-browser-zu50jkow/node_modules/node/bin/node
+CUDA_VISIBLE_DEVICES="" python3 -u tests/turn_control_test.py
+test_noise_is_discarded_but_english_fragments_are_kept (__main__.CompletedShortAnswers.test_noise_is_discarded_but_english_fragments_are_kept) ... ok
+test_numeric_and_non_latin_answers_do_not_wait_for_another_clip (__main__.CompletedShortAnswers.test_numeric_and_non_latin_answers_do_not_wait_for_another_clip) ... ok
+test_a_finished_turn_never_holds_however_short (__main__.HoldTests.test_a_finished_turn_never_holds_however_short) ... ok
+test_a_short_utterance_holds_at_any_clip_length (__main__.HoldTests.test_a_short_utterance_holds_at_any_clip_length) ... ok
+test_an_open_clause_holds_whatever_the_duration_says (__main__.HoldTests.test_an_open_clause_holds_whatever_the_duration_says) ... ok
+test_patience_is_bounded_by_a_duration_not_a_word_count (__main__.HoldTests.test_patience_is_bounded_by_a_duration_not_a_word_count) ... ok
+test_the_measurement_is_echoed_back_for_the_transcript_log (__main__.HoldTests.test_the_measurement_is_echoed_back_for_the_transcript_log) ... ok
+test_the_verdict_shape_is_stable_for_the_page (__main__.HoldTests.test_the_verdict_shape_is_stable_for_the_page) ... ok
+test_without_a_measurement_it_falls_back_to_the_words (__main__.HoldTests.test_without_a_measurement_it_falls_back_to_the_words) ... ok
+test_it_never_raises_on_junk (__main__.ItCanOnlyAddPatience.test_it_never_raises_on_junk) ... ok
+test_it_never_subtracts_time (__main__.ItCanOnlyAddPatience.test_it_never_subtracts_time) ... ok
+test_a_question_ending_on_an_open_word_is_still_a_question (__main__.MeasuredTranscripts.test_a_question_ending_on_an_open_word_is_still_a_question) ... ok
+test_a_real_one_word_answer_still_dispatches (__main__.MeasuredTranscripts.test_a_real_one_word_answer_still_dispatches) ... ok
+test_a_real_sentence_dispatches (__main__.MeasuredTranscripts.test_a_real_sentence_dispatches) ... ok
+test_breath_is_not_speech (__main__.MeasuredTranscripts.test_breath_is_not_speech) ... ok
+test_open_clause_waits (__main__.MeasuredTranscripts.test_open_clause_waits) ... ok
+test_punctuated_fragment_is_not_a_finished_turn (__main__.MeasuredTranscripts.test_punctuated_fragment_is_not_a_finished_turn) ... ok
+
+----------------------------------------------------------------------
+Ran 17 tests in 0.001s
+
+OK
+CUDA_VISIBLE_DEVICES="" python3 -W error::ResourceWarning -u tests/mcp_claude_test.py
+................
+----------------------------------------------------------------------
+Ran 16 tests in 7.704s
+
+OK
+CUDA_VISIBLE_DEVICES="" python3 -W error::ResourceWarning -u tests/claude_stop_test.py
+.....
+----------------------------------------------------------------------
+Ran 5 tests in 4.154s
+
+OK

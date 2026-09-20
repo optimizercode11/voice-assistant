@@ -1,0 +1,3 @@
+guarded-run: campaign=voice-stop-turns-20260920 label=visual mode=cpu cpus=4-7
+command: env PLAYWRIGHT=/tmp/fork-stability-browser-zu50jkow/node_modules/playwright/index.mjs /tmp/fork-stability-browser-zu50jkow/node_modules/node/bin/node evidence/capture-black.mjs
+Black theme screenshot saved

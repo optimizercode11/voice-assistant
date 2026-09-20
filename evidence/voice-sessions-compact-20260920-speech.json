@@ -1,0 +1,40 @@
+{
+  "transcript": "The quick brown fox jumps over the lazy dog.",
+  "reply": "That\u2019s the classic pangram\u2014every letter of the alphabet in one line. What are you working on?",
+  "english": {
+    "frames": 124800,
+    "rms": 0.047760716115491215
+  },
+  "hindi": {
+    "frames": 42600,
+    "rms": 0.11133724070648571
+  },
+  "context_correction": [
+    "Four.",
+    "Five."
+  ],
+  "asr": {
+    "backend": "qasr",
+    "engine": {
+      "audio_ms": 2.115,
+      "prefill_ms": 6.259,
+      "decode_ms": 26.198,
+      "total_ms": 34.667,
+      "audio_rows": 35,
+      "prompt_len": 50,
+      "steps": 14,
+      "gemm_wide": 0,
+      "gemm_narrow": 0,
+      "gemv": 0,
+      "weight_bytes_read": 0
+    },
+    "frontend_ms": 3.503,
+    "frames": 272
+  },
+  "tls_verified": true,
+  "source": "16b1cea978cdbfbd874e10bc802165e4af719b1e1f0e9fca34cb7bbc8b98b3ac",
+  "pgid": 3158786,
+  "gpu": 4,
+  "llm_url": "http://127.0.0.1:8080",
+  "time": 1789882456.513376
+}

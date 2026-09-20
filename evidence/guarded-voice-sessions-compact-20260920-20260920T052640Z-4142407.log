@@ -1,0 +1,16 @@
+guarded-run: campaign=voice-sessions-compact-20260920 label=browser mode=cpu cpus=4-7
+command: make test-browser NODE=/tmp/fork-stability-browser-zu50jkow/node_modules/node/bin/node PLAYWRIGHT=/tmp/fork-stability-browser-zu50jkow/node_modules/playwright/index.mjs
+== voice_chat_browser ==
+PASS chromium: native playback, history, safe text, new chat, cancellation, real MediaRecorder/VAD, automatic relisten, microphone isolation
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+
+page.waitForFunction: Timeout 15000ms exceeded.
+    at /mnt/data/voice-sessions-compact-20260920/tests/browser/voice_chat_browser.mjs:48:13 {
+  log: [],
+  name: 'TimeoutError'
+}
+
+Node.js v22.23.2
+make: *** [Makefile:113: test-browser] Error 1

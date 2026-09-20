@@ -1,0 +1,3 @@
+guarded-run: campaign=voice-sessions-compact-20260920 label=prepare mode=cpu cpus=28-31
+command: python3 deploy/prepare-service.py
+Speech asset hashes verified; staged source fingerprint: 16b1cea978cdbfbd874e10bc802165e4af719b1e1f0e9fca34cb7bbc8b98b3ac

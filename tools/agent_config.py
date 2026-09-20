@@ -42,7 +42,7 @@ class ToolLimits:
         self.per_call_seconds = max(0.5, min(120.0, float(self.per_call_seconds)))
         self.result_chars = max(200, min(MAX_TOOL_RESULT_CHARS, int(self.result_chars)))
         self.turn_seconds = max(10.0, min(600.0, float(self.turn_seconds)))
-        self.generation_seconds = max(5.0, min(180.0, float(self.generation_seconds)))
+        self.generation_seconds = max(5.0, min(600.0, float(self.generation_seconds)))
 
 
 @dataclass

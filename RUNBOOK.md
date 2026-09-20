@@ -1,5 +1,31 @@
 # Runbook
 
+## Sessions and compaction deployment (2026-09-20)
+
+Profile/campaign: `voice-sessions-compact-20260920`; service
+`voice-stack-gpu4.service`; root
+`~/qwen36/voice-stack/voice-sessions-compact-20260920`. Chat remains on the
+independent full-context Q38-27B service at port 8080 (GPU2). Speech remains on
+GPU4. Q36 remains stopped and disabled. The bridge admits two concurrent chat
+or compaction requests, with 32 waiting and a 300-second queue deadline.
+Generation and tool-turn budgets are 600 seconds to accommodate long prompts.
+There is no new GPU allocation per saved conversation.
+
+Manual Compact stores a continuation summary plus recent turns; it retains the
+full archive in IndexedDB. Original browser storage is removed only after a
+successful migration. Save failure leaves the in-memory chat available to export.
+Two tabs can operate separate chats. Directory approvals remain account-level,
+as do configured coding-agent tool sessions; browser chats are not separate
+authorization identities.
+
+Promotion uses `deploy/prepare-service.py` then `deploy/update-service.sh` through
+the campaign CPU guard. The update snapshots the old unit and approvals, starts
+the new GPU4 service through its GPU guard, and checks Q38 PID and Q36 state did
+not change. Failure restores the old voice unit. Successful-update rollback:
+restore `rollback/voice-unit.service` to the systemd user unit path, daemon-reload,
+and restart the voice unit; do not run the earlier campaign restore script.
+See `evidence/SESSION-COMPACTION.md` for validation and deployed identity.
+
 ## GPU 4 speech deployment (2026-09-20)
 
 Campaign: `voice-gpu4-20260920-b`. The deployed default profile runs Kokoro

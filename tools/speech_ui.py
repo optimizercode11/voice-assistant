@@ -447,6 +447,70 @@ def approvals_store(registry):
     return agent_tools.approvals_store(registry.config, registry.context.root)
 
 
+class ChatAdmission:
+    """Shared FIFO admission; the condition is never held during model/tool work."""
+    def __init__(self, concurrency=1, queue_size=32, wait_seconds=300):
+        if concurrency < 1 or queue_size < 0 or wait_seconds <= 0:
+            raise ValueError('Invalid chat admission limits')
+        self.concurrency, self.queue_size, self.wait_seconds = concurrency, queue_size, wait_seconds
+        self.condition = threading.Condition()
+        self.active = 0
+        self.waiters = []
+
+    def acquire(self, blocking=True, timeout=-1):
+        deadline = None if timeout < 0 else time.monotonic() + timeout
+        with self.condition:
+            while self.active >= self.concurrency or self.waiters:
+                if not blocking:
+                    return False
+                remaining = None if deadline is None else deadline - time.monotonic()
+                if remaining is not None and remaining <= 0:
+                    return False
+                self.condition.wait(remaining)
+            self.active += 1
+            return True
+
+    def enter(self, disconnected):
+        ticket = object()
+        deadline = time.monotonic() + self.wait_seconds
+        with self.condition:
+            if disconnected():
+                raise RequestError(499, 'Request cancelled.')
+            if self.active < self.concurrency and not self.waiters:
+                self.active += 1
+                return
+            if len(self.waiters) >= self.queue_size:
+                raise RequestError(503, 'The conversation queue is full. Please try again shortly.')
+            self.waiters.append(ticket)
+            try:
+                while True:
+                    if disconnected():
+                        raise RequestError(499, 'Request cancelled.')
+                    if time.monotonic() >= deadline:
+                        raise RequestError(504, 'The conversation queue took too long. Please try again.')
+                    if self.waiters[0] is ticket and self.active < self.concurrency:
+                        self.waiters.pop(0)
+                        self.active += 1
+                        self.condition.notify_all()
+                        return
+                    self.condition.wait(.05)
+            finally:
+                if ticket in self.waiters:
+                    self.waiters.remove(ticket)
+                    self.condition.notify_all()
+
+    def release(self):
+        with self.condition:
+            if not self.active:
+                raise RuntimeError('release unlocked chat admission')
+            self.active -= 1
+            self.condition.notify_all()
+
+    def locked(self):
+        with self.condition:
+            return self.active >= self.concurrency
+
+
 class SpeechServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -456,7 +520,9 @@ class SpeechServer(ThreadingHTTPServer):
         self.registry = registry
         self.events = events
         self.tls = tls
-        self.chat_lock = chat_lock if chat_lock is not None else threading.Lock()
+        self.chat_lock = chat_lock if chat_lock is not None else ChatAdmission(
+            getattr(config, 'chat_concurrency', 1), getattr(config, 'chat_queue', 32),
+            getattr(config, 'chat_queue_timeout', 300))
         self.asr_lock = asr_lock if asr_lock is not None else threading.Lock()
         super().__init__(address, Handler)
 
@@ -566,6 +632,9 @@ class Handler(BaseHTTPRequestHandler):
             registry = self.server.registry
             health = {"available": bool(getattr(config, "llm_url", None)),
                       "https_port": getattr(config, "https_port", None),
+                      "chat_concurrency": self.server.chat_lock.concurrency,
+                      "chat_queue_limit": self.server.chat_lock.queue_size,
+                      "compaction": True,
                       "tools": registry.names() if registry is not None else [],
                       "streaming": registry is not None,
                       "events": self.server.events is not None}
@@ -599,26 +668,37 @@ class Handler(BaseHTTPRequestHandler):
             return self.events_stream()
         if self.command == "GET" and path in {"/languages", "/voices", "/stats", "/health"}:
             return self.proxy()
-        if self.command != "POST" or path not in {"/tts", "/stt", "/chat/completions", "/approvals"}:
+        if self.command != "POST" or path not in {"/tts", "/stt", "/chat/completions", "/chat/compact", "/approvals"}:
             raise RequestError(404, "Not found.")
         if not self.same_origin():
             raise RequestError(403, "Use the speech UI on this server to submit audio or text.")
         if path == "/approvals":
             return self.approvals()
-        if path == "/chat/completions":
+        if path in {"/chat/completions", "/chat/compact"}:
             if not getattr(config, "llm_url", None):
                 raise RequestError(503, "The conversation model is unavailable.")
-            if not self.server.chat_lock.acquire(blocking=False):
-                raise RequestError(503, "Another reply is in progress. Please try again shortly.")
+            try:
+                body = self.body(voice_chat.MAX_BODY)
+            except RequestError as error:
+                if error.status == 413:
+                    raise RequestError(413, 'Conversation upload is empty or too large. Compact conversation or start a new chat.') from error
+                raise
+            try:
+                voice_chat.parse_messages(body, completed=path == '/chat/compact')
+                voice_chat.parse_summary(body)
+            except voice_chat.ChatError as error:
+                raise RequestError(error.status, error.message) from error
+            self.connection.setblocking(False)
+            self.server.chat_lock.enter(self.disconnected)
             registry = self.server.registry
             wants_stream = ("application/x-ndjson" in (self.headers.get("Accept") or "")
                             or urlsplit(self.path).query in {"stream=1", "stream=true"}) and registry is not None
             progress = None
             try:
-                body = self.body(voice_chat.MAX_BODY)
-                self.connection.setblocking(False)
                 try:
-                    if registry is None:
+                    if path == '/chat/compact':
+                        result = voice_chat.compact(config.llm_url, body, self.disconnected)
+                    elif registry is None:
                         result = voice_chat.complete(config.llm_url, body, self.disconnected)
                     else:
                         if wants_stream:
@@ -649,6 +729,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, result)
             finally:
                 self.server.chat_lock.release()
+                self.connection.settimeout(30)
         if path == "/tts":
             return self.proxy(self.body(1024 * 1024))
         if not self.server.asr_lock.acquire(blocking=False):
@@ -816,6 +897,10 @@ def main():
     parser.add_argument("--tls-cert", type=Path)
     parser.add_argument("--tls-key", type=Path)
     parser.add_argument("--llm-url", help="local Qwen HTTP origin for voice conversations")
+    parser.add_argument('--chat-concurrency', type=int, default=1,
+                        help='maximum active chat/compaction requests shared by HTTP and HTTPS')
+    parser.add_argument('--chat-queue', type=int, default=32, help='maximum waiting chat/compaction requests')
+    parser.add_argument('--chat-queue-timeout', type=float, default=300, help='maximum queue wait in seconds')
     parser.add_argument("--tts-url", default="http://127.0.0.1:8090")
     parser.add_argument("--page", type=Path, default=Path(__file__).resolve().parents[1] / "web/index.html")
     parser.add_argument("--asr-bin", type=Path)
@@ -830,6 +915,8 @@ def main():
                         help="TOML describing tools, the RAG corpus and MCP servers. Without it the "
                              "assistant keeps its pre-tool behaviour exactly: no tools are offered.")
     config = parser.parse_args()
+    if config.chat_concurrency < 1 or config.chat_queue < 0 or not 0 < config.chat_queue_timeout <= 3600:
+        parser.error('chat-concurrency must be positive, chat-queue nonnegative, and chat-queue-timeout in (0, 3600]')
     native = (config.asr_bin, config.model, config.tokenizer)
     if config.asr_url and any(value is not None for value in native):
         parser.error("--asr-url replaces the native path; do not pass --asr-bin/--model/--tokenizer with it")

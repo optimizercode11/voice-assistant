@@ -1,0 +1,30 @@
+{
+  "campaign": "voice-sessions-compact-20260920",
+  "command": [
+    "bash",
+    "deploy/update-service.sh"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "28-31",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stack/voice-sessions-compact-20260920",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-20T05:34:19.842125980Z",
+  "git_head": "43419fec8091dc34c79589d342145ad8fd78c005",
+  "inputs": [],
+  "label": "update",
+  "log": "/home/ambudsharma/qwen36/voice-stack/voice-sessions-compact-20260920/evidence/guarded-voice-sessions-compact-20260920-20260920T053352Z-4171892.log",
+  "run_id": "voice-sessions-compact-20260920-20260920T053352Z-4171892",
+  "schema_version": 2,
+  "source_fingerprint": "16b1cea978cdbfbd874e10bc802165e4af719b1e1f0e9fca34cb7bbc8b98b3ac",
+  "started_utc": "2026-09-20T05:33:54.292224371Z",
+  "status": "PASS"
+}

@@ -230,7 +230,8 @@ def supervise():
             '--port', site.HTTP_PORT, '--https-port', site.HTTPS_PORT,
             '--tls-cert', CERT, '--tls-key', site.KEY,
             '--ffmpeg', FFMPEG, '--asr-url', f'http://127.0.0.1:{QASR_PORT}',
-            '--llm-url', site.LLM_URL]
+            '--llm-url', site.LLM_URL,
+            '--chat-concurrency', str(site.CHAT_CONCURRENCY), '--chat-queue', str(site.CHAT_QUEUE)]
         if site.TOOLS_CONFIG:
             # Refusing to start on a bad capability config is deliberate: a
             # half-loaded tool set is worse than a bridge that will not come up.

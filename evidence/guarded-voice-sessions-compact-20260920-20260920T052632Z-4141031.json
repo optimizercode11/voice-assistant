@@ -1,0 +1,32 @@
+{
+  "campaign": "voice-sessions-compact-20260920",
+  "command": [
+    "make",
+    "test-browser",
+    "NODE=/tmp/fork-stability-browser-zu50jkow/node_modules/node/bin/node",
+    "PLAYWRIGHT=/tmp/fork-stability-browser-zu50jkow/node_modules/playwright/index.mjs"
+  ],
+  "command_exit_code": 1,
+  "containment": {
+    "cpus": "8-11",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/mnt/data/voice-sessions-compact-20260920",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-20T05:26:32.732658792Z",
+  "git_head": "43419fec8091dc34c79589d342145ad8fd78c005",
+  "inputs": [],
+  "label": "browser",
+  "log": "/mnt/data/voice-sessions-compact-20260920/evidence/guarded-voice-sessions-compact-20260920-20260920T052632Z-4141031.log",
+  "run_id": "voice-sessions-compact-20260920-20260920T052632Z-4141031",
+  "schema_version": 2,
+  "source_fingerprint": "16b1cea978cdbfbd874e10bc802165e4af719b1e1f0e9fca34cb7bbc8b98b3ac",
+  "started_utc": "2026-09-20T05:26:32.723868135Z",
+  "status": "FAIL"
+}

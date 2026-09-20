@@ -18,8 +18,8 @@
 rounds = 5
 per_call_seconds = 10
 result_chars = 6000
-turn_seconds = 150
-generation_seconds = 45
+turn_seconds = 600
+generation_seconds = 600
 
 # Where things are.  The tool schemas say how to call a tool and the `purpose`
 # lines say what a server is for; neither can say WHICH MACHINE a server sees,

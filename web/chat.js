@@ -95,51 +95,26 @@ function setState(value, message) {
   $('send').disabled = !ready || busy;
   $('language').disabled = busy; $('voice').disabled = busy;
   $('corrections').disabled=busy;$('corrections-enabled').disabled=busy;
+  renderTurnCount();
 }
 function shortPath(path) { const parts = String(path).split('/').filter(Boolean); return parts.slice(-2).join('/'); }
 // ------------------------------------------------------------- chat history
-// The bridge is stateless: every turn re-sends the whole transcript, so what
-// Qwen remembers is exactly what this page holds in `history`.  Persisting is
-// therefore not decoration, it is the model's memory.
-//
-// One saved conversation is a scratchpad, not a history, so this browser now
-// keeps a *list* of them: an index key holds the metadata for every chat and
-// each chat gets its own key for its turns.  Separate keys are not tidiness --
-// rewriting every conversation on every turn is write amplification against a
-// synchronous, quota-limited store, and one oversized chat would then be able to
-// lose all of them.
-//
-// Four limits are load-bearing rather than defensive:
-//   * tools/voice_chat.py parse_messages refuses a request carrying more than
-//     101 messages -- measured on the deployed bridge: 101 is a 200, 102 is a
-//     400 -- so the transcript that is *sent* is capped at SEND_TURNS while the
-//     whole conversation stays readable, and the counter says which is which.
-//   * one reply may be 8000 characters (measured: 8000 is a 200, 8001 is a 400),
-//     so a single chat is bounded in bytes, oldest turns rolling off first.
-//   * localStorage is a few MB per origin, so the *whole list* is bounded too --
-//     by count and by bytes -- and eviction never touches the chat on screen.
-//   * storage is attacker-writable, so every record is read with the same
-//     suspicion as a request body: half turns, forged roles and over-long
-//     messages are dropped or clipped, never repaired.
-// Storage failing may never cost a turn: the conversation carries on in memory
-// and the counter admits out loud that it is not being saved.
-const CHAT_INDEX = 'voice-chats';        // metadata for every chat, newest first
-const CHAT_PREFIX = 'voice-chat-';       // voice-chat-<id> holds one conversation
-const LEGACY_KEY = 'voice-chat';         // the single-conversation build, migrated below
-const SEND_TURNS = 40;      // 81 messages at the cap, inside the bridge's 101
-const STORE_TURNS = 200;
-const STORE_BYTES = 1200000;   // one conversation
-const TOTAL_BYTES = 3000000;   // every conversation together
-const MAX_CHATS = 60;
+// The full archive is stored per conversation in IndexedDB. Compaction changes
+// only the context sent to Qwen; no quota handler deletes chats or old turns.
+const CHAT_INDEX = 'voice-chats';
+const CHAT_PREFIX = 'voice-chat-';
+const LEGACY_KEY = 'voice-chat';
+const CHAT_DB = 'voice-conversations';
 const MAX_TITLE = 90;
-const MAX_MESSAGE = 8000;   // measured: 8000 chars is a 200, 8001 is a 400
-const INDEX_BYTES_LIMIT = 200000;   // the index itself, so one setItem can never fail on it
-let transcript = [];        // the chat on screen, oldest turn first
-let conversationId = '';
-let conversationTitle = '';
-let conversationAt = 0;
-let saving = true;          // false once storage is unavailable
-let chatsOpen = false;
+const MAX_MESSAGE = 8000;
+const MAX_SUMMARY = 16000;
+let transcript = [], conversationId = '', conversationTitle = '', conversationAt = 0;
+let conversationSummary = '', summaryThrough = 0, conversationRevision = '';
+let saving = true, savePending = false, chatsOpen = false, chatDB = null;
+const chatRecords = new Map();
+const unsavedChats = new Set();
+let storageChannel = null;
+try { storageChannel = new BroadcastChannel('voice-conversations'); } catch (_) {}
 function newConversationId() {
   try { if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID(); } catch (_) {}
   return `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -176,7 +151,7 @@ function turnFrom(question, answer, original, evidence) {
 function messagesOf(turn) {
   return [{role: 'user', content: turn.q}, {role: 'assistant', content: turn.a}];
 }
-function historyFrom(turns) { return turns.slice(-SEND_TURNS).flatMap(messagesOf); }
+function historyFrom(turns) { return turns.slice(summaryThrough).flatMap(messagesOf); }
 function chatKey(id) { return CHAT_PREFIX + id; }
 function titleFor(turns) {
   // The first thing the person actually said, not a summary: a summary would be
@@ -206,131 +181,169 @@ function parseRecord(raw, expectId) {
   if (expectId && parsed.id !== expectId) return null;
   if (!Array.isArray(parsed.turns)) return null;
   const turns = parsed.turns.map(usableTurn).filter(Boolean);
+  // A summary is usable only with its exact archive boundary. Reject the pair
+  // if sanitizing the archive changed its positions or either field is invalid.
+  const summaryValid = typeof parsed.summary === 'string' && parsed.summary.trim()
+    && parsed.summary.length <= MAX_SUMMARY && Number.isInteger(parsed.summaryThrough)
+    && parsed.summaryThrough > 0 && parsed.summaryThrough <= turns.length
+    && turns.length === parsed.turns.length;
   return {id: parsed.id, turns,
           title: typeof parsed.title === 'string' && parsed.title.trim() ? parsed.title.slice(0, MAX_TITLE) : titleFor(turns),
-          at: Number(parsed.at) || 0};
+          at: Number(parsed.at) || 0, revision: typeof parsed.revision === 'string' ? parsed.revision : '',
+          summary: summaryValid ? parsed.summary.trim() : '',
+          summaryThrough: summaryValid ? parsed.summaryThrough : 0};
 }
-function readConversation(id) {
-  if (typeof id !== 'string' || !id) return null;
-  try { return parseRecord(localStorage.getItem(chatKey(id)), id); } catch (_) { return null; }
+function readConversation(id) { return chatRecords.get(id) || null; }
+function readIndex() {
+  return [...chatRecords.values()].map(record => ({id: record.id, title: record.title,
+    at: record.at, turns: record.turns.length})).sort((a, b) => b.at - a.at);
 }
-function readIndex(verify = false) {
-  // The index is a cache of what the keys say.  An orphan (key gone: evicted or
-  // deleted in another tab) is dropped by checking the key exists; the record
-  // itself is only re-parsed when `verify` is set (rendering the list), because
-  // parsing every stored chat on every saved turn is the write amplification
-  // separate keys exist to avoid.  Opening a chat parses it anyway.
-  let parsed = null;
-  try { parsed = JSON.parse(localStorage.getItem(CHAT_INDEX) || 'null'); } catch (_) { return []; }
-  const list = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.chats) ? parsed.chats : null);
-  if (!list) return [];
-  const seen = new Set();
-  const entries = [];
-  for (const item of list) {
-    const id = item && typeof item.id === 'string' ? item.id : '';
-    if (!id || seen.has(id) || id === LEGACY_KEY) continue;
-    const raw = (() => { try { return localStorage.getItem(chatKey(id)); } catch (_) { return null; } })();
-    if (raw === null) continue;                                  // orphan
-    seen.add(id);
-    if (verify) {
-      const record = parseRecord(raw, id);
-      if (!record) { seen.delete(id); continue; }                // unreadable
-      entries.push({id, title: record.title, at: record.at, turns: record.turns.length,
-                    bytes: byteLength(raw)});
-      continue;
-    }
-    const title = typeof item.title === 'string' ? item.title.slice(0, MAX_TITLE) : '';
-    entries.push({id, title, at: Number(item.at) || 0,
-                  turns: Math.max(0, Number(item.turns) || 0), bytes: raw.length});
-  }
-  return entries;
+function databaseTransaction(mode, act) {
+  return new Promise((resolve, reject) => {
+    if (!chatDB) { reject(new Error('Browser storage is unavailable')); return; }
+    const tx = chatDB.transaction('chats', mode);
+    const request = act(tx.objectStore('chats'));
+    tx.oncomplete = () => resolve(request?.result);
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error('Browser storage is unavailable'));
+  });
 }
-function writeIndex(entries) {
-  let list = entries.slice(0, MAX_CHATS);
-  for (let attempt = 0; attempt < 6; attempt++) {
-    const payload = JSON.stringify({v: 2, chats: list});
-    if (byteLength(payload) > INDEX_BYTES_LIMIT && list.length > 1) { list = list.slice(0, -1); continue; }
-    try { localStorage.setItem(CHAT_INDEX, payload); return true; }
-    catch (_) { if (list.length > 1) { list = list.slice(0, -1); continue; } return false; }
-  }
-  return false;
+function currentRecord() {
+  return {v: 3, id: conversationId, title: conversationTitle || titleFor(transcript),
+    at: conversationAt, turns: transcript.slice(), summary: conversationSummary, summaryThrough, revision: conversationRevision};
 }
-function evict(order) {
-  // `order` is index entries, newest first, and the chat on screen is always
-  // last-resort protected: an eviction that deletes the conversation you are
-  // looking at is worse than one that deletes a chat you have not opened in a
-  // month.  Evicted turns go with the entry, or the list lies about what it has.
-  const keep = [];
-  let total = 0;
-  for (const entry of order) {
-    if (entry.id === conversationId) { keep.unshift(entry); total += entry.bytes || 0; continue; }
-    if (keep.length >= MAX_CHATS - 1) { localStorage.removeItem(chatKey(entry.id)); continue; }
-    if (total + (entry.bytes || 0) > TOTAL_BYTES && keep.some(item => item.id !== conversationId)) {
-      localStorage.removeItem(chatKey(entry.id)); continue;
-    }
-    total += entry.bytes || 0;
-    keep.push(entry);
-  }
-  return keep;
-}
-function saveConversation() {
-  if (!saving) return false;
-  let turns = transcript.slice(-STORE_TURNS);
-  let wrote = false;
-  // The title is the first thing the person said and stays that even after the
-  // oldest turns roll off; `at` is the last activity, which is what "newest
-  // first" and "3 min ago" both mean.
+async function saveConversation() {
+  if (!transcript.length) return true;
   if (!conversationTitle) conversationTitle = titleFor(transcript);
-  conversationAt = Date.now();
-  for (let attempt = 0; attempt < 8; attempt++) {
-    const payload = JSON.stringify({v: 2, id: conversationId, title: conversationTitle,
-                                    at: conversationAt, turns});
-    const bytes = byteLength(payload);
-    if (bytes > STORE_BYTES && turns.length > 1) {
-      // Drop a *proportional* slice, not one turn: a record far over budget has
-      // to converge inside the retry budget, or the loop exits without writing
-      // anything while the counter still claims "saved".
-      const keep = Math.ceil(turns.length * (STORE_BYTES / bytes));
-      turns = turns.slice(turns.length - Math.max(1, Math.min(turns.length - 1, keep)));
-      continue;
-    }
-    try {
-      localStorage.setItem(chatKey(conversationId), payload);
-      wrote = true;
-      break;
-    } catch (error) {
-      // QuotaExceeded is the ordinary case: a full origin or a private window.
-      if (turns.length > 1) { turns = turns.slice(Math.ceil(turns.length / 2)); continue; }
-      saving = false;
-      break;
+  conversationAt = Math.max(Date.now(), conversationAt + 1);
+  const record = currentRecord(), originalId = record.id, expectedRevision = conversationRevision;
+  record.revision = newConversationId(); conversationRevision = record.revision;
+  chatRecords.set(record.id, record);  // a failed save remains switchable in this tab
+  unsavedChats.add(record.id);
+  savePending = true;
+  replaceHash(`#/chat/${encodeURIComponent(record.id)}`);
+  renderTurnCount(); renderChatList();
+  try {
+    // Summary and covered-through position share the same atomic record write.
+    const result = await new Promise((resolve, reject) => {
+      if (!chatDB) {reject(new Error('Browser storage is unavailable')); return;}
+      const tx = chatDB.transaction('chats', 'readwrite'), store = tx.objectStore('chats');
+      const request = store.get(originalId);
+      let savedRecord = record, existing = null;
+      request.onsuccess = () => {
+        existing = request.result;
+        // Read-and-write inside one transaction: two tabs can never both pass
+        // the revision check and silently overwrite one another's conversation.
+        if ((existing?.revision || '') !== expectedRevision || (!existing && expectedRevision)) {
+          savedRecord = {...record, id: newConversationId(), title: record.title + ' (this tab)'};
+        }
+        store.put(savedRecord);
+      };
+      tx.oncomplete = () => resolve({savedRecord, existing});
+      tx.onerror = tx.onabort = () => reject(tx.error || new Error('Browser storage is unavailable'));
+    });
+    if (result.savedRecord.id !== originalId) {
+      if (result.existing) chatRecords.set(originalId, parseRecord(JSON.stringify(result.existing)));
+      else chatRecords.delete(originalId);
+      unsavedChats.delete(originalId);
+      chatRecords.set(result.savedRecord.id, result.savedRecord);
+      if (conversationId === originalId && conversationRevision === record.revision) {
+        conversationId = result.savedRecord.id; conversationTitle = result.savedRecord.title;
+        replaceHash(`#/chat/${encodeURIComponent(conversationId)}`);
+        $('compact-status').textContent = 'Another tab changed this chat. Your changes were saved as a separate conversation.';
+      }
+    } else if (chatRecords.get(record.id) === record) unsavedChats.delete(record.id);
+    storageChannel?.postMessage({id: result.savedRecord.id});
+    renderChatList();
+    return true;
+  } catch (_) {
+    record.revision = expectedRevision;
+    if (conversationId === originalId) conversationRevision = expectedRevision;
+    return false;  // preserve the full transcript and offer an export; never evict
+  } finally {
+    if (record.revision === conversationRevision) {
+      savePending = false;
+      saving = !unsavedChats.has(conversationId);
+      renderTurnCount();
     }
   }
-  adoptTranscript(turns);
-  if (!wrote) { renderTurnCount(); return false; }
-  const entry = {id: conversationId, title: conversationTitle, at: conversationAt,
-                 turns: turns.length, bytes: byteLength(localStorage.getItem(chatKey(conversationId)) || '')};
-  writeIndex(evict([entry, ...readIndex().filter(item => item.id !== conversationId)]));
-  const wanted = `#/chat/${encodeURIComponent(conversationId)}`;
-  if (location.hash !== wanted) replaceHash(wanted);   // a saved chat is addressable
-  if (chatsOpen) renderChatList();
-  return true;
 }
-function deleteConversation(id) {
-  if (typeof id !== 'string' || !id) return false;
-  try { localStorage.removeItem(chatKey(id)); } catch (_) { return false; }
-  writeIndex(readIndex().filter(item => item.id !== id));
-  if (chatsOpen) renderChatList();
-  return true;
+async function deleteConversation(id) {
+  if (!readConversation(id)) return false;
+  try {
+    if (chatDB) await databaseTransaction('readwrite', store => store.delete(id));
+    else throw new Error('Browser storage is unavailable; deletion was not saved.');
+    chatRecords.delete(id); unsavedChats.delete(id);
+    storageChannel?.postMessage({id});
+    renderChatList();
+    return true;
+  } catch (error) { setState('idle', error.message); return false; }
 }
-function adoptTranscript(turns) {
-  // The single place `transcript` shrinks.  Anything still on screen must be
-  // something storage also holds, so a roll-off repaints rather than leaving a
-  // bubble that a refresh would silently delete.
-  const dropped = transcript.length > turns.length;
-  transcript = turns;
-  history = historyFrom(transcript);   // what is saved is what Qwen holds
-  if (dropped) renderTranscript();
+async function initializeChatStore() {
+  // Keep legacy keys intact until every corresponding destination write commits.
+  // This also makes an interrupted migration safe to retry on the next reload.
+  const legacy = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key === LEGACY_KEY || (key.startsWith(CHAT_PREFIX) && key !== 'voice-chat-probe')) {
+        const raw = localStorage.getItem(key), record = parseRecord(raw);
+        if (record?.turns.length) legacy.push({key, raw, record});
+      }
+    }
+  } catch (_) {}
+  try {
+    chatDB = await new Promise((resolve, reject) => {
+      const request = indexedDB.open(CHAT_DB, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore('chats', {keyPath: 'id'});
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+      request.onblocked = () => reject(new Error('Browser storage is blocked'));
+    });
+    chatDB.onversionchange = () => {chatDB.close(); chatDB = null; saving = false; renderTurnCount();};
+    const stored = await databaseTransaction('readonly', store => store.getAll());
+    for (const value of stored) {
+      const record = parseRecord(JSON.stringify(value));
+      if (record) chatRecords.set(record.id, record);
+    }
+    for (const entry of legacy) {
+      if (chatRecords.has(entry.record.id)) continue; // preserve a conflicting legacy copy
+      const imported = await new Promise((resolve, reject) => {
+        const tx = chatDB.transaction('chats', 'readwrite'), store = tx.objectStore('chats');
+        const request = store.get(entry.record.id);
+        let inserted = false, existing = null;
+        request.onsuccess = () => {
+          existing = request.result;
+          if (!existing) {store.add(entry.record); inserted = true;}
+        };
+        tx.oncomplete = () => resolve({inserted, existing});
+        tx.onerror = tx.onabort = () => reject(tx.error || new Error('Migration failed'));
+      });
+      if (!imported.inserted) {
+        const existing = parseRecord(JSON.stringify(imported.existing), entry.record.id);
+        if (existing) chatRecords.set(existing.id, existing);
+        continue; // another tab won the transaction; retain the legacy copy
+      }
+      chatRecords.set(entry.record.id, entry.record);
+      // Re-read before deleting: another tab may have just updated the old key.
+      if (localStorage.getItem(entry.key) === entry.raw) localStorage.removeItem(entry.key);
+    }
+  } catch (_) {
+    for (const {record} of legacy) if (!chatRecords.has(record.id)) {
+      chatRecords.set(record.id, record); unsavedChats.add(record.id);
+    }
+    saving = false;
+  }
 }
+if (storageChannel) storageChannel.onmessage = async event => {
+  const id = event.data?.id;
+  if (typeof id !== 'string' || id === conversationId || unsavedChats.has(id)) return;
+  try {
+    const value = await databaseTransaction('readonly', store => store.get(id));
+    const record = value && parseRecord(JSON.stringify(value), id);
+    if (record) chatRecords.set(id, record); else chatRecords.delete(id);
+    renderChatList();
+  } catch (_) {}
+};
 function renderTranscript() {
   const host = $('messages');
   host.replaceChildren();
@@ -351,12 +364,66 @@ function renderTranscript() {
 }
 function renderTurnCount() {
   const turns = transcript.length;
-  const where = !saving ? 'not saved in this browser'
+  const where = savePending ? 'saving in this browser' : !saving ? 'not saved in this browser — export to keep a copy'
     : turns ? 'saved in this browser' : 'nothing saved yet';
-  const remembered = turns > SEND_TURNS ? `Qwen is holding the last ${SEND_TURNS}` : '';
-  $('turns').textContent = [turns ? `${turns} ${turns === 1 ? 'turn' : 'turns'}` : 'No conversation yet',
-                            where, remembered].filter(Boolean).join(' \u00b7 ');
+  const remembered = summaryThrough ? `${summaryThrough} turns summarized + ${turns - summaryThrough} recent turns in context`
+    : turns ? 'all turns in context' : '';
+  $('turns').textContent = [turns ? `${turns} ${turns === 1 ? 'turn' : 'turns'}` : 'No conversation yet', where, remembered].filter(Boolean).join(' · ');
+  $('compact').disabled = !ready || busy || turns - summaryThrough < 3;
+  $('export-chat').disabled = turns === 0;
+  $('compact-summary').hidden = !conversationSummary;
+  $('compact-summary-text').textContent = conversationSummary;
 }
+async function compactConversation() {
+  if (busy || !ready || transcript.length - summaryThrough < 3) return;
+  const recent = transcript.length - summaryThrough;
+  const keep = recent > 6 ? 6 : 2;
+  // Bound one request by the bridge's message/body limits. Very large archives
+  // compact incrementally; the status shows how many turns remain verbatim.
+  let through = summaryThrough;
+  let bytes = byteLength(conversationSummary) + 256;
+  const messages = [];
+  for (let i = summaryThrough; i < transcript.length - keep && messages.length < 4000; i++) {
+    const pair = messagesOf(transcript[i]);
+    const size = byteLength(JSON.stringify(pair)) + 2;
+    if (bytes + size > 3 * 1024 * 1024) break;
+    messages.push(...pair); bytes += size; through = i + 1;
+  }
+  const payload = {messages, ...(conversationSummary ? {summary: conversationSummary} : {})};
+  const chatId = conversationId, id = ++epoch, controller = new AbortController();
+  abort = controller; busy = true; clearCapture(); player.pause();
+  setState('thinking', 'Compacting older turns. Your full transcript stays in this browser.');
+  $('compact-status').textContent = 'Compacting… Use Interrupt to cancel.';
+  try {
+    const result = await responseJSON('/chat/compact', JSON.stringify(payload), controller.signal);
+    if (id !== epoch || chatId !== conversationId || controller.signal.aborted) return;
+    if (typeof result.summary !== 'string' || !result.summary.trim() || result.summary.length > MAX_SUMMARY
+        || result.finish_reason === 'length' || result.truncated === true)
+      throw new Error('Compaction returned an empty or incomplete summary. Previous context was kept.');
+    conversationSummary = result.summary.trim(); summaryThrough = through;
+    history = historyFrom(transcript);
+    const saved = await saveConversation();
+    if (id !== epoch) return;
+    $('compact-status').textContent = saved
+      ? 'Compacted. Summaries can omit details; the full transcript is preserved below.'
+      : 'Compacted in this tab only. Export this conversation now to keep the summary and full transcript.';
+  } catch (error) {
+    if (id !== epoch || chatId !== conversationId) return;
+    $('compact-status').textContent = error.name === 'AbortError' ? 'Compaction cancelled. Previous context was kept.'
+      : `Compaction failed: ${error.message} Previous context was kept.`;
+  } finally {
+    if (id === epoch) {
+      abort = null; busy = false;
+      if (active) listen(); else setState('idle', 'Send another message when ready.');
+    }
+  }
+}
+$('compact').onclick = compactConversation;
+$('export-chat').onclick = () => {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(currentRecord(), null, 2)], {type: 'application/json'}));
+  const link = document.createElement('a'); link.href = url; link.download = `conversation-${conversationId}.json`;
+  link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
 function chatRow(entry) {
   const row = document.createElement('div'); row.className = 'chat-entry'; row.dataset.id = entry.id;
   const open = document.createElement('button');
@@ -371,11 +438,11 @@ function chatRow(entry) {
   const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'chat-remove';
   remove.textContent = '\u00d7';
   remove.setAttribute('aria-label', `Delete this conversation: ${entry.title || 'untitled'}`);
-  remove.onclick = () => {
+  remove.onclick = async () => {
     // Deleting the chat you are looking at has to land somewhere, so it starts a
     // fresh one instead of leaving a panel full of bubbles that no longer exist.
     if (!window.confirm(`Delete this conversation?\n\n${entry.title || 'Untitled'}\n\nIt is gone from this browser and cannot be recovered.`)) return;
-    deleteConversation(entry.id);
+    if (!await deleteConversation(entry.id)) return;
     if (entry.id === conversationId) startFreshChat(); else setState('idle', 'Conversation deleted.');
   };
   row.append(open, meta, remove);
@@ -409,25 +476,25 @@ function chatIdFromHash() {
 function openChat(id) {
   const stored = readConversation(id);
   if (!stored) {
-    // The index is a cache, so a missing key means it was evicted or deleted in
-    // another tab.  Say so and repair the list rather than showing nothing.
-    writeIndex(readIndex());
+    // The record may have been explicitly deleted in another tab.
     renderChatList();
     setState('idle', 'That conversation is no longer in this browser.');
     return 0;
   }
   if (busy) interruptReply();   // never swap the transcript out from under a live turn
   heldText = ''; fragmentHolds = 0;   // a half-heard sentence belongs to the chat it was said in
-  saving = true;                      // storage may have been full for the last chat, not this one
+  saving = !!chatDB && !unsavedChats.has(id);
+  savePending = false;
   conversationId = stored.id;
   conversationTitle = stored.title;
-  conversationAt = stored.at;
-  transcript = stored.turns.slice(-STORE_TURNS);
+  conversationAt = stored.at; conversationRevision = stored.revision || '';
+  transcript = stored.turns.slice();
+  conversationSummary = stored.summary || ''; summaryThrough = stored.summaryThrough || 0;
+  $('compact-status').textContent = '';
   history = historyFrom(transcript);
   renderTranscript();
   renderTurnCount();
   if (chatsOpen) renderChatList();
-  if (transcript.length < stored.turns.length) saveConversation();   // store what is shown
   const wanted = `#/chat/${encodeURIComponent(stored.id)}`;
   if (location.hash !== wanted) replaceHash(wanted);
   renderChatList();
@@ -450,39 +517,20 @@ function startFreshChat() {
     conversationAt = 0;
     transcript = [];
     history = [];
+    conversationSummary = ''; summaryThrough = 0; conversationRevision = '';
   }
-  saving = true;
+  saving = !!chatDB; savePending = false;
+  $('compact-status').textContent = '';
   heldText = ''; fragmentHolds = 0;
   renderTranscript();
   renderTurnCount();
   renderChatList();
   replaceHash('');
 }
-function migrateLegacy() {
-  // The previous build kept exactly one conversation under `voice-chat`.  A
-  // reader must not lose it to the upgrade, and must not get it twice, so the
-  // key is removed in the same breath as the new record is written.
-  let raw = null;
-  try { raw = localStorage.getItem(LEGACY_KEY); } catch (_) { return false; }
-  if (raw === null) return false;
-  const record = parseRecord(raw);
-  try { localStorage.removeItem(LEGACY_KEY); } catch (_) {}
-  if (!record || !record.turns.length) return false;
-  const id = newConversationId();
-  const turns = record.turns.slice(-STORE_TURNS);
-  const at = record.at || Date.now();
-  const payload = JSON.stringify({v: 2, id, title: titleFor(turns), at, turns});
-  try { localStorage.setItem(chatKey(id), payload); } catch (_) { return false; }
-  writeIndex(evict([{id, title: titleFor(turns), at, turns: turns.length, bytes: byteLength(payload)},
-                    ...readIndex().filter(item => item.id !== id)]));
-  return id;
-}
 function restoreChat() {
-  const migrated = migrateLegacy();
   const wanted = chatIdFromHash();
   if (wanted && readConversation(wanted)) return openChat(wanted);
-  if (migrated && readConversation(migrated)) return openChat(migrated);
-  const first = readIndex().find(entry => readConversation(entry.id));
+  const first = readIndex()[0];
   if (first) return openChat(first.id);
   startFreshChat();
   return 0;
@@ -492,18 +540,6 @@ window.addEventListener('hashchange', () => {
   // empty fragment leaves the conversation on screen alone.
   const wanted = chatIdFromHash();
   if (wanted && wanted !== conversationId && readConversation(wanted)) openChat(wanted);
-});
-try {
-  localStorage.setItem('voice-chat-probe', '1');
-  localStorage.removeItem('voice-chat-probe');
-} catch (_) { saving = false; }
-window.addEventListener('storage', event => {
-  // Another tab wrote, deleted or evicted something.  Adopting its transcript
-  // mid-reply would be its own bug, so this tab refreshes the *list* only and
-  // keeps working on the conversation it has on screen.
-  if (event.key !== null && event.key !== CHAT_INDEX && !String(event.key).startsWith(CHAT_PREFIX)) return;
-  if (chatsOpen) renderChatList();
-  if (event.key === null) { saving = false; renderTurnCount(); }   // storage cleared entirely
 });
 
 function message(role, text, original = null, evidence = null) {
@@ -666,6 +702,7 @@ function primeAudio() {
   replaceAudio(new Blob([wav],{type:'audio/wav'})); player.play().catch(()=>{});
 }
 function stopSession(note = 'Conversation ended. Start again whenever you like.') {
+  if ($('compact-status').textContent.startsWith('Compacting')) $('compact-status').textContent = 'Compaction cancelled. Previous context was kept.';
   stopBargeWatch(); stopThinkingAloud(); replySeam = false;
   heldText = ''; fragmentHolds = 0; paused = false; pauseReason = ''; dormant = false;
   active = false; epoch++; abort?.abort(); abort = null; busy = false;
@@ -1550,8 +1587,8 @@ async function runTurn(input, forced = false, voicedMs = null) {
     let reply;
     try {
       reply = streaming
-        ? await responseProgress('/chat/completions', JSON.stringify({messages: pending}), controller.signal, progress)
-        : await responseJSON('/chat/completions', JSON.stringify({messages: pending}), controller.signal);
+        ? await responseProgress('/chat/completions', JSON.stringify({messages: pending, ...(conversationSummary ? {summary: conversationSummary} : {})}), controller.signal, progress)
+        : await responseJSON('/chat/completions', JSON.stringify({messages: pending, ...(conversationSummary ? {summary: conversationSummary} : {})}), controller.signal);
     } catch (error) {
       // A refusal from the bridge ("ran out of room", "too long", "busy") is a
       // turn that failed, not a conversation that ended.  Measured live
@@ -1583,7 +1620,7 @@ async function runTurn(input, forced = false, voicedMs = null) {
     // transcript rather than maintained beside it, so the model can never be
     // shown a turn the browser would lose on refresh, or forget one it kept.
     const turn = turnFrom(text, answer, original, reply);
-    if (turn) transcript = [...transcript, turn].slice(-STORE_TURNS);
+    if (turn) transcript = [...transcript, turn];
     history = historyFrom(transcript);
     committed = true;
     // The bridge aggregated a pause_listening tool call into the answer.  Arm
@@ -1599,7 +1636,8 @@ async function runTurn(input, forced = false, voicedMs = null) {
     // A request_directory call happened during that generation, so the card the
     // user needs to see is one poll overdue.  Fetch it now, not in four seconds.
     refreshApprovals();
-    saveConversation();   // after the bubbles, so a trim never strands a rendered turn
+    await saveConversation();   // commit the full archive before reporting the turn saved
+    check();
     if (speaking) {
       source.finish(answer);
       const spokeAny = await speaking;
@@ -1662,6 +1700,7 @@ $('finish').onclick=()=>{if(recorder?.state==='recording'){recorder.sendNow=true
 function interruptReply() {
   if(!busy)return;
   epoch++;abort?.abort();abort=null;busy=false;clearCapture();replySeam=false;player.pause();gapless.stop();
+  if ($('compact-status').textContent.startsWith('Compacting')) $('compact-status').textContent = 'Compaction cancelled. Previous context was kept.';
   playbackEndedAt = performance.now();
   asleep=false;if(active)listen();else setState('idle','Reply interrupted. Send another message when ready.');
 }
@@ -1856,9 +1895,10 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) refr
 window.addEventListener('pagehide',()=>{stopSession();releaseAudioContext();updateSource?.close();});
 // Before the first fetch, so a reload cannot let a turn be sent against a
 // transcript the page has not rebuilt yet.
-const restoredTurns = restoreChat();
 (async()=>{
   try{
+    await initializeChatStore();
+    const restoredTurns = restoreChat();
     const responses=await Promise.all(['/chat/health','/languages','/voices'].map(url=>fetch(url)));
     if(responses.some(r=>!r.ok))throw new Error('The voice service is unavailable. Please reload shortly.');
     const [health,languages,catalogue]=await Promise.all(responses.map(r=>r.json()));

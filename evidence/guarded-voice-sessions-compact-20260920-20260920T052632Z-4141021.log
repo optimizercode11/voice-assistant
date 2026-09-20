@@ -1,0 +1,17 @@
+guarded-run: campaign=voice-sessions-compact-20260920 label=negative mode=cpu cpus=4-7
+command: python3 tests/compact_test.py --sabotage CompactTests.test_large_history_and_body_accepted
+test_large_history_and_body_accepted (__main__.CompactTests.test_large_history_and_body_accepted) ... 127.0.0.1 - - [20/Sep/2026 05:26:32] "POST /chat/completions HTTP/1.1" 400 -
+FAIL
+
+======================================================================
+FAIL: test_large_history_and_body_accepted (__main__.CompactTests.test_large_history_and_body_accepted)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/voice-sessions-compact-20260920/tests/compact_test.py", line 152, in test_large_history_and_body_accepted
+    self.assertEqual(status, 200, result)
+AssertionError: 400 != 200 : {'error': 'This conversation is too long. Compact conversation or start a new chat.'}
+
+----------------------------------------------------------------------
+Ran 1 test in 1.601s
+
+FAILED (failures=1)

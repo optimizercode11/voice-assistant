@@ -1,0 +1,30 @@
+guarded-run: campaign=voice-sessions-compact-20260920 label=browser-diagnostic mode=cpu cpus=4-7
+command: env PLAYWRIGHT=/tmp/fork-stability-browser-zu50jkow/node_modules/playwright/index.mjs timeout 120 /tmp/fork-stability-browser-zu50jkow/node_modules/node/bin/node evidence/debug-voice-chat.mjs
+completed line 20
+completed line 33
+completed line 34
+completed line 35
+completed line 36
+completed line 37
+completed line 38
+completed line 39
+completed line 40
+completed line 45
+completed line 47
+completed line 48
+completed line 50
+completed line 51
+completed line 52
+completed line 54
+completed line 76
+RELEASE STATE true {
+  state: 'Thinking',
+  detail: undefined,
+  busy: true,
+  epoch: 5,
+  history: [],
+  transcript: []
+}
+completed line 78
+completed line 82
+PASS webkit: native playback, history, safe text, new chat, cancellation

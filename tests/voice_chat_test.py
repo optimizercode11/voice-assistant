@@ -42,7 +42,7 @@ class ChatTests(unittest.TestCase):
         tls=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);tls.load_cert_chain(cert,key)
         cls.client_tls=ssl.create_default_context(cafile=str(cert))
         cls.upstream=ThreadingHTTPServer(('127.0.0.1',0),Upstream)
-        cls.config=SimpleNamespace(page=Path('web/index.html').resolve(),llm_url=f'http://127.0.0.1:{cls.upstream.server_port}')
+        cls.config=SimpleNamespace(page=Path('web/index.html').resolve(),llm_url=f'http://127.0.0.1:{cls.upstream.server_port}',chat_queue=0)
         cls.http=speech_ui.SpeechServer(('127.0.0.1',0),cls.config)
         cls.https=speech_ui.SpeechServer(('127.0.0.1',0),cls.config,tls=tls,chat_lock=cls.http.chat_lock)
         for server in (cls.upstream,cls.http,cls.https):threading.Thread(target=server.serve_forever,daemon=True).start()

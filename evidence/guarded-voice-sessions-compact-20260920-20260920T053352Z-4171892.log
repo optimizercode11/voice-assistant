@@ -1,0 +1,5 @@
+guarded-run: campaign=voice-sessions-compact-20260920 label=update mode=cpu cpus=28-31
+command: bash deploy/update-service.sh
+indexed 6 documents into 240 chunks in 0.028s at var/notes.sqlite
+active
+enabled

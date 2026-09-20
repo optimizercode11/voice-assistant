@@ -62,6 +62,7 @@ transition:opacity .09s linear,transform .09s ease-out}
 .approval button:disabled{opacity:.45;cursor:default}
 .approvals .granted{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:11px;color:var(--muted)}
 .approvals .granted button{font-size:11px;padding:3px 8px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer}
+.context-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.context-actions button{font-size:12px;padding:7px 12px}.context-note{font-size:12px;color:var(--muted);margin:6px 0}#compact-summary{font-size:12px;margin:8px 0}#compact-summary-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto}details[hidden]{display:none}
 </style>
 </head>
 <body>
@@ -80,13 +81,16 @@ red skeleton = Ritz-Carlton</textarea></label><small id="corrections-note" role=
 </section>
 <section class="conversation" aria-label="Conversation">
 <div class="chat-head"><h2>Your conversation</h2><small id="turns">Just this tab</small></div>
+<div class="context-actions"><button id="compact" type="button" disabled>Compact conversation</button><button id="export-chat" type="button" disabled>Export conversation</button></div>
+<p id="compact-status" class="context-note" role="status"></p>
+<details id="compact-summary" hidden><summary>Context summary — full transcript kept below</summary><p class="context-note">Summaries can omit details. Recent turns are sent alongside this summary.</p><pre id="compact-summary-text"></pre></details>
 <div id="chats" class="chats" hidden aria-label="Saved conversations"></div>
 <div id="approvals" class="approvals" hidden aria-live="polite"></div>
 <div id="messages" role="log" aria-live="polite"><div class="empty"><strong>What's on your mind?</strong><p>Start talking, or write a message below.</p></div></div>
 <details id="console" class="console" hidden><summary>Agent console <span id="console-note"></span><button type="button" id="console-clear">Clear</button></summary><pre id="console-log" aria-live="off"></pre></details>
 <audio id="player" playsinline hidden aria-hidden="true"></audio>
 <form class="compose" id="compose"><input id="text" aria-label="Your message" placeholder="Or type a message…" maxlength="8000" autocomplete="off"><button id="send" disabled>Send ↗</button></form>
-<p class="footnote">Audio and messages are processed on your server. End closes the microphone. Your conversations are kept in <strong>this browser only</strong> — never on the server — and survive a reload; “Chats” lists them, “New chat” starts another and keeps the old one. Clearing site data erases them all.</p>
+<p class="footnote">Audio and messages are processed on your server. End closes the microphone. Your conversations are kept in <strong>this browser only</strong> — never on the server — and survive a reload; “Chats” lists them, “New chat” starts another and keeps the old one. There is no automatic deletion of old chats. Compact reduces the context sent to Qwen and keeps the full transcript here. Clearing site data erases saved chats; export important conversations.</p>
 </section>
 </main><script src="/chat.js" defer></script>
 </body></html>

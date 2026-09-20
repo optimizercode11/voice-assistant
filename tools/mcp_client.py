@@ -249,9 +249,10 @@ class MCPServer:
             pass
         finally:
             with self.lock:
-                self._fail_pending(f"mcp server {self.name} closed its output")
-                if self.state == "ready":
-                    self.state = "exited"
+                if self.process is process:
+                    self._fail_pending(f"mcp server {self.name} closed its output")
+                    if self.state == "ready":
+                        self.state = "exited"
 
     def _write(self, message: dict) -> None:
         process = self.process
@@ -264,14 +265,23 @@ class MCPServer:
             raise MCPError(f"cannot reach mcp server {self.name}: {error}") from error
 
     def request(self, method: str, params: dict, timeout: float | None = None):
-        if self.process is not None and self.process.poll() is not None:
-            raise MCPError(f"mcp server {self.name} exited with code {self.process.returncode}")
-        identifier = next(self.ids)
-        entry = {"done": threading.Event()}
-        self.pending[identifier] = entry
-        self._write({"jsonrpc": "2.0", "id": identifier, "method": method, "params": params})
+        # Concurrent conversations share the transport, not their responses.
+        # Register and send a complete line atomically; never hold the lock
+        # while waiting for the reader to deliver this request's response.
+        with self.lock:
+            if self.process is not None and self.process.poll() is not None:
+                raise MCPError(f"mcp server {self.name} exited with code {self.process.returncode}")
+            identifier = next(self.ids)
+            entry = {"done": threading.Event()}
+            self.pending[identifier] = entry
+            try:
+                self._write({"jsonrpc": "2.0", "id": identifier, "method": method, "params": params})
+            except MCPError:
+                self.pending.pop(identifier, None)
+                raise
         if not entry["done"].wait(timeout or self.timeout):
-            self.pending.pop(identifier, None)
+            with self.lock:
+                self.pending.pop(identifier, None)
             raise MCPError(f"mcp server {self.name} did not answer {method} in {timeout or self.timeout}s")
         if "error" in entry:
             raise entry["error"]
@@ -281,7 +291,8 @@ class MCPServer:
         message = {"jsonrpc": "2.0", "method": method}
         if params is not None:
             message["params"] = params
-        self._write(message)
+        with self.lock:
+            self._write(message)
 
     # -- the two calls the assistant makes ---------------------------------
     def call(self, tool: MCPTool, arguments: dict, timeout: float | None = None) -> tuple[str, bool]:

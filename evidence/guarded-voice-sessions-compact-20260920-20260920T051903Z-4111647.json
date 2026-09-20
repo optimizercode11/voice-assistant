@@ -1,0 +1,38 @@
+{
+  "campaign": "voice-sessions-compact-20260920",
+  "command": [
+    "python3",
+    "evidence/reproduce-session-limit.py"
+  ],
+  "command_exit_code": 1,
+  "containment": {
+    "cpus": "0-3",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/mnt/data/voice-sessions-compact-20260920",
+  "expected_exit_code": 1,
+  "finished_utc": "2026-09-20T05:19:03.513122928Z",
+  "git_head": "43419fec8091dc34c79589d342145ad8fd78c005",
+  "inputs": [
+    {
+      "bytes": 20397,
+      "exists": true,
+      "path": "/mnt/data/voice-gpu4-20260920-b/tools/voice_chat.py",
+      "sha256": "e391633707cb9fabf55800db29906daf27289c6310501ec2b924fc4c3a2a24a5",
+      "verification": "current_local"
+    }
+  ],
+  "label": "reproduce",
+  "log": "/mnt/data/voice-sessions-compact-20260920/evidence/guarded-voice-sessions-compact-20260920-20260920T051903Z-4111647.log",
+  "run_id": "voice-sessions-compact-20260920-20260920T051903Z-4111647",
+  "schema_version": 2,
+  "source_fingerprint": "72dd05761e83fc7acf6c5c6384c0a73ff4eb2fc3092225accd6313a528db8f6e",
+  "started_utc": "2026-09-20T05:19:03.473012010Z",
+  "status": "PASS"
+}

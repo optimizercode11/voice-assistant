@@ -1,0 +1,3 @@
+guarded-run: campaign=voice-sessions-compact-20260920 label=reproduce mode=cpu cpus=0-3
+command: python3 evidence/reproduce-session-limit.py
+Observed: existing bridge rejects121-message saved conversation before model receives it

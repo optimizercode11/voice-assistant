@@ -7,6 +7,21 @@ Qwen3.8-27B server on GPU 2 at port 8080. See the first section of RUNBOOK.md.
 Older architecture and campaign descriptions below are historical.
 
 
+The chat stays on the full 262,144-token 27B model. Use **New chat** for separate
+sessions; the server admits two active replies or compactions and queues up to
+32 more (five-minute queue timeout). These slots are shared with other clients
+of the same model. Saved chats do not reserve a model slot.
+
+**Compact** summarizes older turns and keeps recent turns verbatim for the next
+request. The full transcript stays in the archive, and the summary is visible
+for inspection. Summaries can omit details; use the original transcript when
+exact wording matters. Saved chats use this browser's IndexedDB, with no
+application limit on chat count or automatic eviction. Browser quota, clearing
+site data, and private browsing still affect persistence; **Export** saves a
+JSON copy. Storage errors are shown, and legacy history migrates only after a
+successful write. Chats are local to the browser, not synced across devices.
+
+
 Point a browser at it, press **Start conversation**, talk, and the answer comes
 back as speech. Nothing is typed unless you want it to be. Voice processing
 runs on your own server; optional tools can reach configured external sources.

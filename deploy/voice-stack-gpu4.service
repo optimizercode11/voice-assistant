@@ -7,9 +7,9 @@ StartLimitBurst=3
 
 [Service]
 Type=forking
-WorkingDirectory=%h/qwen36/voice-stack/voice-gpu4-20260920-b
-PIDFile=%h/qwen36/voice-stack/voice-gpu4-20260920-b/run/stack.pid
-ExecStart=/bin/bash %h/qwen36/voice-stack/voice-gpu4-20260920-b/deploy/start-voice-stack.sh
+WorkingDirectory=%h/qwen36/voice-stack/voice-sessions-compact-20260920
+PIDFile=%h/qwen36/voice-stack/voice-sessions-compact-20260920/run/stack.pid
+ExecStart=/bin/bash %h/qwen36/voice-stack/voice-sessions-compact-20260920/deploy/start-voice-stack.sh
 Environment=GUARD_SAMPLE_INTERVAL=1
 Environment=GUARD_PGID_INTERVAL=0.2
 Restart=on-failure

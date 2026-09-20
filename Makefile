@@ -32,6 +32,7 @@ test-bridge:
 
 test-chat:
 	$(CPU) $(PYTHON) -u tests/voice_chat_test.py
+	$(CPU) $(PYTHON) -u tests/compact_test.py
 
 test-retrieval:
 	$(CPU) $(PYTHON) -u tests/retrieval_test.py
@@ -41,6 +42,7 @@ test-tools:
 
 test-mcp:
 	$(CPU) $(PYTHON) -W error::ResourceWarning -u tests/mcp_test.py
+	$(CPU) $(PYTHON) -W error::ResourceWarning -u tests/mcp_concurrency_test.py
 
 # The loop needs the TLS bridge and a scripted upstream; it is the one that
 # proves a browser cannot write a tool result.
@@ -108,7 +110,7 @@ doctor:
 	$(CPU) $(PYTHON) -u tools/voicectl.py --config config/assistant.toml doctor
 
 test-browser:
-	@for suite in voice_chat_browser voice_carry_browser voice_barge_browser voice_controls_browser voice_language_browser stt_browser voice_tools_browser voice_think_browser voice_tts_browser voice_history_browser voice_pause_browser voice_push_browser voice_wake_browser voice_silence_browser; do \
+	@for suite in voice_chat_browser voice_carry_browser voice_barge_browser voice_controls_browser voice_language_browser stt_browser voice_tools_browser voice_think_browser voice_tts_browser voice_history_browser voice_compact_browser voice_pause_browser voice_push_browser voice_wake_browser voice_silence_browser; do \
 	  echo "== $$suite =="; \
 	  $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/$$suite.mjs || exit 1; \
 	done
@@ -202,6 +204,7 @@ sabotage-selftest:
 
 check-site:
 	$(CPU) $(PYTHON) -u deploy/check_site.py
+	$(CPU) $(PYTHON) -u tests/deploy_gpu4_test.py
 
 # The MCP server the deployed bridge ships with, exercised as a real peer.
 mcp-probe:

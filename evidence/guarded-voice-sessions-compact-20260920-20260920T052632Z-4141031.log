@@ -1,0 +1,3 @@
+guarded-run: campaign=voice-sessions-compact-20260920 label=browser mode=cpu cpus=8-11
+command: make test-browser NODE=/tmp/fork-stability-browser-zu50jkow/node_modules/node/bin/node PLAYWRIGHT=/tmp/fork-stability-browser-zu50jkow/node_modules/playwright/index.mjs
+taskset: failed to set pid 4141660's affinity: Invalid argument

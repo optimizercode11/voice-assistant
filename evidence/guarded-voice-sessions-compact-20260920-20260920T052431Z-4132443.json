@@ -1,0 +1,30 @@
+{
+  "campaign": "voice-sessions-compact-20260920",
+  "command": [
+    "python3",
+    "tests/compact_test.py"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "0-3",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/mnt/data/voice-sessions-compact-20260920",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-20T05:24:34.926162321Z",
+  "git_head": "43419fec8091dc34c79589d342145ad8fd78c005",
+  "inputs": [],
+  "label": "positive",
+  "log": "/mnt/data/voice-sessions-compact-20260920/evidence/guarded-voice-sessions-compact-20260920-20260920T052431Z-4132443.log",
+  "run_id": "voice-sessions-compact-20260920-20260920T052431Z-4132443",
+  "schema_version": 2,
+  "source_fingerprint": "c384245a7251fcd901b482d6e65c205b58b49154ca66f1b4a1db1dcf50b41770",
+  "started_utc": "2026-09-20T05:24:31.573663847Z",
+  "status": "PASS"
+}

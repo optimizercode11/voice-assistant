@@ -1,0 +1,154 @@
+{
+  "health": {
+    "available": true,
+    "https_port": 8094,
+    "chat_concurrency": 2,
+    "chat_queue_limit": 32,
+    "compaction": true,
+    "tools": [
+      "mcp__claude__send",
+      "mcp__claude__updates",
+      "mcp__codex__send",
+      "mcp__codex__updates",
+      "mcp__files__find",
+      "mcp__files__grep",
+      "mcp__files__list_dir",
+      "mcp__files__read_file",
+      "mcp__files__roots",
+      "mcp__stack__health",
+      "mcp__web__read_page",
+      "mcp__web__search",
+      "now",
+      "pause_listening",
+      "request_directory",
+      "search_notes"
+    ],
+    "streaming": true,
+    "events": true,
+    "tool_sources": {
+      "mcp__claude__send": "mcp:claude",
+      "mcp__claude__updates": "mcp:claude",
+      "mcp__codex__send": "mcp:codex",
+      "mcp__codex__updates": "mcp:codex",
+      "mcp__files__find": "mcp:files",
+      "mcp__files__grep": "mcp:files",
+      "mcp__files__list_dir": "mcp:files",
+      "mcp__files__read_file": "mcp:files",
+      "mcp__files__roots": "mcp:files",
+      "mcp__stack__health": "mcp:stack",
+      "mcp__web__read_page": "mcp:web",
+      "mcp__web__search": "mcp:web",
+      "now": "builtin",
+      "pause_listening": "builtin",
+      "request_directory": "builtin",
+      "search_notes": "retrieval"
+    },
+    "mcp": [
+      {
+        "name": "stack",
+        "state": "ready",
+        "running": true,
+        "tools": 1,
+        "restarts": 0,
+        "command": "python3",
+        "server_info": {
+          "name": "voice-stack-status",
+          "version": "1.0"
+        },
+        "error": "",
+        "pid": 3160217
+      },
+      {
+        "name": "web",
+        "state": "ready",
+        "running": true,
+        "tools": 2,
+        "restarts": 0,
+        "command": "python3",
+        "server_info": {
+          "name": "web-browser",
+          "version": "1.0"
+        },
+        "error": "",
+        "pid": 3160223
+      },
+      {
+        "name": "claude",
+        "state": "ready",
+        "running": true,
+        "tools": 2,
+        "restarts": 0,
+        "command": "ssh",
+        "server_info": {
+          "name": "voice-claude-code",
+          "version": "1.0"
+        },
+        "error": "",
+        "pid": 3160225
+      },
+      {
+        "name": "codex",
+        "state": "ready",
+        "running": true,
+        "tools": 2,
+        "restarts": 0,
+        "command": "ssh",
+        "server_info": {
+          "name": "voice-codex",
+          "version": "1.0"
+        },
+        "error": "",
+        "pid": 3160267
+      },
+      {
+        "name": "files",
+        "state": "ready",
+        "running": true,
+        "tools": 5,
+        "restarts": 0,
+        "command": "python3",
+        "server_info": {
+          "name": "local-files",
+          "version": "1.0"
+        },
+        "error": "",
+        "pid": 3160288
+      }
+    ],
+    "retrieval": {
+      "ready": true,
+      "stale": false,
+      "chunks": 240,
+      "documents": 6
+    }
+  },
+  "summaries": [
+    "**Project Context**\n- **Project Code:** ORBIT-731 (Must be preserved exactly).\n- **Status:** Deployment is pending.\n- **Constraint:** Do not deploy.\n\n**User Preferences**\n- **Language:** Hindi (Corrected from English; latest correction takes precedence).\n\n**Action Items**\n- Maintain pending status for ORBIT-731.\n- Communicate in Hindi.",
+    "**Project Context**\n- **Project Code:** CEDAR-946 (preserve exactly).\n- **Status:** Deployment is pending.\n- **Constraint:** Do not deploy.\n\n**User Preferences**\n- **Language:** Hindi (latest correction takes precedence over the initial preference for English).\n\n**Action Items**\n- Maintain the pending status for CEDAR-946.\n- Communicate in Hindi."
+  ],
+  "replies": [
+    {
+      "text": "ORBIT-731",
+      "usage": {
+        "prompt_tokens": 3774,
+        "completion_tokens": 6,
+        "total_tokens": 3780
+      },
+      "tools": [],
+      "sources": [],
+      "controls": {}
+    },
+    {
+      "text": "CEDAR-946",
+      "usage": {
+        "prompt_tokens": 3774,
+        "completion_tokens": 6,
+        "total_tokens": 3780
+      },
+      "tools": [],
+      "sources": [],
+      "controls": {}
+    }
+  ],
+  "invalid_status": 400
+}

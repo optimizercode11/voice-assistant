@@ -1,0 +1,53 @@
+guarded-run: campaign=voice-sessions-compact-20260920 label=browser mode=cpu cpus=0-7
+command: make test-browser NODE=/tmp/fork-stability-browser-zu50jkow/node_modules/node/bin/node PLAYWRIGHT=/tmp/fork-stability-browser-zu50jkow/node_modules/playwright/index.mjs
+== voice_chat_browser ==
+PASS chromium: native playback, history, safe text, new chat, cancellation, real MediaRecorder/VAD, automatic relisten, microphone isolation
+PASS webkit: native playback, history, safe text, new chat, cancellation
+== voice_carry_browser ==
+ASSERTIONS COMPLETE: browser carry
+PASS chromium: real two-clip utterance held, carried and dispatched as one sentence
+== voice_barge_browser ==
+ASSERTIONS COMPLETE: browser barge
+PASS chromium: AEC device keeps the microphone live (glow peaked at 0.4410), and a device without cancellation is refused
+== voice_controls_browser ==
+CONTROL PASS hidden native playback and default speed chromium
+PASS chromium: dark/light theme persistence and mobile layout, Space interruption/editing/modifiers, hidden playback, autoplay recovery/cancel, speed1.2/1.5, real microphone resumes after Space
+ASSERTIONS COMPLETE: browser controls
+CONTROL PASS hidden native playback and default speed webkit
+PASS webkit: dark/light theme persistence and mobile layout, Space interruption/editing/modifiers, hidden playback, autoplay recovery/cancel, speed1.2/1.5
+ASSERTIONS COMPLETE: browser controls
+== voice_language_browser ==
+CONTROL PASS English routes to English chromium
+PASS chromium Hindi/English auto, manual languages/voices, persistence, speech-only corrections and original text, boundaries/escaping/disable, active controls, unchanged Qwen payload
+CONTROL PASS English routes to English webkit
+PASS webkit Hindi/English auto, manual languages/voices, persistence, speech-only corrections and original text, boundaries/escaping/disable, active controls, unchanged Qwen payload
+== stt_browser ==
+PASS webkit: upload, editing, cancellation, recording lifecycle, permission failures, unavailable service, Safari default
+PASS chromium: upload, editing, cancellation, recording lifecycle, permission failures, unavailable service, Safari default
+== voice_tools_browser ==
+ASSERTIONS COMPLETE: browser tools
+PASS chromium: live tool progress, citations kept, failed tool disclosed, citation markup inert, plain-JSON fallback
+== voice_think_browser ==
+ASSERTIONS COMPLETE: browser think-aloud
+PASS chromium: slow tool turn named aloud, fast reply unpadded, deadline covers tool-less waits, one line per turn, empty reply survives, switch honoured
+== voice_tts_browser ==
+speech stats {"gapless":3,"element":0}
+ASSERTIONS COMPLETE: browser reply pipelining
+PASS chromium: multi-sentence reply pipelined (6 requests, first bite 19 chars), word-for-word lossless, single sentence unsplit, no per-sentence stall label
+== voice_history_browser ==
+ASSERTIONS COMPLETE: browser chat history
+PASS chromium: turn survives reload and reaches the model, restore re-speaks nothing, provenance survives, refused reply leaves no trace, New chat keeps the old chat listed, full context beyond forty turns, forged storage cannot author a turn, a second tab keeps its own conversation, large records preserve every turn, the legacy record migrates once, the list switches/deletes/deep-links
+== voice_compact_browser ==
+PASS chromium: full context beyond 40 turns; compaction/reload/continue; repeated and failed compaction; cancel/switch/new races; 77 saved chats and independent tabs; concurrent same-chat revisions fork without lost turns; quota failure preserves archive and export; failed migration keeps legacy data
+== voice_pause_browser ==
+ASSERTIONS COMPLETE: browser pause
+PASS chromium: pause_listening holds a real microphone loop, typing still works, only Space/Resume reopens it
+== voice_push_browser ==
+ASSERTIONS COMPLETE: browser push
+PASS chromium: pushed updates are spoken when idle, wait for a reply, ride into history, and hold while paused
+== voice_wake_browser ==
+ASSERTIONS COMPLETE: browser wake
+PASS chromium: wake word gates the real microphone loop, strips the name, and goes dormant after the quiet period
+== voice_silence_browser ==
+ASSERTIONS COMPLETE: browser silence
+PASS chromium: silence closes the microphone, an update or a reply reopens it, 0 keeps it open

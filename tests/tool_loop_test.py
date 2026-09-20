@@ -119,7 +119,7 @@ class ToolLoopTests(unittest.TestCase):
         cls.upstream = ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
         cls.upstream.requests, cls.upstream.script, cls.upstream.started = [], [], threading.Event()
         config = SimpleNamespace(page=Path('web/index.html').resolve(),
-                                 llm_url=f'http://127.0.0.1:{cls.upstream.server_port}')
+                                 llm_url=f'http://127.0.0.1:{cls.upstream.server_port}', chat_queue=0)
         cls.http = speech_ui.SpeechServer(('127.0.0.1', 0), config)
         cls.https = speech_ui.SpeechServer(('127.0.0.1', 0), config, tls=tls, chat_lock=cls.http.chat_lock)
         for server in (cls.upstream, cls.http, cls.https):

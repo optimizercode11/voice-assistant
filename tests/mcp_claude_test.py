@@ -89,10 +89,10 @@ class ClaudeServerTests(unittest.TestCase):
         self.assertFalse(is_error, text)
         return parse(text)
 
-    def test_the_two_tools_and_their_folded_names(self):
-        self.assertEqual(sorted(self.tools), ['send', 'updates'])
+    def test_the_three_tools_and_their_folded_names(self):
+        self.assertEqual(sorted(self.tools), ['send', 'stop', 'updates'])
         self.assertEqual(sorted(t.tool_name for t in self.tools.values()),
-                         ['mcp__claude__send', 'mcp__claude__updates'])
+                         ['mcp__claude__send', 'mcp__claude__stop', 'mcp__claude__updates'])
         self.assertEqual(self.instance.server_info['name'], 'voice-claude-code')
 
     def test_send_returns_before_the_work_is_done(self):
@@ -325,7 +325,7 @@ class ProcessHygieneTests(unittest.TestCase):
         try:
             self.assertIn('mcp__claude__send', registry.names())
             self.assertIn('mcp__claude__updates', registry.names())
-            self.assertIn('- mcp__claude__send, mcp__claude__updates: hand work to Claude Code and hear how it went',
+            self.assertIn('- mcp__claude__send, mcp__claude__stop, mcp__claude__updates: hand work to Claude Code and hear how it went',
                           registry.manifest())
             result = registry.execute('mcp__claude__send', '{"instruction":"through the registry"}')
             self.assertTrue(result.ok, result.error)

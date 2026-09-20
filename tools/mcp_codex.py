@@ -82,7 +82,9 @@ was meant and ask, in the spoken line, before doing anything hard to undo."""
 
 
 def _codex_tools() -> list[dict]:
-    tools = json.loads(json.dumps(shared.TOOLS))
+    # Share descriptions only for methods this server actually implements.
+    tools = json.loads(json.dumps([tool for tool in shared.TOOLS
+                                  if tool["name"] in {"send", "updates"}]))
     for tool in tools:
         tool["description"] = tool["description"].replace(
             "Claude Code, the coding agent on the user's machine",

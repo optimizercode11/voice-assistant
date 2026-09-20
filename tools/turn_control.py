@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import unicodedata
 
 # Words that cannot end an English sentence.  A trailing one is the strongest
 # cheap signal that the speaker is between clauses, not at the end of a turn.
@@ -46,14 +47,14 @@ will would shall should can could may might must ought
 # it is not worth a generation, and dispatching on one is how the assistant
 # starts answering a cough.
 FILLERS = frozenset("""
-um uh umm uhmm hmm hm mm ah eh er oh huh ha yeah
+um uh umm uhmm hmm hm mm ah eh er oh huh ha
 """.split())
 
 # A one-word answer really can be a whole turn ("Yes." "Blue.").  These are the
 # shapes that are complete on their own, so the short-utterance rule does not
 # stall forever on a person answering a question.
 SELF_CONTAINED = frozenset("""
-yes no maybe perhaps thanks thank ok okay stop quiet never always sometimes
+yes yeah yep no nope sure done maybe perhaps thanks thank ok okay stop quiet never always sometimes
 here there hello hi goodbye morning evening who what why how when where
 """.split())
 
@@ -79,6 +80,13 @@ def _judge(text: str) -> dict:
     stripped = (text or "").strip()
     if not stripped:
         return {"complete": False, "reason": "empty", "extra_silence_ms": EXTRA_FILLER_MS, "words": 0}
+
+    # English fragment rules cannot classify another script, and digits are
+    # valid short answers. The acoustic endpointer has already observed quiet.
+    if (any(ch.isdigit() for ch in stripped) and not any(ch.isalpha() for ch in stripped)) or any(
+            ch.isalpha() and 'LATIN' not in unicodedata.name(ch, '') for ch in stripped):
+        return {"complete": True, "reason": "use acoustic endpoint for numeric or non-Latin speech",
+                "extra_silence_ms": 0, "words": len(stripped.split())}
 
     words = WORD.findall(stripped)
     lowered = [word.lower() for word in words]
@@ -170,6 +178,7 @@ def completeness(text: str, speech_ms=None) -> dict:
     """
     verdict = _judge(text)
     verdict["speech_ms"] = int(speech_ms) if isinstance(speech_ms, (int, float)) else None
+    verdict["discard"] = verdict["reason"] in ("empty", "filler-only")
     verdict["open"] = bool(verdict.get("open"))
     verdict["hold"] = _should_hold(verdict, speech_ms)
     return verdict

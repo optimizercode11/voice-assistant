@@ -52,7 +52,7 @@ try{
   await page.goto(`http://127.0.0.1:${server.address().port}/chat`);
   await page.waitForFunction(()=>!document.querySelector('#send').disabled);
   const deadline=Date.now()+10000;while(!listeners.length&&Date.now()<deadline)await page.waitForTimeout(100);
-  assert.equal(await page.locator('#silence-timeout').inputValue(),'5','the shipped default is five seconds');
+  assert.equal(await page.locator('#silence-timeout').inputValue(),'0','continuous listening is the default');
   await page.fill('#silence-timeout','2');await page.dispatchEvent('#silence-timeout','change');
   await page.uncheck('#wake-enabled');
   await page.locator('#start').click();

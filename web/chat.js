@@ -12,9 +12,9 @@ function setTheme(theme){
 $('theme').onclick=()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark');
 setTheme(document.documentElement.dataset.theme==='light'?'light':'dark');
 let active = false, busy = false, ready = false, epoch = 0, abort = null;
-let stream = null, context = null, source = null, analyser = null, recorder = null, raf = 0;
+let stream = null, context = null, source = null, analyser = null, recorder = null, captureTimer = 0;
 let history = [], voiceList = [], audioURL = null, secureURL = null, phase = 'idle', streaming = false;
-let fragmentHolds = 0, heldText = '';
+let fragmentHolds = 0, heldText = '', heldFlushTimer = 0;
 // The one control a reply may carry: "stop listening after this".  It is set
 // only from a tool result the bridge aggregated into the answer, and it is
 // cleared only by a person -- the Resume button, the space bar, or ending the
@@ -578,7 +578,8 @@ function message(role, text, original = null, evidence = null) {
   $('messages').scrollTop = $('messages').scrollHeight;
 }
 function clearCapture() {
-  cancelAnimationFrame(raf); raf = 0;
+  clearTimeout(captureTimer); captureTimer = 0;
+  clearTimeout(heldFlushTimer); heldFlushTimer = 0;
   clearTimeout(dormantTimer); dormantTimer = 0;
   stopBargeWatch();
   if (recorder) { recorder.onstop = null; recorder.ondataavailable = null; if (recorder.state !== 'inactive') recorder.stop(); recorder = null; }
@@ -630,6 +631,7 @@ async function armGlow() {
     const Audio = window.AudioContext || window.webkitAudioContext;
     if (!Audio || !window.AnalyserNode) return;
     if (!context || context.state === 'closed') context = new Audio();
+    watchAudioContext();
     const ctx = context;
     // createMediaElementSource is a method of the AudioContext, not of the media
     // element, so this capability check is one no browser can pass.  Asking the
@@ -648,6 +650,18 @@ async function armGlow() {
     // the reply keeps playing through the element's own output.
     if (!playbackAnalyser) { glowArmed = false; mediaSource = null; }
   }
+}
+// A browser may suspend WebAudio when a tab/device changes. Expose a gesture
+// recovery for both recording and gapless playback instead of waiting on onended.
+function watchAudioContext() {
+  if (!context || context.voiceWatched) return;
+  context.voiceWatched = true;
+  context.addEventListener('statechange', () => {
+    if (context?.state === 'suspended' && (active || busy)) {
+      $('resume').hidden = false;
+      $('status').textContent = 'Audio was suspended by the browser. Choose Play reply / Resume audio to continue.';
+    } else if (context?.state === 'running' && !resumePlayback) $('resume').hidden = true;
+  });
 }
 function releaseAudioContext() {
   stopPlaybackGlow(); setGlow(0);
@@ -706,6 +720,7 @@ function stopSession(note = 'Conversation ended. Start again whenever you like.'
   stopBargeWatch(); stopThinkingAloud(); replySeam = false;
   heldText = ''; fragmentHolds = 0; paused = false; pauseReason = ''; dormant = false;
   active = false; epoch++; abort?.abort(); abort = null; busy = false;
+  $('resume').hidden = true;
   clearCapture(); player.pause(); gapless.stop(); stopPlaybackGlow(); setGlow(0);
   if (stream) {stream.getTracks().forEach(track=>track.stop()); stream = null;}
   source?.disconnect(); source = null; analyser = null;
@@ -728,7 +743,11 @@ async function responseProgress(url, body, signal, onEvent) {
   const response = await fetch(url, {method: 'POST', body, signal,
     headers: {'Content-Type': 'application/json', 'Accept': 'application/x-ndjson'}});
   const type = response.headers.get('Content-Type') || '';
-  if (!type.includes('x-ndjson')) return responseJSON(url, body, signal);
+  if (!type.includes('x-ndjson')) {
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'The request failed. Please try again.');
+    return result;
+  }
   const reader = response.body.getReader(), decoder = new TextDecoder();
   let buffer = '', answer = null;
   for (;;) {
@@ -765,8 +784,12 @@ function holdListening() {
     setState('paused', `Quiet for ${silenceSeconds()} s, so I stopped listening. Press Resume listening or Space, or type; I listen again after the next reply or update.`);
   }
 }
-function resumeListening() {
+async function resumeListening() {
   if (!paused && !asleep) return;
+  const id = epoch;
+  try { if (context?.state === 'suspended') await context.resume(); }
+  catch (_) { $('status').textContent = 'Audio is still suspended. Press Resume listening again.'; return; }
+  if (id !== epoch || !active) return;
   paused = false; asleep = false; pauseReason = '';
   if (active && !busy) listen();
   else setState(active ? phase : 'idle', 'Listening resumes after this reply.');
@@ -774,7 +797,8 @@ function resumeListening() {
 }
 function listen() {
   if (!active || !stream) return;
-  if (paused || asleep) { holdListening(); return; }
+  if (paused) { holdListening(); return; }
+  if (asleep) { holdListening(); return; }
   // The seam after a reply, before the microphone reopens, is the one moment
   // that is certainly nobody's turn: whatever Claude Code finished meanwhile
   // is said here, and listening resumes after it.
@@ -788,13 +812,15 @@ function listen() {
   rec.onerror = () => stopSession('Microphone recording failed. Try again or type your message.');
   rec.onstop = () => {
     if (!active || thisEpoch !== epoch) return;
-    recorder = null; cancelAnimationFrame(raf); stream.getTracks().forEach(track=>{track.enabled=false;});
+    recorder = null; clearTimeout(captureTimer); captureTimer = 0; stream.getTracks().forEach(track=>{track.enabled=false;});
     if (!chunks.length || (voiced < 120 && !rec.sendNow)) {listen.continuing = true; listen(); return;}   // the same silence goes on
     runTurn(new Blob(chunks,{type:rec.mimeType || 'audio/webm'}), rec.sendNow === true, voiced);
   };
   if (!listen.continuing) silenceFrom = performance.now();   // the silence clock runs from when listening began, or the last voice
   listen.continuing = false;
+  rec.voicedMs = 0;
   rec.start(250); busy = false;
+  armHeldFlush(rec);
   setState('listening', dormant ? `Waiting for “${wakePhrase()}”. Say it first, and I will answer.` : 'I’m listening. A short pause sends your message.');
   // Awake and nothing happening: after the quiet period, go back to waiting
   // for the name.  clearCapture() cancels this, so a turn that starts (even
@@ -816,20 +842,22 @@ function listen() {
   let settleUntil = sincePlayback < BARGE.settleMs
     ? performance.now() + (BARGE.settleMs - sincePlayback) : 0;
   const samples = new Float32Array(analyser.fftSize);
+  // Audio endpointing must continue when the browser stops rendering frames.
+  // Background tabs may throttle timers, but RAF can stop entirely.
   function tick() {
     if (recorder !== rec || rec.state !== 'recording') return;
     analyser.getFloatTimeDomainData(samples);
     const rms = Math.sqrt(samples.reduce((sum,x)=>sum+x*x,0)/samples.length), now=performance.now();
     $('level').style.width = `${Math.min(100,rms*1000)}%`;
     setGlow(rms * 7);                       // same measurement, one shared meter
-    if (now < settleUntil) {raf = requestAnimationFrame(tick); return;}
+    if (now < settleUntil) {captureTimer = setTimeout(tick, 25); return;}
     if (rms > .015) {voiced += Math.min(100,now-lastTick);lastVoice=now;micLastVoiceAt=now;}
-    lastTick=now;
+    lastTick=now; rec.voicedMs = voiced;
     // Nobody has spoken for the silence timeout: close the microphone and go to
     // sleep (not while the wake word is on: waiting for the name IS listening
     // to silence).  The clip is dropped as speechless, and listen() then holds.
     const quietMs = silenceMs();
-    if (quietMs && !wakeWanted() && voiced < 180 && now - Math.max(silenceFrom, micLastVoiceAt) >= quietMs) { asleep = true; rec.stop(); return; }
+    if (quietMs && !heldText && !wakeWanted() && voiced < 120 && now - Math.max(silenceFrom, micLastVoiceAt) >= quietMs) { asleep = true; rec.stop(); return; }
     // 20 s, not the engine's 30 s ceiling: measured against known ground truth,
 // a 19.5 s upload keeps 96% of its words and a 29.3 s upload keeps 19% -- the
 // engine returns its first sentence and then degenerates.  Stopping earlier
@@ -840,10 +868,10 @@ function listen() {
     // short reply, including a real "Yes.", and it is not needed: the cut is no
     // longer the bug. What was broken is what happened *after* the cut, so see
     // the carry-below and turn_control._should_hold.
-    if ((voiced >= 180 && now-lastVoice > 1000) || now-started > 20000) {rec.stop();return;}
-    raf = requestAnimationFrame(tick);
+    if ((voiced >= 120 && now-lastVoice > 1000) || now-started > 20000) {rec.stop();return;}
+    captureTimer = setTimeout(tick, 25);
   }
-  raf = requestAnimationFrame(tick);
+  captureTimer = setTimeout(tick, 25);
 }
 // ---------------------------------------------------------------- pushed updates
 // The bridge speaks first exactly once per finished Claude Code turn, over
@@ -854,6 +882,10 @@ function listen() {
 // Which coding agent spoke: the bridge names the MCP server an update came
 // from, and two of them exist (Claude Code, and Codex on the local model).
 function agentName(server) { return server === 'codex' ? 'Codex' : 'Claude Code'; }
+function clearAgentPending(agent) {
+  for (const item of document.querySelectorAll('.message.claude.pending'))
+    if (item.querySelector('.role')?.textContent === agent) item.remove();
+}
 // The agent console (2026-09-12): the raw output of a Claude Code or Codex turn
 // as it happens -- every command, edit, tool call and reply, one clipped line
 // each, from the bridge's `trace` events.  It is a window, not a voice: nothing
@@ -892,7 +924,7 @@ function connectUpdates() {
     let notice; try { notice = JSON.parse(event.data); } catch (_) { return; }
     const instruction = typeof notice?.instruction === 'string' ? notice.instruction.trim().slice(0, 200) : '';
     consoleLine(agentName(notice?.server), 'instruction', instruction || '(none)');
-    document.querySelector('.message.claude.pending')?.remove();
+    clearAgentPending(agentName(notice?.server));
     $('messages').querySelector('.empty')?.remove();
     const item = document.createElement('div'); item.className = 'message claude pending';
     const label = document.createElement('span'); label.className = 'role'; label.textContent = agentName(notice?.server);
@@ -952,7 +984,7 @@ async function announceUpdate(update) {
   const id = ++epoch, controller = new AbortController(); abort = controller;
   const check = () => {if(id !== epoch || controller.signal.aborted) throw new DOMException('Stopped','AbortError');};
   try {
-    document.querySelector('.message.claude.pending')?.remove();
+    clearAgentPending(update.agent);
     message('claude', update.spoken, null, {note: updateNote(update), detail: update.detail, agent: update.agent});
     noteUpdateInHistory(update);
     saveConversation();
@@ -1224,7 +1256,6 @@ async function playReply(blob, signal, final = true, first = true, onStart = nul
       player.play().then(()=>{replySeam = !final;if(!settled && !player.paused){startPlaybackGlow();startBargeWatch();onStart?.();}},error=>{
         if(settled || signal.aborted)return;
         if(error.name!=='NotAllowedError'){failed();return;}
-        if(!final){startBargeWatch();return;}   // re-entrant: attempt() is already the retry path
         resumePlayback=attempt;$('resume').hidden=false;
         setState('speaking','Choose Play reply to allow audio in your browser.');
       });
@@ -1492,7 +1523,28 @@ async function speakReply(answer, signal, onFirstClip) {
     await playReply(audio, signal, index === parts.length - 1, index === 0);
   }
 }
-async function runTurn(input, forced = false, voicedMs = null) {
+// Semantic holds buy time for a continuation; silence must also finish them.
+// A recording that has new speech is allowed to finish before flushing, so its
+// words are carried into the same turn. Epoch/capture cancellation owns this timer.
+function armHeldFlush(rec) {
+  if (!heldText) return;
+  const id = epoch;
+  const checkHeld = () => {
+    heldFlushTimer = 0;
+    if (!heldText || !active || busy || id !== epoch || recorder !== rec || paused || asleep) return;
+    if (rec.voicedMs >= 120 || performance.now() - micLastVoiceAt < 1000) {
+      heldFlushTimer = setTimeout(checkHeld, 300); return;
+    }
+    sendHeldText();
+  };
+  heldFlushTimer = setTimeout(checkHeld, 2200);
+}
+function sendHeldText(forced = false) {
+  if (!heldText || busy) return;
+  const text = heldText;
+  runTurn(text, forced, null, true);
+}
+async function runTurn(input, forced = false, voicedMs = null, voiceText = false) {
   if (!(input instanceof Blob)) { heldText = ''; fragmentHolds = 0; }
   clearCapture(); player.pause(); busy = true;
   const id = ++epoch, controller = new AbortController(); abort = controller;
@@ -1509,7 +1561,11 @@ async function runTurn(input, forced = false, voicedMs = null) {
         Number.isFinite(voicedMs) ? {'X-Voiced-Ms': String(Math.round(voicedMs))} : undefined);
       text = String(heard.text || '').trim(); check();
       // A breath between two halves of a sentence must not throw away the first half, so heldText deliberately survives this path.
-      if (!text) {busy=false;if(active)listen();else setState('idle','No speech was detected. Please try again.');return;}
+      if (!text || heard.turn?.discard) {
+        busy=false;
+        if (forced && heldText) { sendHeldText(true); return; }
+        if(active)listen();else setState('idle','No speech was detected. Please try again.');return;
+      }
       const corrected=correctSpeech(text);if(corrected!==text){original=text;text=corrected;}
       // A one-word clip is not a question.  qasr punctuates fragments -- a 0.6 s
       // clip of one syllable comes back as "I." -- so the transcript cannot be
@@ -1537,7 +1593,8 @@ async function runTurn(input, forced = false, voicedMs = null) {
       // punctuation; whatever closed the last clip is the transcript's own.
       if (carried) text = `${carried.replace(/[.!?\u2026]+\s*$/, '')} ${text}`.trim();
       fragmentHolds = 0; heldText = '';
-      if (wakeWanted() && active && !forced) {
+    }
+    if ((input instanceof Blob || voiceText) && wakeWanted() && active && !forced) {
         const rest = afterWakeWord(text, wakePhrase());
         if (dormant) {
           // WAKE-GATE: not addressed to the assistant.  Heard, transcribed, dropped.
@@ -1551,7 +1608,6 @@ async function runTurn(input, forced = false, voicedMs = null) {
           }
           text = rest;
         } else if (rest) text = rest;      // awake, and named anyway: the name is not part of the question
-      }
     }
     lastTurnAt = performance.now();
     message('user',text,original); setState('thinking','Qwen is preparing a reply…');
@@ -1580,9 +1636,12 @@ async function runTurn(input, forced = false, voicedMs = null) {
         // silence would otherwise start: name the tool instead of waiting for it.
         mentionThinking(thinkLine(event.calls), id, controller.signal);
       }
-      else if (event.type === 'tool') setState('thinking', event.ok
+      else if (event.type === 'tool') {
+        if (event.ok && event.name === 'mcp__claude__stop') clearAgentPending('Claude Code');
+        setState('thinking', event.ok
         ? (event.citations?.length ? `Found ${event.citations.length} passage${event.citations.length > 1 ? 's' : ''} in your notes…` : 'Read it. Thinking…')
         : 'That did not work. Answering from what it has…');
+      }
     };
     let reply;
     try {
@@ -1629,6 +1688,7 @@ async function runTurn(input, forced = false, voicedMs = null) {
     // microphone goes through listen(), and listen() holds while `paused`.
     // Only ever set here, and only from the bridge's own answer -- a saved
     // transcript record cannot carry it (turnFrom keeps no controls).
+    if (reply.tools?.some(tool => tool.name === 'mcp__claude__stop' && tool.ok)) clearAgentPending('Claude Code');
     if (reply.controls && reply.controls.pause_listening === true) {
       paused = true; pauseReason = String(reply.controls.pause_reason || '').slice(0, 200);
     }
@@ -1661,7 +1721,7 @@ async function runTurn(input, forced = false, voicedMs = null) {
     // on Start.
     if (error.keepSession && active) {
       busy = false; listen();
-      setState('listening', error.message);
+      setState(phase, error.message);
     } else {
       stopSession(error.name==='AbortError'?'Reply stopped.':error.message);
       if(error.name!=='AbortError')setState('error',error.message);
@@ -1679,6 +1739,7 @@ $('start').onclick = async () => {
     armGlow();
     const Audio = window.AudioContext || window.webkitAudioContext;
     if(!context || context.state==='closed')context=new Audio();
+    watchAudioContext();
     await context.resume();
     if(id!==epoch)return;
     analyser=context.createAnalyser();analyser.fftSize=2048;source=context.createMediaStreamSource(stream);source.connect(analyser);
@@ -1696,7 +1757,10 @@ player.addEventListener('play',()=>{
 player.addEventListener('pause',()=>{if (!replySeam) playbackEndedAt = performance.now();});
 player.addEventListener('ended',()=>{if (!replySeam) playbackEndedAt = performance.now();});
 $('end').onclick=()=>stopSession();
-$('finish').onclick=()=>{if(recorder?.state==='recording'){recorder.sendNow=true;recorder.stop();}};
+$('finish').onclick=()=>{
+  if (heldText && (!recorder || recorder.voicedMs < 120)) { sendHeldText(true); return; }
+  if(recorder?.state==='recording'){recorder.sendNow=true;recorder.stop();}
+};
 function interruptReply() {
   if(!busy)return;
   epoch++;abort?.abort();abort=null;busy=false;clearCapture();replySeam=false;player.pause();gapless.stop();
@@ -1705,7 +1769,11 @@ function interruptReply() {
   asleep=false;if(active)listen();else setState('idle','Reply interrupted. Send another message when ready.');
 }
 $('interrupt').onclick=interruptReply;
-$('resume').onclick=()=>resumePlayback?.();
+$('resume').onclick=async()=>{
+  try { if(context?.state==='suspended') await context.resume(); }
+  catch (_) { $('status').textContent='Audio is still suspended. Try Resume audio again.'; return; }
+  if(resumePlayback)resumePlayback();else $('resume').hidden=true;
+};
 $('resume-listening').onclick=resumeListening;
 let spaceHeld=false;
 window.addEventListener('keydown',event=>{
@@ -1793,8 +1861,14 @@ if(typeof speechPreferences.wakeWord==='string'&&speechPreferences.wakeWord.trim
 if(typeof speechPreferences.wakeQuiet==='string'&&speechPreferences.wakeQuiet)$('wake-quiet').value=speechPreferences.wakeQuiet;
 $('wake-enabled').onchange=()=>{saveSpeech();if(!wakeWanted()&&dormant){dormant=false;if(active&&!busy)listen();}};
 $('wake-word').oninput=saveSpeech;$('wake-quiet').onchange=saveSpeech;
+// The old five-second default was saved alongside unrelated speech settings.
+// Migrate that implicit default once; explicit new timeout choices persist.
+if(speechPreferences.silenceVersion !== 2 && speechPreferences.silence === '5') speechPreferences.silence = '0';
 if(typeof speechPreferences.silence==='string'&&speechPreferences.silence!=='')$('silence-timeout').value=speechPreferences.silence;
-$('silence-timeout').onchange=saveSpeech;
+$('silence-timeout').onchange=()=>{
+  speechPreferences.silenceVersion = 2; saveSpeech();
+  if (!silenceMs() && asleep && !paused) resumeListening();
+};
 correctionRules();
 // ------------------------------------------------------------- directory access
 // Qwen can ask for a folder; only this card can hand one over.  The flow is

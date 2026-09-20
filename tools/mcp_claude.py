@@ -7,7 +7,8 @@ WHY A SEPARATE PROCESS AND NOT A TOOL IN agent_tools.py
     queues an instruction and returns at once; `updates` returns what has
     accumulated since the last time it was asked.  The session itself lives in
     a child of THIS process, so it survives between spoken turns, and the
-    bridge's SIGTERM at shutdown takes it down with us.
+    bridge's SIGTERM at shutdown takes it down with us. `stop` cancels its work
+    and queued instructions without shutting down this MCP server.
 
 WHY THE SPOKEN LINE IS ASKED FOR AT THE SOURCE
     Claude Code answers in Markdown with code blocks, and a speech engine reads
@@ -51,8 +52,9 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
-SERVER_INFO = {"name": "voice-claude-code", "version": "1.0"}
+SERVER_INFO = {"name": "voice-claude-code", "version": "1.1"}
 PROTOCOL = "2025-03-26"
 
 SPOKEN_MARK = "SPOKEN:"
@@ -99,6 +101,13 @@ TOOLS = [
         "inputSchema": {"type": "object", "required": ["instruction"], "properties": {
             "instruction": {"type": "string", "minLength": 1, "maxLength": MAX_INSTRUCTION,
                             "description": "The user's words, verbatim."}}},
+    },
+    {
+        "name": "stop",
+        "description": ("Stop the Claude Code session managed by this voice assistant and its work, "
+                        "discard all queued instructions, and keep it stopped until the user explicitly "
+                        "sends a new instruction. Does not stop unrelated Claude Code sessions."),
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
         "name": "updates",
@@ -165,8 +174,9 @@ class Session:
         # unread, and "any news?" afterwards is honestly told there is none.
         # Without it (an older bridge, or --no-push) `updates` is the only path.
         self.notify = notify
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.process: subprocess.Popen | None = None
+        self.process_identity: str | None = None
         self.reader: threading.Thread | None = None
         self.queue: list[str] = []             # instructions not yet handed to the child
         self.in_flight: str | None = None      # the instruction Claude is working on
@@ -177,6 +187,9 @@ class Session:
         self.seq = 0
         self.session_id = ""
         self.exit: dict | None = None          # set when the child dies
+        self.stopping = False
+        self.stopped = False
+        self.stop_incomplete: dict[int, str] = {}
 
     @staticmethod
     def _fresh_activity() -> dict:
@@ -191,7 +204,10 @@ class Session:
         self.process = subprocess.Popen(argv, cwd=self.cwd, env=env, stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                         text=True, encoding="utf-8", bufsize=1, start_new_session=True)
+        row = self._processes().get(self.process.pid)
+        self.process_identity = row[3] if row else None
         self.exit = None
+        self.stopped = False
         self.session_id = ""
         self.reader = threading.Thread(target=self._read_loop, args=(self.process,), daemon=True)
         self.reader.start()
@@ -201,23 +217,119 @@ class Session:
     def alive(self) -> bool:
         return self.process is not None and self.process.poll() is None
 
-    def stop(self) -> None:
-        process = self.process
-        if process is None:
-            return
-        try:
-            if process.stdin:
-                process.stdin.close()
-        except OSError:
-            pass
-        try:
-            process.terminate()
-            process.wait(timeout=5)
-        except (OSError, subprocess.TimeoutExpired):
+    @staticmethod
+    def _processes() -> dict[int, tuple[str, int, int, str]]:
+        """Linux process identities: state, parent, process group, start ticks."""
+        found = {}
+        for path in Path("/proc").glob("[0-9]*/stat"):
             try:
-                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-            except OSError:
+                fields = path.read_text().rsplit(")", 1)[1].split()
+                found[int(path.parent.name)] = (fields[0], int(fields[1]), int(fields[2]), fields[19])
+            except (OSError, ValueError, IndexError):
+                continue
+        return found
+
+    def stop(self) -> dict:
+        # Invalidate events BEFORE signaling. A final result racing with stop
+        # must not publish success or dispatch the next queued instruction.
+        with self.lock:
+            if self.stopping:
+                return {"status": "stopping", "state": "stopping"}
+            self.stopping = True
+            self.stopped = True
+            process = self.process
+            cancelled = self.in_flight is not None
+            discarded = len(self.queue)
+            self.queue.clear()
+            self.in_flight, self.started_at = None, None
+            self.activity = self._fresh_activity()
+            self.session_id = ""
+            owned = dict(self.stop_incomplete)
+            snapshot = self._processes()
+            if process is not None and (process.pid not in snapshot or
+                                        snapshot[process.pid][3] == self.process_identity):
+                # start_new_session makes the child the owner of this group.
+                # Also capture descendants which created their own groups.
+                descendants = {process.pid}
+                while True:
+                    expanded = descendants | {pid for pid, row in snapshot.items() if row[1] in descendants}
+                    if expanded == descendants:
+                        break
+                    descendants = expanded
+                owned.update({pid: row[3] for pid, row in snapshot.items()
+                              if pid in descendants or row[2] == process.pid})
+
+        def remaining():
+            rows = self._processes()
+            known = {pid for pid, identity in owned.items() if pid in rows and rows[pid][3] == identity}
+            group_owned = process is not None and any(rows[pid][2] == process.pid for pid in known)
+            while True:
+                expanded = known | {pid for pid, row in rows.items()
+                                    if row[1] in known or (group_owned and row[2] == process.pid)}
+                if expanded == known:
+                    break
+                known = expanded
+            # Include commands forked during the graceful shutdown interval.
+            owned.update({pid: rows[pid][3] for pid in known})
+            return {pid: identity for pid, identity in owned.items()
+                    if pid in rows and rows[pid][3] == identity and rows[pid][0] != "Z"}
+
+        def signal_owned(sig):
+            live = remaining()
+            rows = self._processes()
+            signaled_group = False
+            if process is not None and any(pid in rows and rows[pid][3] == identity and
+                                           rows[pid][2] == process.pid for pid, identity in owned.items()):
+                try:
+                    os.killpg(process.pid, sig)
+                    signaled_group = True
+                except ProcessLookupError:
+                    pass
+                except PermissionError as error:
+                    self.log(f"could not stop owned group={process.pid}: {error}")
+            # Identity checks avoid signaling a reused PID. Never global pkill.
+            for pid in live:
+                if signaled_group and pid in rows and rows[pid][2] == process.pid:
+                    continue
+                try:
+                    os.kill(pid, sig)
+                except ProcessLookupError:
+                    pass
+                except PermissionError as error:
+                    self.log(f"could not stop owned pid={pid}: {error}")
+
+        signal_owned(signal.SIGTERM)
+        if process is not None and process.stdin:
+            try:
+                process.stdin.close()
+            except (OSError, ValueError):
                 pass
+        deadline = time.monotonic() + 2.0
+        while remaining() and time.monotonic() < deadline:
+            time.sleep(0.025)
+        if remaining():
+            signal_owned(signal.SIGKILL)
+            deadline = time.monotonic() + 1.0
+            while remaining() and time.monotonic() < deadline:
+                time.sleep(0.025)
+        if process is not None:
+            try:
+                process.wait(timeout=0.2)
+            except subprocess.TimeoutExpired:
+                pass
+        left = remaining()
+        with self.lock:
+            self.stopping = False
+            self.stop_incomplete = left
+            if not left:
+                self.process = None
+            self.exit = {"code": process.poll(), "at": time.time()} if process is not None else self.exit
+        result = {"status": "stop failed" if left else "stopped", "state": "stop failed" if left else "stopped",
+                  "cancelled_work": cancelled, "discarded_queued": discarded,
+                  "note": "Send a new instruction explicitly to start a fresh Claude Code session."}
+        if left:
+            result.update(error="Some owned processes could not be stopped.", remaining_pids=sorted(left))
+        return result
 
     # -- the child's stdout, one event per line ---------------------------
     def _drain_stderr(self, process: subprocess.Popen) -> None:
@@ -226,6 +338,8 @@ class Session:
                 self.log("claude stderr: " + line.rstrip()[:300])
         except (OSError, ValueError):
             pass
+        finally:
+            process.stderr.close()
 
     def _read_loop(self, process: subprocess.Popen) -> None:
         try:
@@ -237,12 +351,16 @@ class Session:
                     event = json.loads(raw)
                 except ValueError:
                     continue
-                self._on_event(event)
+                self._on_event(event, process)
         except (OSError, ValueError):
             pass
+        process.stdout.close()
         code = process.wait()
+        if process.stdin:
+            process.stdin.close()
         with self.lock:
-            if self.process is process:
+            if self.process is process and not self.stopped:
+                self.queue.clear()
                 self.exit = {"code": code, "at": time.time()}
                 if self.in_flight is not None:
                     self._finish(spoken=f"Claude Code stopped unexpectedly (exit code {code}) before it "
@@ -250,9 +368,11 @@ class Session:
                                  detail="", is_error=True)
         self.log(f"claude exited code={code}")
 
-    def _on_event(self, event: dict) -> None:
+    def _on_event(self, event: dict, process: subprocess.Popen | None = None) -> None:
         kind = event.get("type")
         with self.lock:
+            if self.stopped or self.stopping or (process is not None and self.process is not process):
+                return
             if kind == "system" and event.get("subtype") == "init":
                 self.session_id = str(event.get("session_id", ""))[:64]
             elif kind == "assistant":
@@ -324,12 +444,14 @@ class Session:
         self.in_flight, self.started_at = None, None
         self.activity = self._fresh_activity()
 
-    # -- the two tools ---------------------------------------------------
-    def _dispatch_locked(self) -> None:
+    # -- the tools ---------------------------------------------------
+    def _dispatch_locked(self, *, allow_spawn: bool = False) -> None:
         """Hand the next queued instruction to the child, if it is idle.  Caller holds the lock."""
         if self.in_flight is not None or not self.queue:
             return
         if not self.alive():
+            if not allow_spawn:
+                return
             self._spawn()
         instruction = self.queue.pop(0)
         message = {"type": "user", "message": {"role": "user", "content": FRAME + instruction}}
@@ -352,9 +474,11 @@ class Session:
         if not instruction:
             return {"error": "instruction is empty"}
         with self.lock:
+            if self.stopping or self.stop_incomplete:
+                return {"error": "Claude Code is still stopping; try stop again before sending new work."}
             fresh = not self.alive()
             self.queue.append(instruction[:MAX_INSTRUCTION])
-            self._dispatch_locked()
+            self._dispatch_locked(allow_spawn=True)
             waiting = len(self.queue)
             working = self.in_flight is not None
         return {
@@ -366,7 +490,10 @@ class Session:
         }
 
     def state_locked(self) -> dict:
-        state = {"state": "working" if self.in_flight is not None else ("idle" if self.alive() else "not started")}
+        label = ("stopping" if self.stopping else "stop failed" if self.stop_incomplete else
+                 "stopped" if self.stopped else "working" if self.in_flight is not None else
+                 "idle" if self.alive() else "not started")
+        state = {"state": label}
         if self.in_flight is not None:
             state["working_on"] = _clip(self.in_flight, 200)
             state["working_for_seconds"] = round(time.time() - self.started_at, 1) if self.started_at else 0
@@ -542,7 +669,15 @@ def main() -> int:
             "Claude Code will speak up on its own the moment it finishes, so tell the user they will hear "
             "from it; `updates` is only for asking how it is going meanwhile.")
 
+    shutdown_requested = False
+
     def shutdown(*_):
+        nonlocal shutdown_requested
+        shutdown_requested = True
+        # Closing stdin and SIGTERM often arrive together. Do not interrupt
+        # cleanup already running in the main thread, nor deadlock its lock.
+        if session.stopping:
+            return
         session.stop()
         raise SystemExit(0)
 
@@ -574,12 +709,17 @@ def main() -> int:
                         continue
                     result = session.send(str(args.get("instruction", "")))
                     _reply(identifier, _content(result, "error" in result))
+                elif name == "stop":
+                    result = session.stop()
+                    _reply(identifier, _content(result, "error" in result))
                 elif name == "updates":
                     _reply(identifier, _content(session.get_updates(bool(args.get("detail", False)))))
                 else:
                     _reply(identifier, _content({"error": f"unknown tool {name}"}, True))
             else:
                 _write({"jsonrpc": "2.0", "id": identifier, "error": {"code": -32601, "message": f"unknown {method}"}})
+            if shutdown_requested:
+                break
     finally:
         session.stop()
     return 0

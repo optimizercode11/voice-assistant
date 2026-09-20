@@ -340,6 +340,25 @@ class ToolLoopTests(unittest.TestCase):
         status, data = self.request({'messages': [{'role': 'user', 'content': 'hello'}]})
         self.assertEqual(json.loads(data)['controls'], {})
 
+    def test_model_cannot_pause_the_microphone_without_current_user_intent(self):
+        registry = self.registry()
+        registry.config.builtins['pause_listening'] = True
+        registry._install_builtins()
+        for text in ('stop Claude Code', 'What time is it?', "Don't stop listening", 'Why did you stop listening?'):
+            self.upstream.requests = []
+            self.upstream.script = [calling([call('pause_listening', {'reason': 'model decided'})]),
+                                    answered('Still listening.')]
+            status, data = self.request({'messages': [{'role': 'user', 'content': text}]})
+            self.assertEqual(status, 200)
+            result = json.loads(data)
+            self.assertEqual(result['controls'], {})
+            self.assertFalse(result['tools'][0]['ok'])
+        self.upstream.requests = []
+        self.upstream.script = [calling([call('pause_listening', {})]), answered('Paused.')]
+        status, data = self.request({'messages': [{'role': 'user', 'content': 'Please stop listening'}]})
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(data)['controls']['pause_listening'])
+
     def test_the_system_prompt_carries_the_manifest_only_when_tools_are_attached(self):
         registry = self.registry()
         registry.config.builtins['pause_listening'] = True

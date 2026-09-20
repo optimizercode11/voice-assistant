@@ -59,6 +59,7 @@ test-web:
 # path hears the spoken line only -- the Markdown report moves only when asked.
 test-claude:
 	$(CPU) $(PYTHON) -W error::ResourceWarning -u tests/mcp_claude_test.py
+	$(CPU) $(PYTHON) -W error::ResourceWarning -u tests/claude_stop_test.py
 
 # The Codex server, same claims over a fake `codex exec --json`: one child per
 # turn, later turns resume the thread, the profile reaches both argv forms as
@@ -110,7 +111,7 @@ doctor:
 	$(CPU) $(PYTHON) -u tools/voicectl.py --config config/assistant.toml doctor
 
 test-browser:
-	@for suite in voice_chat_browser voice_carry_browser voice_barge_browser voice_controls_browser voice_language_browser stt_browser voice_tools_browser voice_think_browser voice_tts_browser voice_history_browser voice_compact_browser voice_pause_browser voice_push_browser voice_wake_browser voice_silence_browser; do \
+	@for suite in voice_recovery_browser voice_chat_browser voice_carry_browser voice_barge_browser voice_controls_browser voice_language_browser stt_browser voice_tools_browser voice_think_browser voice_tts_browser voice_history_browser voice_compact_browser voice_pause_browser voice_push_browser voice_wake_browser voice_silence_browser; do \
 	  echo "== $$suite =="; \
 	  $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/$$suite.mjs || exit 1; \
 	done

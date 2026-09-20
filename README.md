@@ -1,5 +1,16 @@
 # voice-assistant — a live speech-to-speech conversation with Qwen
 
+Stability update (2026-09-20): the default chat background is black. Automatic
+microphone sleep is off by default; explicit Pause still requires Resume.
+Short numeric and multilingual answers finish normally, and incomplete fragments
+get a bounded quiet window before being sent. Blocked audio exposes a retry
+control, and the JSON response fallback never repeats a chat request.
+
+Say “Stop Claude Code” to stop the voice assistant's managed coding session and
+cancel its queued instructions. This leaves the microphone listening. A later
+explicit instruction can start a fresh session. Unrelated Claude sessions are
+outside this tool's scope.
+
 Deployment update (2026-09-20): the default profile is
 `voice-stack-gpu4.service`, serving `/chat` on HTTPS 8094. Kokoro and
 Qwen3-ASR-1.7B FP8 run on GPU 4; chat uses the independently managed

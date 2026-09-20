@@ -31,7 +31,7 @@ class MeasuredTranscripts(unittest.TestCase):
 
     def test_a_real_one_word_answer_still_dispatches(self):
         # Holding fragments must not turn into holding everything.
-        for answer in ('yes', 'Hello.', 'no', 'Thanks'):
+        for answer in ('yes', 'yeah', 'Yep.', 'Nope.', 'Sure.', 'Hello.', 'no', 'Thanks'):
             self.assertTrue(judge(answer)['complete'], f'{answer!r} was held')
 
     def test_open_clause_waits(self):
@@ -60,6 +60,24 @@ class MeasuredTranscripts(unittest.TestCase):
     def test_breath_is_not_speech(self):
         for noise in ('um', 'um uh', '   ', ''):
             self.assertFalse(judge(noise)['complete'], f'{noise!r} would dispatch')
+
+
+class CompletedShortAnswers(unittest.TestCase):
+    def test_numeric_and_non_latin_answers_do_not_wait_for_another_clip(self):
+        for text in ('42', '3.14', '२०', 'मुझे समय बताओ।', 'हाँ', '你好。', 'ありがとう', '今何時？'):
+            with self.subTest(text=text):
+                result = turn_control.completeness(text, 400)
+                self.assertTrue(result['complete'])
+                self.assertFalse(result['hold'])
+                self.assertFalse(result['discard'])
+
+    def test_noise_is_discarded_but_english_fragments_are_kept(self):
+        for text in ('', '...', 'um', 'uh hmm'):
+            self.assertTrue(turn_control.completeness(text, 400)['discard'])
+        for text in ('I.', 'How do I restart the', 'Carlton.'):
+            result = turn_control.completeness(text, 400)
+            self.assertTrue(result['hold'])
+            self.assertFalse(result['discard'])
 
 
 class ItCanOnlyAddPatience(unittest.TestCase):

@@ -1,5 +1,25 @@
 # Runbook
 
+## Voice stability and Claude stop (2026-09-20)
+
+Campaign/root: `voice-stop-turns-20260920`, on the same GPU4 voice service and
+HTTPS8094 origin. Model remains the full-context Q38-27B on GPU2; Q36 stays
+inactive/disabled. The Claude MCP tool now includes `mcp__claude__stop`, which
+cancels current/queued work, stops owned descendants, and keeps the MCP peer
+available. It never kills unrelated Claude sessions or starts new work.
+
+The forced SSH command for the Claude MCP server reads
+`/mnt/voice-assistant/tools/mcp_claude.py` on the local coding host. The reviewed
+branch must be integrated there before restarting the voice bridge to advertise
+the new tool. The unrelated local service-file edit must be preserved.
+
+Listening now has a bounded fragment grace window, completes numeric/non-Latin
+answers without English grammar heuristics, and defaults idle sleep to off.
+Explicit microphone pause is gated on the current user's request; a request to
+stop Claude Code cannot pause listening. The black default theme retains
+contrasting controls and microphone feedback. See
+`evidence/VOICE-STABILITY.md` for verification and remaining device limits.
+
 ## Sessions and compaction deployment (2026-09-20)
 
 Profile/campaign: `voice-sessions-compact-20260920`; service

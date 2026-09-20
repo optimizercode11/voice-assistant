@@ -182,7 +182,7 @@ enabled = true
 # page hears about finished work only when someone asks.
 [[mcp.server]]
 name = "claude"
-purpose = "the user's own projects, repositories and code live on the user's computer, which only Claude Code reaches: send hands it any request to find, look up, read, summarise, explain or change them (the answer is pushed back and spoken when ready); updates says what it has done since; use detail only when the user asks for specifics"
+purpose = "the user's own projects, repositories and code live on the user's computer, which only Claude Code reaches: send hands it any request to find, look up, read, summarise, explain or change them (the answer is pushed back and spoken when ready); stop cancels its current and queued work without pausing the microphone; updates says what it has done since; use detail only when the user asks for specifics"
 command = "ssh"
 args = ["-T", "codex-claude"]
 timeout_seconds = 20

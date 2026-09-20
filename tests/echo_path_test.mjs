@@ -324,7 +324,7 @@ check('the page protects listening after playback with the same settle setting',
   assert.match(listen, /let settleUntil = sincePlayback < BARGE\.settleMs/);
   assert.doesNotMatch(listen, /playbackEndedAt \? BARGE\.settleMs : 0/,
     'a settle window charged to every clip after the first reply');
-  assert.match(listen, /if \(now < settleUntil\) \{raf = requestAnimationFrame\(tick\); return;\}/);
+  assert.match(listen, /if \(now < settleUntil\) \{captureTimer = setTimeout\(tick, 25\); return;\}/);
 });
 
 check('no AEC: source guard refuses before enabling the microphone', () => {

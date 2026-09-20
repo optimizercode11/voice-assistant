@@ -20,6 +20,9 @@ every test:
 import json
 import os
 import sys
+import signal
+import subprocess
+from pathlib import Path
 import time
 
 SESSION = "fake-session-0001"
@@ -99,7 +102,25 @@ def main() -> int:
         instruction = text.split("\n\n", 1)[1] if "\n\n" in text else text
         words = instruction.split()
         head = words[0].lower() if words else ""
-        if head == "slow":
+        if head == "children":
+            # Both the normal command group and a child which starts its own
+            # session belong to this fake Claude. A TERM handler reaps them.
+            children = [subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"],
+                                         start_new_session=detached) for detached in (False, True)]
+            def stop_children(*_):
+                for child in children:
+                    child.terminate()
+                for child in children:
+                    child.wait(timeout=5)
+                raise SystemExit(0)
+            signal.signal(signal.SIGTERM, stop_children)
+            Path(words[1]).write_text(json.dumps([os.getpid()] + [child.pid for child in children]))
+            time.sleep(60)
+        elif head == "ignoreterm":
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            Path(words[1]).write_text(str(os.getpid()))
+            time.sleep(60)
+        elif head == "slow":
             seconds = float(words[1]) if len(words) > 1 else 2.0
             tool_use("Bash", command="sleep")
             time.sleep(seconds)

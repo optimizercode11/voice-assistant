@@ -1,0 +1,32 @@
+{
+  "campaign": "voice-idle4-20260920",
+  "command": [
+    "env",
+    "PLAYWRIGHT=/tmp/fork-stability-browser-zu50jkow/node_modules/playwright/index.mjs",
+    "/tmp/fork-stability-browser-zu50jkow/node_modules/node/bin/node",
+    "tests/browser/voice_silence_browser.mjs"
+  ],
+  "command_exit_code": 1,
+  "containment": {
+    "cpus": "0-3",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/mnt/data/voice-idle4-20260920",
+  "expected_exit_code": 1,
+  "finished_utc": "2026-09-20T06:08:56.256538256Z",
+  "git_head": "6b01bd04d8634e2840994f371db98afe45f17f65",
+  "inputs": [],
+  "label": "reproduce",
+  "log": "/mnt/data/voice-idle4-20260920/evidence/guarded-voice-idle4-20260920-20260920T060855Z-116359.log",
+  "run_id": "voice-idle4-20260920-20260920T060855Z-116359",
+  "schema_version": 2,
+  "source_fingerprint": "eb5d4d6e448f21f3e166ffb5beeee37673297e6de6a9af4b4b4ff84e68538641",
+  "started_utc": "2026-09-20T06:08:55.728477511Z",
+  "status": "PASS"
+}

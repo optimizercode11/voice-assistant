@@ -1,7 +1,7 @@
 # voice-assistant — a live speech-to-speech conversation with Qwen
 
 Stability update (2026-09-20): the default chat background is black. Automatic
-microphone sleep is off by default; explicit Pause still requires Resume.
+microphone sleep defaults to 4 seconds of inactivity; explicit Pause still requires Resume.
 Short numeric and multilingual answers finish normally, and incomplete fragments
 get a bounded quiet window before being sent. Blocked audio exposes a retry
 control, and the JSON response fallback never repeats a chat request.
@@ -188,7 +188,7 @@ and must go red.
 
 ## Silence timeout
 
-Settings has a **Silence timeout**, five seconds by default: when nobody has
+Settings has a **Silence timeout**, four seconds by default: when nobody has
 spoken for that long the microphone closes and the page says so.  Being
 asleep is not the same as the "be quiet" pause the assistant can ask for:
 an agent's finished update is still spoken, and listening returns after it,

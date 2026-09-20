@@ -1,0 +1,3 @@
+guarded-run: campaign=voice-idle4-20260920 label=regression mode=cpu cpus=4-7
+command: env PLAYWRIGHT=/tmp/fork-stability-browser-zu50jkow/node_modules/playwright/index.mjs /tmp/fork-stability-browser-zu50jkow/node_modules/node/bin/node tests/browser/voice_recovery_browser.mjs
+PASS: held/brief turns, Send now, carry/filler, cancellation, wake gate, pause/audio recovery, autoplay retry, single POST, agent indicators, preferences and black background

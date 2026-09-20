@@ -52,15 +52,16 @@ try{
   await page.goto(`http://127.0.0.1:${server.address().port}/chat`);
   await page.waitForFunction(()=>!document.querySelector('#send').disabled);
   const deadline=Date.now()+10000;while(!listeners.length&&Date.now()<deadline)await page.waitForTimeout(100);
-  assert.equal(await page.locator('#silence-timeout').inputValue(),'0','continuous listening is the default');
-  await page.fill('#silence-timeout','2');await page.dispatchEvent('#silence-timeout','change');
+  assert.equal(await page.locator('#silence-timeout').inputValue(),'4','four seconds is the default idle pause');
   await page.uncheck('#wake-enabled');
   await page.locator('#start').click();
   await page.waitForFunction(()=>document.querySelector('#state').textContent==='Listening');
+  const listeningSince=Date.now();
   // 1. Silence: within the timeout plus a margin the microphone closes.
   await page.waitForFunction(()=>document.querySelector('#state').textContent==='Paused',null,{timeout:7000})
-    .catch(()=>assert.fail('two seconds of silence must close the microphone'));
-  assert.match(await page.locator('#status').textContent(),/Quiet for 2 s, so I stopped listening/);
+    .catch(()=>assert.fail('four seconds of silence must close the microphone'));
+  assert.ok(Date.now()-listeningSince>=3000,'idle pause must allow at least three seconds to speak');
+  assert.match(await page.locator('#status').textContent(),/Quiet for 4 s, so I stopped listening/);
   assert.equal(await page.evaluate(()=>window.observedTracks.every(t=>!t.enabled)),true,'the tracks are disabled while asleep');
   assert.equal(await page.locator('#resume-listening').isVisible(),true,'the way back is a button');
   assert.equal(uploads,0,'silence is never uploaded');

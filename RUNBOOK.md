@@ -1,5 +1,14 @@
 # Runbook
 
+## Four-second idle pause (local update, 2026-09-20)
+
+Campaign: `voice-idle4-20260920`. The current source defaults idle pause to four
+seconds and migrates browsers using either previous default. Custom timeouts and
+new explicit zero (continuous listening) choices persist. Resume, Space, typed
+replies, and agent updates retain their recovery behavior. Deployment is pending
+because the owner is shutting down `vllm`; the live deployment described below
+still uses the previous default until this update is deployed.
+
 ## Voice stability and Claude stop (2026-09-20)
 
 Campaign/root: `voice-stop-turns-20260920`, on the same GPU4 voice service and

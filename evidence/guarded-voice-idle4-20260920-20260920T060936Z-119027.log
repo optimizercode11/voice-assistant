@@ -1,0 +1,4 @@
+guarded-run: campaign=voice-idle4-20260920 label=positive mode=cpu cpus=0-3
+command: env PLAYWRIGHT=/tmp/fork-stability-browser-zu50jkow/node_modules/playwright/index.mjs /tmp/fork-stability-browser-zu50jkow/node_modules/node/bin/node tests/browser/voice_silence_browser.mjs
+ASSERTIONS COMPLETE: browser silence
+PASS chromium: silence closes the microphone, an update or a reply reopens it, 0 keeps it open

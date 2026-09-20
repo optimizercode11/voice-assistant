@@ -1,0 +1,20 @@
+guarded-run: campaign=voice-idle4-20260920 label=reproduce mode=cpu cpus=0-3
+command: env PLAYWRIGHT=/tmp/fork-stability-browser-zu50jkow/node_modules/playwright/index.mjs /tmp/fork-stability-browser-zu50jkow/node_modules/node/bin/node tests/browser/voice_silence_browser.mjs
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: four seconds is the default idle pause
+
+'0' !== '4'
+
+    at file:///mnt/data/voice-idle4-20260920/tests/browser/voice_silence_browser.mjs:55:10 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: '0',
+  expected: '4',
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v22.23.2

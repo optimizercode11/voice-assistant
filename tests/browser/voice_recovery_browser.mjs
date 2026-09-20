@@ -139,14 +139,22 @@ try {
   assert.deepEqual(await page.locator('.message.claude.pending .role').allTextContents(),['Codex']);
   await page.click('#end');
 
-  // Existing browsers inherit the continuous-listening default, but an explicit
-  // new timeout preference survives reload.
+  // Existing browsers inherit the four-second idle default; custom choices persist.
   await page.evaluate(()=>localStorage.setItem('voice-speech',JSON.stringify({silence:'5'})));
   await page.reload(); await page.waitForFunction(()=>!document.querySelector('#send').disabled);
-  assert.equal(await page.inputValue('#silence-timeout'),'0','legacy automatic default no longer pauses users');
+  assert.equal(await page.inputValue('#silence-timeout'),'4','legacy automatic default migrates to four seconds');
   assert.equal(await page.evaluate(()=>getComputedStyle(document.body).backgroundColor),'rgb(0, 0, 0)');
   await page.fill('#silence-timeout','5'); await page.dispatchEvent('#silence-timeout','change');
   await page.reload(); await page.waitForFunction(()=>!document.querySelector('#send').disabled);
   assert.equal(await page.inputValue('#silence-timeout'),'5','explicit timeout persists');
+  await page.evaluate(()=>localStorage.setItem('voice-speech',JSON.stringify({silence:'0',silenceVersion:2})));
+  await page.reload(); await page.waitForFunction(()=>!document.querySelector('#send').disabled);
+  assert.equal(await page.inputValue('#silence-timeout'),'4','previous continuous-listening default migrates');
+  await page.fill('#silence-timeout','0'); await page.dispatchEvent('#silence-timeout','change');
+  await page.reload(); await page.waitForFunction(()=>!document.querySelector('#send').disabled);
+  assert.equal(await page.inputValue('#silence-timeout'),'0','new explicit continuous listening persists');
+  await page.evaluate(()=>localStorage.setItem('voice-speech',JSON.stringify({silence:'3',silenceVersion:2})));
+  await page.reload(); await page.waitForFunction(()=>!document.querySelector('#send').disabled);
+  assert.equal(await page.inputValue('#silence-timeout'),'3','existing custom timeout persists');
   assert.deepEqual(errors,[]); console.log('PASS: held/brief turns, Send now, carry/filler, cancellation, wake gate, pause/audio recovery, autoplay retry, single POST, agent indicators, preferences and black background');
 } finally { await browser.close(); await new Promise(resolve=>server.close(resolve)); }

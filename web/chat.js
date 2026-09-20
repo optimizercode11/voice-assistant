@@ -1861,12 +1861,16 @@ if(typeof speechPreferences.wakeWord==='string'&&speechPreferences.wakeWord.trim
 if(typeof speechPreferences.wakeQuiet==='string'&&speechPreferences.wakeQuiet)$('wake-quiet').value=speechPreferences.wakeQuiet;
 $('wake-enabled').onchange=()=>{saveSpeech();if(!wakeWanted()&&dormant){dormant=false;if(active&&!busy)listen();}};
 $('wake-word').oninput=saveSpeech;$('wake-quiet').onchange=saveSpeech;
-// The old five-second default was saved alongside unrelated speech settings.
-// Migrate that implicit default once; explicit new timeout choices persist.
-if(speechPreferences.silenceVersion !== 2 && speechPreferences.silence === '5') speechPreferences.silence = '0';
+// Adopt the four-second idle default for browsers with either previous default.
+// Keep custom timeouts, and preserve new explicit choices (including zero).
+if(speechPreferences.silenceVersion !== 3) {
+  if(!speechPreferences.silence || ['0','5'].includes(speechPreferences.silence)) speechPreferences.silence = '4';
+  speechPreferences.silenceVersion = 3;
+  try{localStorage.setItem('voice-speech',JSON.stringify(speechPreferences));}catch(_){}
+}
 if(typeof speechPreferences.silence==='string'&&speechPreferences.silence!=='')$('silence-timeout').value=speechPreferences.silence;
 $('silence-timeout').onchange=()=>{
-  speechPreferences.silenceVersion = 2; saveSpeech();
+  speechPreferences.silenceVersion = 3; saveSpeech();
   if (!silenceMs() && asleep && !paused) resumeListening();
 };
 correctionRules();

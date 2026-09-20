@@ -1,0 +1,39 @@
+{
+  "campaign": "voice-codex-sessions-20260920",
+  "command": [
+    "python3",
+    "-c",
+    "import sys,json\nsys.path.insert(0,\"tools\")\nimport agent_config,mcp_client\nconfig=agent_config.load(\"config/host.toml\")\nentry=next(x for x in config.mcp if x.name==\"codex\")\npeer=mcp_client.MCPServer(entry.name,entry.command,entry.args,entry.env,entry.timeout_seconds)\ntry:\n tools={t.name:t for t in peer.start()}\n assert set(tools)=={\"create_session\",\"list_sessions\",\"select_session\",\"send\",\"status\",\"steer\",\"interrupt\",\"answer\",\"updates\",\"archive_session\"},list(tools)\n text,error=peer.call(tools[\"list_sessions\"],{\"context_id\":\"preflight\"})\n assert not error,text\n print(json.dumps({\"server\":peer.server_info,\"tools\":sorted(tools),\"state\":json.loads(text)},indent=2))\nfinally:peer.stop()\n"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "28-31",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stack/voice-codex-sessions-20260920",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-20T19:31:02.425452298Z",
+  "git_head": "ea4f6b5b510c962f03096ad1ad5cd5e5b1615c95",
+  "inputs": [
+    {
+      "bytes": 12475,
+      "exists": true,
+      "path": "config/host.toml",
+      "sha256": "596bb3e2c4fc3093baa73a1236808b78f2a8f38801869f66570d8aefad40151d",
+      "verification": "current_local"
+    }
+  ],
+  "label": "ssh-mcp-preflight",
+  "log": "/home/ambudsharma/qwen36/voice-stack/voice-codex-sessions-20260920/evidence/guarded-voice-codex-sessions-20260920-20260920T193100Z-2974103.log",
+  "run_id": "voice-codex-sessions-20260920-20260920T193100Z-2974103",
+  "schema_version": 2,
+  "source_fingerprint": "3ce06259100ebd912492839262aa083e378e6c9f994bfc5db477c7dd36d3f383",
+  "started_utc": "2026-09-20T19:31:01.853982351Z",
+  "status": "PASS"
+}

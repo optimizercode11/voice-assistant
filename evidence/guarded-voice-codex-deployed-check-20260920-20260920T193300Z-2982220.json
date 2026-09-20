@@ -1,0 +1,39 @@
+{
+  "campaign": "voice-codex-deployed-check-20260920",
+  "command": [
+    "python3",
+    "-c",
+    "import sys,json,time,uuid,pathlib\nsys.path.insert(0,\"deploy\")\nimport voice_stack as v\nstamp=uuid.uuid4().hex[:6]\nnames=[\"VoiceProbeA\"+stamp,\"VoiceProbeB\"+stamp]\ncontexts=[\"probe_a_\"+stamp,\"probe_b_\"+stamp]\nreport={\"names\":names,\"contexts\":contexts,\"turns\":[],\"checks\":{}}\ndef get(context):\n return json.loads(v.request(\"/codex/sessions?context_id=\"+context))\ndef ask(text,expected,context):\n result=json.loads(v.request(\"/chat/completions\",json.dumps({\"context_id\":context,\"messages\":[{\"role\":\"user\",\"content\":text}]}).encode()))\n report[\"turns\"].append({\"request\":text,\"context_id\":context,**result})\n print(json.dumps(report[\"turns\"][-1]),flush=True)\n assert any(t[\"name\"]==expected and t[\"ok\"] for t in result[\"tools\"]),result\n assert not result.get(\"controls\",{}).get(\"pause_listening\"),result\n return result\ntry:\n health=json.loads(v.request(\"/chat/health\"))\n expected={\"create_session\",\"list_sessions\",\"select_session\",\"send\",\"status\",\"steer\",\"interrupt\",\"answer\",\"updates\",\"archive_session\"}\n assert {n.removeprefix(\"mcp__codex__\") for n in health[\"tools\"] if n.startswith(\"mcp__codex__\")}==expected,health[\"tools\"]\n for name,context in zip(names,contexts):\n  ask(\"Create a Codex session named \"+name+\". Use its default isolated workspace. Do not start a task yet.\",\"mcp__codex__create_session\",context)\n views=[get(c) for c in contexts]\n assert all(x[\"enabled\"] for x in views)\n rows={r[\"name\"]:r for r in views[0][\"sessions\"] if r[\"name\"] in names}\n assert len(rows)==2,rows\n assert views[0][\"selected_session_id\"]==rows[names[0]][\"session_id\"]\n assert views[1][\"selected_session_id\"]==rows[names[1]][\"session_id\"]\n selected=json.loads(v.request(\"/codex/sessions/select\",json.dumps({\"context_id\":contexts[0],\"session\":rows[names[1]][\"session_id\"]}).encode()))\n assert selected[\"selected_session_id\"]==rows[names[1]][\"session_id\"]\n assert get(contexts[1])[\"selected_session_id\"]==rows[names[1]][\"session_id\"]\n # Switch only first conversation back by the voice tool.\n ask(\"Switch the selected Codex session to \"+names[0]+\".\",\"mcp__codex__select_session\",contexts[0])\n assert get(contexts[0])[\"selected_session_id\"]==rows[names[0]][\"session_id\"]\n assert get(contexts[1])[\"selected_session_id\"]==rows[names[1]][\"session_id\"]\n report[\"checks\"][\"separate_selections\"]=True\n ask(\"Tell the selected Codex session to implement probe.py containing square(x) that returns x*x, and run Python assertions for square(-3)==9 and square(0)==0. Use only its own project directory.\",\"mcp__codex__send\",contexts[0])\n deadline=time.monotonic()+150\n while time.monotonic()<deadline:\n  current=next(r for r in get(contexts[0])[\"sessions\"] if r[\"name\"]==names[0])\n  assert current[\"state\"] not in [\"failed\",\"unknown\"],current\n  if current[\"state\"]==\"idle\" and current[\"thread_id\"]:break\n  time.sleep(1)\n else:raise AssertionError(current)\n report[\"checks\"][\"real_coding_completion\"]=current\n ask(\"What is the status of the selected Codex session?\",\"mcp__codex__status\",contexts[0])\n ask(\"Read \"+rows[names[0]][\"cwd\"]+\"/probe.py using the direct workspace file tools.\",\"mcp__workspace__read_file\",contexts[0])\n report[\"checks\"][\"direct_read_path\"]=rows[names[0]][\"cwd\"]+\"/probe.py\"\n for name,context in zip(names,contexts):\n  ask(\"Archive the finished Codex session named \"+name+\". Keep all project files.\",\"mcp__codex__archive_session\",context)\n assert not any(r[\"name\"] in names for r in get(contexts[0])[\"sessions\"])\n report[\"checks\"][\"archived_without_deleting_projects\"]=True\n report[\"passed\"]=True\nfinally:\n pathlib.Path(\"evidence/deployed-check.json\").write_text(json.dumps(report,indent=2)+\"\\n\")\n print(json.dumps({\"passed\":report.get(\"passed\",False),\"checks\":report[\"checks\"]},indent=2),flush=True)\n"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "28-31",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-validation/voice-codex-deployed-check-20260920",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-20T19:33:25.272764437Z",
+  "git_head": "ea4f6b5b510c962f03096ad1ad5cd5e5b1615c95",
+  "inputs": [
+    {
+      "bytes": 7358,
+      "exists": true,
+      "path": "deploy/site_config.py",
+      "sha256": "f51a90c691a3a4801d02573e904581ff051be1229f02c2817d9939dc72e1e46d",
+      "verification": "current_local"
+    }
+  ],
+  "label": "deployed-voice-routing",
+  "log": "/home/ambudsharma/qwen36/voice-validation/voice-codex-deployed-check-20260920/evidence/guarded-voice-codex-deployed-check-20260920-20260920T193300Z-2982220.log",
+  "run_id": "voice-codex-deployed-check-20260920-20260920T193300Z-2982220",
+  "schema_version": 2,
+  "source_fingerprint": "3ce06259100ebd912492839262aa083e378e6c9f994bfc5db477c7dd36d3f383",
+  "started_utc": "2026-09-20T19:33:01.775923149Z",
+  "status": "PASS"
+}

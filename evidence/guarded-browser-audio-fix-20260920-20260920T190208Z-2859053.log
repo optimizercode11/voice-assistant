@@ -1,0 +1,15 @@
+guarded-run: campaign=browser-audio-fix-20260920 label=publish-static-audio mode=cpu cpus=28-31
+command: python3 -c $'import os,sys,json,hashlib,subprocess,pathlib,ssl,urllib.request,datetime\nsys.path.insert(0,"deploy")\nimport site_config as site\ndef ctl(*args):\n    return subprocess.check_output(["systemctl","--user",*args],text=True).strip()\ndef identities():\n    return {u:ctl("show",u,"-p","MainPID","-p","ActiveState","-p","NRestarts") for u in [site.UNIT,"q38-server.service"]}\nroot=pathlib.Path(ctl("show",site.UNIT,"-p","WorkingDirectory","--value"))\nassert root.resolve()==site.DEPLOY_ROOT.resolve(),str(root)\ntarget=root/"web/chat.js"\nold=target.read_bytes()\nsha=lambda b:hashlib.sha256(b).hexdigest()\nassert sha(old)=="863d5346ac320cbc11153eadb2a9352dc97d7404e298c213a8c7cb982e95be10","Live asset changed; refusing overwrite"\nnew=pathlib.Path("web/chat.js").read_bytes()\nbefore=identities()\nassert all("ActiveState=active" in v for v in before.values()),before\nbackup=pathlib.Path("rollback/chat.js")\nbackup.parent.mkdir(exist_ok=True)\nwith backup.open("xb") as out: out.write(old)\ntemp=target.with_name("chat.js.voice-audio.tmp")\nassert not temp.exists(),str(temp)\ndef replace(data):\n    with temp.open("xb") as out: out.write(data)\n    temp.chmod(target.stat().st_mode & 0o777)\n    os.replace(temp,target)\ntry:\n    replace(new)\n    with urllib.request.urlopen("https://127.0.0.1:8094/chat.js",context=ssl.create_default_context(cafile=str(site.CERT)),timeout=20) as response:\n        served=response.read()\n    assert served==new,"HTTPS serves different bytes"\n    after=identities()\n    assert before==after,{"before":before,"after":after}\nexcept BaseException:\n    replace(old)\n    raise\nreport={"time":datetime.datetime.now(datetime.timezone.utc).isoformat(),"target":str(target),"old_sha256":sha(old),"new_sha256":sha(new),"backup":str(backup.resolve()),"https_matches":True,"service_identities_unchanged":after,"deployment_kind":"atomic static asset update; no service restart"}\npathlib.Path("evidence/browser-audio-deployment.json").write_text(json.dumps(report,indent=2)+"\\n")\nprint(json.dumps(report,indent=2))\n'
+{
+  "time": "2026-09-20T19:02:10.468612+00:00",
+  "target": "/home/ambudsharma/qwen36/voice-stack/voice-home-grounding-20260920/web/chat.js",
+  "old_sha256": "863d5346ac320cbc11153eadb2a9352dc97d7404e298c213a8c7cb982e95be10",
+  "new_sha256": "758e06e1de98a9dae452180c4b30c7d59475163450fcdf4df5cc867a1264e5f5",
+  "backup": "/home/ambudsharma/qwen36/voice-validation/browser-audio-fix-20260920/rollback/chat.js",
+  "https_matches": true,
+  "service_identities_unchanged": {
+    "voice-stack-gpu4.service": "MainPID=177991\nNRestarts=0\nActiveState=active",
+    "q38-server.service": "MainPID=1839\nNRestarts=0\nActiveState=active"
+  },
+  "deployment_kind": "atomic static asset update; no service restart"
+}

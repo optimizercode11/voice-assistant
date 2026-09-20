@@ -1,0 +1,46 @@
+{
+  "campaign": "voice-audio-20260920",
+  "command": [
+    "python3",
+    "-c",
+    "import sys,json,datetime\nsys.path.insert(0,\"deploy\")\nimport voice_stack as v\ndata=v.request(\"/tts?format=wav&language=a&voice=af_bella&speed=1.2\", b\"The quick brown fox jumps over the lazy dog.\")\nstats=v.audio(data)\ntranscript=json.loads(v.request(\"/stt\",data))[\"text\"]\nassert \"quick brown fox\" in transcript.lower(), transcript\nprint(json.dumps({\"time\":datetime.datetime.now(datetime.timezone.utc).isoformat(),\"voice\":\"af_bella\",\"bytes\":len(data),\"seconds\":stats[\"frames\"]/24000,**stats,\"transcript\":transcript,\"passed\":True},indent=2))\n"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "28-31",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-validation/voice-audio-20260920",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-20T18:52:08.830985354Z",
+  "git_head": "ea4f6b5b510c962f03096ad1ad5cd5e5b1615c95",
+  "inputs": [
+    {
+      "bytes": 13952,
+      "exists": true,
+      "path": "deploy/voice_stack.py",
+      "sha256": "7bf7f9447aedba404231d9b4d93e94a8565c1749b33badf868a981b5813e0198",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 7358,
+      "exists": true,
+      "path": "deploy/site_config.py",
+      "sha256": "196fe2c3d4805bbd6b76b970207cab64bc80da57fb2bc99e28c51c96c65da4ec",
+      "verification": "current_local"
+    }
+  ],
+  "label": "bella-roundtrip",
+  "log": "/home/ambudsharma/qwen36/voice-validation/voice-audio-20260920/evidence/guarded-voice-audio-20260920-20260920T185207Z-2820572.log",
+  "run_id": "voice-audio-20260920-20260920T185207Z-2820572",
+  "schema_version": 2,
+  "source_fingerprint": "5543c553463b5455ab4a17c47856e3856462faf1cff9b87d4ca07fd5b06742fc",
+  "started_utc": "2026-09-20T18:52:08.620576062Z",
+  "status": "PASS"
+}

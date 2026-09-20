@@ -1,0 +1,6 @@
+guarded-run: campaign=voice-workspace-20260920 label=live-workspace mode=cpu cpus=28-31
+command: python3 deploy/campaigns/workspace-20260920/acceptance.py --output run/workspace-acceptance.json
+Checking mcp__workspace__make_directory, mcp__workspace__write_file
+Checking mcp__workspace__list_directory, mcp__workspace__read_file
+Checking mcp__workspace__run_shell
+PASS: evidence run/workspace-acceptance.json; scratch /mnt/voice-workspace/voice-acceptance-20260920T171329Z-5ca5b3fe795642c59ff80e86a7339329

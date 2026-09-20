@@ -1,0 +1,278 @@
+{
+  "url": "https://192.168.228.113:8094",
+  "run": "voice-acceptance-20260920T174203Z-a459ca5bfc3c4f0196f51c562d9c3aad",
+  "directory": "/mnt/voice-workspace/voice-acceptance-20260920T174203Z-a459ca5bfc3c4f0196f51c562d9c3aad",
+  "file": "/mnt/voice-workspace/voice-acceptance-20260920T174203Z-a459ca5bfc3c4f0196f51c562d9c3aad/note.txt",
+  "expected_content": "Direct workspace acceptance voice-acceptance-20260920T174203Z-a459ca5bfc3c4f0196f51c562d9c3aad",
+  "requests": [
+    {
+      "path": "/chat/health",
+      "request": null,
+      "status": 200,
+      "response": {
+        "available": true,
+        "https_port": 8094,
+        "chat_concurrency": 2,
+        "chat_queue_limit": 32,
+        "compaction": true,
+        "tools": [
+          "mcp__claude__send",
+          "mcp__claude__stop",
+          "mcp__claude__updates",
+          "mcp__codex__send",
+          "mcp__codex__updates",
+          "mcp__files__find",
+          "mcp__files__grep",
+          "mcp__files__list_dir",
+          "mcp__files__read_file",
+          "mcp__files__roots",
+          "mcp__stack__health",
+          "mcp__web__read_page",
+          "mcp__web__search",
+          "mcp__workspace__list_directory",
+          "mcp__workspace__make_directory",
+          "mcp__workspace__read_file",
+          "mcp__workspace__run_shell",
+          "mcp__workspace__write_file",
+          "now",
+          "pause_listening",
+          "request_directory",
+          "search_notes"
+        ],
+        "streaming": true,
+        "events": true,
+        "tool_sources": {
+          "mcp__claude__send": "mcp:claude",
+          "mcp__claude__stop": "mcp:claude",
+          "mcp__claude__updates": "mcp:claude",
+          "mcp__codex__send": "mcp:codex",
+          "mcp__codex__updates": "mcp:codex",
+          "mcp__files__find": "mcp:files",
+          "mcp__files__grep": "mcp:files",
+          "mcp__files__list_dir": "mcp:files",
+          "mcp__files__read_file": "mcp:files",
+          "mcp__files__roots": "mcp:files",
+          "mcp__stack__health": "mcp:stack",
+          "mcp__web__read_page": "mcp:web",
+          "mcp__web__search": "mcp:web",
+          "mcp__workspace__list_directory": "mcp:workspace",
+          "mcp__workspace__make_directory": "mcp:workspace",
+          "mcp__workspace__read_file": "mcp:workspace",
+          "mcp__workspace__run_shell": "mcp:workspace",
+          "mcp__workspace__write_file": "mcp:workspace",
+          "now": "builtin",
+          "pause_listening": "builtin",
+          "request_directory": "builtin",
+          "search_notes": "retrieval"
+        },
+        "mcp": [
+          {
+            "name": "stack",
+            "state": "ready",
+            "running": true,
+            "tools": 1,
+            "restarts": 0,
+            "command": "python3",
+            "server_info": {
+              "name": "voice-stack-status",
+              "version": "1.0"
+            },
+            "error": "",
+            "pid": 178834
+          },
+          {
+            "name": "web",
+            "state": "ready",
+            "running": true,
+            "tools": 2,
+            "restarts": 0,
+            "command": "python3",
+            "server_info": {
+              "name": "web-browser",
+              "version": "1.0"
+            },
+            "error": "",
+            "pid": 178838
+          },
+          {
+            "name": "claude",
+            "state": "ready",
+            "running": true,
+            "tools": 3,
+            "restarts": 0,
+            "command": "ssh",
+            "server_info": {
+              "name": "voice-claude-code",
+              "version": "1.1"
+            },
+            "error": "",
+            "pid": 178846
+          },
+          {
+            "name": "codex",
+            "state": "ready",
+            "running": true,
+            "tools": 2,
+            "restarts": 0,
+            "command": "ssh",
+            "server_info": {
+              "name": "voice-codex",
+              "version": "1.0"
+            },
+            "error": "",
+            "pid": 178890
+          },
+          {
+            "name": "files",
+            "state": "ready",
+            "running": true,
+            "tools": 5,
+            "restarts": 0,
+            "command": "python3",
+            "server_info": {
+              "name": "local-files",
+              "version": "1.0"
+            },
+            "error": "",
+            "pid": 178908
+          },
+          {
+            "name": "workspace",
+            "state": "ready",
+            "running": true,
+            "tools": 5,
+            "restarts": 0,
+            "command": "ssh",
+            "server_info": {
+              "name": "local-workspace",
+              "version": "1.0"
+            },
+            "error": "",
+            "pid": 178910
+          }
+        ],
+        "retrieval": {
+          "ready": true,
+          "stale": false,
+          "chunks": 253,
+          "documents": 6
+        }
+      },
+      "elapsed_seconds": 0.009
+    },
+    {
+      "path": "/chat/completions",
+      "request": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Create the directory /mnt/voice-workspace/voice-acceptance-20260920T174203Z-a459ca5bfc3c4f0196f51c562d9c3aad and write a file named note.txt inside it. The file must contain exactly this text, with no trailing newline: Direct workspace acceptance voice-acceptance-20260920T174203Z-a459ca5bfc3c4f0196f51c562d9c3aad"
+          }
+        ]
+      },
+      "status": 200,
+      "response": {
+        "text": "Done. I created the directory and wrote note.txt with the exact requested text and no trailing newline.",
+        "usage": {
+          "prompt_tokens": 15993,
+          "completion_tokens": 266,
+          "total_tokens": 16259
+        },
+        "tools": [
+          {
+            "name": "mcp__workspace__make_directory",
+            "ok": true,
+            "ms": 1,
+            "source": "mcp:workspace",
+            "call_id": "call_99_0"
+          },
+          {
+            "name": "mcp__workspace__write_file",
+            "ok": true,
+            "ms": 1,
+            "source": "mcp:workspace",
+            "call_id": "call_100_0"
+          }
+        ],
+        "sources": [],
+        "controls": {}
+      },
+      "elapsed_seconds": 4.698
+    },
+    {
+      "path": "/chat/completions",
+      "request": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "List the directory /mnt/voice-workspace/voice-acceptance-20260920T174203Z-a459ca5bfc3c4f0196f51c562d9c3aad, then read its note.txt file. Reply with the filename and the exact file content you read."
+          }
+        ]
+      },
+      "status": 200,
+      "response": {
+        "text": "The directory contains one file: note.txt. Its content is: \"Direct workspace acceptance voice-acceptance-20260920T174203Z-a459ca5bfc3c4f0196f51c562d9c3aad\".",
+        "usage": {
+          "prompt_tokens": 10565,
+          "completion_tokens": 239,
+          "total_tokens": 10804
+        },
+        "tools": [
+          {
+            "name": "mcp__workspace__list_directory",
+            "ok": true,
+            "ms": 1,
+            "source": "mcp:workspace",
+            "call_id": "call_102_0"
+          },
+          {
+            "name": "mcp__workspace__read_file",
+            "ok": true,
+            "ms": 0,
+            "source": "mcp:workspace",
+            "call_id": "call_102_1"
+          }
+        ],
+        "sources": [],
+        "controls": {}
+      },
+      "elapsed_seconds": 3.612
+    },
+    {
+      "path": "/chat/completions",
+      "request": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Run this short shell command exactly as written, then report its output: printf %s 'Direct workspace acceptance voice-acceptance-20260920T174203Z-a459ca5bfc3c4f0196f51c562d9c3aad' | cmp - /mnt/voice-workspace/voice-acceptance-20260920T174203Z-a459ca5bfc3c4f0196f51c562d9c3aad/note.txt && printf '%s\\n' SHELL_OK_70e0b329162a495393b233bab3cb0390"
+          }
+        ]
+      },
+      "status": 200,
+      "response": {
+        "text": "The command ran successfully. The file matched the expected string, and the output was:\n\nSHELL_OK_70e0b329162a495393b233bab3cb0390",
+        "usage": {
+          "prompt_tokens": 10611,
+          "completion_tokens": 238,
+          "total_tokens": 10849
+        },
+        "tools": [
+          {
+            "name": "mcp__workspace__run_shell",
+            "ok": true,
+            "ms": 3,
+            "source": "mcp:workspace",
+            "call_id": "call_104_0"
+          }
+        ],
+        "sources": [],
+        "controls": {}
+      },
+      "elapsed_seconds": 3.898
+    }
+  ],
+  "passed": true,
+  "started_at": "2026-09-20T17:42:03.580858+00:00",
+  "verification_scope": "HTTPS tool metadata, assistant readback, and requested shell byte comparison",
+  "finished_at": "2026-09-20T17:42:15.801362+00:00"
+}

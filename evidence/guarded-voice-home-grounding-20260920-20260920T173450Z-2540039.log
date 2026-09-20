@@ -1,0 +1,17 @@
+guarded-run: campaign=voice-home-grounding-20260920 label=candidate-check mode=cpu cpus=28-31
+command: bash -c set\ -e\;\ python3\ deploy/prepare-service.py\;\ python3\ tools/voicectl.py\ --config\ config/host.toml\ index\ build\;\ python3\ deploy/campaigns/home-grounding-20260920/acceptance.py\ --candidate\ --output\ run/home-candidate.json
+Speech asset hashes verified; staged source fingerprint: 4424ca11821f910529b8f72a87cc7e01fcfe994145fd8af9ed4cef048a2c95eb
+indexed 6 documents into 252 chunks in 0.024s at var/notes.sqlite
+Traceback (most recent call last):
+  File "/home/ambudsharma/qwen36/voice-stack/voice-home-grounding-20260920/deploy/campaigns/home-grounding-20260920/acceptance.py", line 76, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/home/ambudsharma/qwen36/voice-stack/voice-home-grounding-20260920/deploy/campaigns/home-grounding-20260920/acceptance.py", line 53, in main
+    result = voice_chat.turn('http://127.0.0.1:8080', body, registry)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ambudsharma/qwen36/voice-stack/voice-home-grounding-20260920/tools/voice_chat.py", line 441, in turn
+    decoded = _exchange(url, request, disconnected, min(generation_seconds, remaining), on_delta=on_delta)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ambudsharma/qwen36/voice-stack/voice-home-grounding-20260920/tools/voice_chat.py", line 298, in _exchange
+    raise ChatError(502, 'The conversation model is unavailable. Please try again.') from None
+voice_chat.ChatError: (502, 'The conversation model is unavailable. Please try again.')

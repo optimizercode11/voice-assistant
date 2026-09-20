@@ -1,0 +1,31 @@
+{
+  "campaign": "voice-home-repro-20260920",
+  "command": [
+    "python3",
+    "-c",
+    "import json, sys, ssl, urllib.request\nfrom pathlib import Path\nsys.path.insert(0,'tools')\nimport mcp_client\ns=mcp_client.MCPServer('workspace','ssh',['-T','codex-workspace'],timeout=10)\ntry:\n    ts={t.name:t for t in s.start()}\n    raw,error=s.call(ts['run_shell'],{'command':'printf \"HOME=%s\\\\n\" \"$HOME\"; printf \"CWD=\"; pwd; printf \"USER=\"; id -un; printf \"HOST=\"; hostname'})\n    assert not error, raw\n    actual=json.loads(raw)\nfinally:\n    s.stop()\nquestion=\"What's your home directory?\"\nr=urllib.request.Request('https://192.168.228.113:8094/chat/completions',data=json.dumps({'messages':[{'role':'user','content':question}]}).encode(),headers={'Content-Type':'application/json'})\nwith urllib.request.urlopen(r,context=ssl._create_unverified_context(),timeout=120) as response:\n    answer=json.load(response)\ndoc={'actual_environment':actual,'question':question,'response':answer}\nPath('run').mkdir(exist_ok=True)\nPath('run/home-before.json').write_text(json.dumps(doc,indent=2)+'\\n')\nprint(json.dumps(doc,indent=2))\n"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "28-31",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stack/voice-home-repro-20260920",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-20T17:32:58.820611107Z",
+  "git_head": "ea4f6b5b510c962f03096ad1ad5cd5e5b1615c95",
+  "inputs": [],
+  "label": "reproduce",
+  "log": "/home/ambudsharma/qwen36/voice-stack/voice-home-repro-20260920/evidence/guarded-voice-home-repro-20260920-20260920T173255Z-2532683.log",
+  "run_id": "voice-home-repro-20260920-20260920T173255Z-2532683",
+  "schema_version": 2,
+  "source_fingerprint": "f19e9a5decc8b0f31facd128127d4a2aa74ec51c010f1963a83d4f8e005a483b",
+  "started_utc": "2026-09-20T17:32:57.454509796Z",
+  "status": "PASS"
+}

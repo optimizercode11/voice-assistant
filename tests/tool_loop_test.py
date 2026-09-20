@@ -208,6 +208,66 @@ class ToolLoopTests(unittest.TestCase):
         self.assertEqual([event['type'] for event in events], ['error'])
 
     # -- the happy path ----------------------------------------------------
+    def workspace_registry(self, cwd):
+        config = agent_config.load('')
+        config.limits.rounds = 5
+        config.mcp = [agent_config.MCPServerConfig(
+            name='workspace', command=sys.executable,
+            args=[str(Path(__file__).resolve().parents[1] / 'tools' / 'mcp_workspace.py'),
+                  '--cwd', str(cwd)], timeout_seconds=10,
+            purpose='direct files and shell commands on the project machine')]
+        registry = agent_tools.Registry.build(config, root=cwd)
+        self.http.registry = self.https.registry = registry
+        self.assertEqual(registry.mcp_failures, [])
+        return registry
+
+    def test_direct_workspace_round_trip_over_tls_without_a_coding_agent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            registry = self.workspace_registry(root)
+            self.upstream.script = [
+                calling([call('mcp__workspace__make_directory', {'path': 'notes'})]),
+                calling([call('mcp__workspace__write_file',
+                              {'path': 'notes/todo.txt', 'content': 'Buy tea\n'})]),
+                calling([call('mcp__workspace__run_shell',
+                              {'command': "printf 'Buy coffee\\n' >> todo.txt", 'cwd': 'notes'})]),
+                calling([call('mcp__workspace__read_file', {'path': 'notes/todo.txt'})]),
+                answered('Created the notes folder and saved the shopping list.')]
+            status, events = self.request(
+                {'messages': [{'role': 'user', 'content': 'Create a shopping list with tea and coffee.'}]},
+                accept='application/x-ndjson')
+            self.assertEqual(status, 200)
+            self.assertEqual(events[-1]['type'], 'answer', events)
+            results = events[-1]['tools']
+            self.assertEqual(len(results), 4)
+            self.assertTrue(all(row['ok'] for row in results), results)
+            self.assertTrue(all(row['source'] == 'mcp:workspace' for row in results))
+            self.assertEqual((root / 'notes/todo.txt').read_text(), 'Buy tea\nBuy coffee\n')
+            self.assertIn('Buy coffee', self.upstream.requests[-1]['messages'][-1]['content'])
+            offered = self.upstream.requests[0]['tools']
+            self.assertFalse(any('__claude__' in row['function']['name'] for row in offered))
+            self.assertIn('use direct\nworkspace tools',
+                          self.upstream.requests[0]['messages'][0]['content'])
+            flags = {row['name']: row['read_only'] for row in registry.status()['tools']}
+            for name in ('write_file', 'make_directory', 'run_shell'):
+                self.assertFalse(flags['mcp__workspace__' + name])
+            for name in ('read_file', 'list_directory'):
+                self.assertTrue(flags['mcp__workspace__' + name])
+
+    def test_direct_shell_failure_keeps_diagnostics_for_the_model(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.workspace_registry(Path(directory))
+            self.upstream.script = [calling([call('mcp__workspace__run_shell', {
+                'command': "printf '%600s' x; printf 'specific diagnosis\\n' >&2; exit 7"})]),
+                answered('The command failed with exit code seven.')]
+            status, data = self.request({'messages': [{'role': 'user', 'content': 'Run the check.'}]})
+            self.assertEqual(status, 200)
+            result = json.loads(data)
+            self.assertFalse(result['tools'][0]['ok'])
+            feedback = self.upstream.requests[-1]['messages'][-1]['content']
+            self.assertIn('specific diagnosis', feedback)
+            self.assertRegex(feedback, r'"exit_code":\s*7')
+
     def test_tool_round_trip_is_server_owned_and_cited(self):
         self.registry()
         self.upstream.script = [

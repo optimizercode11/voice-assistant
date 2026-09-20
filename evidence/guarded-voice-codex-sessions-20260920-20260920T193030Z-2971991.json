@@ -1,0 +1,46 @@
+{
+  "campaign": "voice-codex-sessions-20260920",
+  "command": [
+    "bash",
+    "-c",
+    "python3 tools/voicectl.py --config config/host.toml index build && python3 tools/voicectl.py --config config/host.toml doctor"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "28-31",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stack/voice-codex-sessions-20260920",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-20T19:30:32.349769633Z",
+  "git_head": "ea4f6b5b510c962f03096ad1ad5cd5e5b1615c95",
+  "inputs": [
+    {
+      "bytes": 12475,
+      "exists": true,
+      "path": "config/host.toml",
+      "sha256": "596bb3e2c4fc3093baa73a1236808b78f2a8f38801869f66570d8aefad40151d",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 8540,
+      "exists": true,
+      "path": "tools/mcp_codex_sessions.py",
+      "sha256": "8eafcc0801a3a47cefd693101ecca9b9b879c33c974b64c2984680637ed77e05",
+      "verification": "current_local"
+    }
+  ],
+  "label": "preflight",
+  "log": "/home/ambudsharma/qwen36/voice-stack/voice-codex-sessions-20260920/evidence/guarded-voice-codex-sessions-20260920-20260920T193030Z-2971991.log",
+  "run_id": "voice-codex-sessions-20260920-20260920T193030Z-2971991",
+  "schema_version": 2,
+  "source_fingerprint": "3ce06259100ebd912492839262aa083e378e6c9f994bfc5db477c7dd36d3f383",
+  "started_utc": "2026-09-20T19:30:32.208239688Z",
+  "status": "PASS"
+}

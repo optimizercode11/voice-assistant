@@ -1,0 +1,199 @@
+{
+  "environment": {
+    "home": "/home/ambudsharma",
+    "cwd": "/mnt/voice-workspace",
+    "user": "ambudsharma"
+  },
+  "candidate": false,
+  "cases": [
+    {
+      "name": "home-1",
+      "messages": [
+        {
+          "role": "user",
+          "content": "What's your home directory?"
+        }
+      ],
+      "expected": "/home/ambudsharma",
+      "response": {
+        "text": "My home directory is /home/ambudsharma. My current working directory is /mnt/voice-workspace.",
+        "usage": {
+          "prompt_tokens": 10115,
+          "completion_tokens": 62,
+          "total_tokens": 10177
+        },
+        "tools": [
+          {
+            "name": "mcp__workspace__run_shell",
+            "ok": true,
+            "ms": 53,
+            "source": "mcp:workspace",
+            "call_id": "call_75_0"
+          }
+        ],
+        "sources": [],
+        "controls": {}
+      },
+      "passed": true
+    },
+    {
+      "name": "home-2",
+      "messages": [
+        {
+          "role": "user",
+          "content": "What's your home directory?"
+        }
+      ],
+      "expected": "/home/ambudsharma",
+      "response": {
+        "text": "My home directory on the project machine is /home/ambudsharma.",
+        "usage": {
+          "prompt_tokens": 10098,
+          "completion_tokens": 49,
+          "total_tokens": 10147
+        },
+        "tools": [
+          {
+            "name": "mcp__workspace__run_shell",
+            "ok": true,
+            "ms": 2,
+            "source": "mcp:workspace",
+            "call_id": "call_77_0"
+          }
+        ],
+        "sources": [],
+        "controls": {}
+      },
+      "passed": true
+    },
+    {
+      "name": "home-3",
+      "messages": [
+        {
+          "role": "user",
+          "content": "What's your home directory?"
+        }
+      ],
+      "expected": "/home/ambudsharma",
+      "response": {
+        "text": "My home directory is /home/ambudsharma.",
+        "usage": {
+          "prompt_tokens": 10097,
+          "completion_tokens": 44,
+          "total_tokens": 10141
+        },
+        "tools": [
+          {
+            "name": "mcp__workspace__run_shell",
+            "ok": true,
+            "ms": 2,
+            "source": "mcp:workspace",
+            "call_id": "call_79_0"
+          }
+        ],
+        "sources": [],
+        "controls": {}
+      },
+      "passed": true
+    },
+    {
+      "name": "cwd",
+      "messages": [
+        {
+          "role": "user",
+          "content": "What's your current working directory?"
+        }
+      ],
+      "expected": "/mnt/voice-workspace",
+      "response": {
+        "text": "My current working directory is /mnt/voice-workspace.",
+        "usage": {
+          "prompt_tokens": 10096,
+          "completion_tokens": 42,
+          "total_tokens": 10138
+        },
+        "tools": [
+          {
+            "name": "mcp__workspace__run_shell",
+            "ok": true,
+            "ms": 2,
+            "source": "mcp:workspace",
+            "call_id": "call_81_0"
+          }
+        ],
+        "sources": [],
+        "controls": {}
+      },
+      "passed": true
+    },
+    {
+      "name": "account",
+      "messages": [
+        {
+          "role": "user",
+          "content": "What user account do your computer tools run under?"
+        }
+      ],
+      "expected": "ambudsharma",
+      "response": {
+        "text": "My computer tools run under the user account \u201cambudsharma.\u201d",
+        "usage": {
+          "prompt_tokens": 10103,
+          "completion_tokens": 46,
+          "total_tokens": 10149
+        },
+        "tools": [
+          {
+            "name": "mcp__workspace__run_shell",
+            "ok": true,
+            "ms": 53,
+            "source": "mcp:workspace",
+            "call_id": "call_83_0"
+          }
+        ],
+        "sources": [],
+        "controls": {}
+      },
+      "passed": true
+    },
+    {
+      "name": "earlier-wrong-answer",
+      "messages": [
+        {
+          "role": "user",
+          "content": "What's your home directory?"
+        },
+        {
+          "role": "assistant",
+          "content": "My home directory is /home/voice."
+        },
+        {
+          "role": "user",
+          "content": "What's your home directory?"
+        }
+      ],
+      "expected": "/home/ambudsharma",
+      "response": {
+        "text": "My home directory is /home/ambudsharma.",
+        "usage": {
+          "prompt_tokens": 10164,
+          "completion_tokens": 53,
+          "total_tokens": 10217
+        },
+        "tools": [
+          {
+            "name": "mcp__workspace__run_shell",
+            "ok": true,
+            "ms": 2,
+            "source": "mcp:workspace",
+            "call_id": "call_85_0"
+          }
+        ],
+        "sources": [],
+        "controls": {}
+      },
+      "passed": true
+    }
+  ],
+  "passed": true
+}

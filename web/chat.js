@@ -248,6 +248,8 @@ async function saveConversation() {
       chatRecords.set(result.savedRecord.id, result.savedRecord);
       if (conversationId === originalId && conversationRevision === record.revision) {
         conversationId = result.savedRecord.id; conversationTitle = result.savedRecord.title;
+        pendingUpdates = pendingUpdates.filter(update => update.contextId === conversationId);
+        refreshCodexSessions();
         replaceHash(`#/chat/${encodeURIComponent(conversationId)}`);
         $('compact-status').textContent = 'Another tab changed this chat. Your changes were saved as a separate conversation.';
       }
@@ -486,6 +488,7 @@ function openChat(id) {
   saving = !!chatDB && !unsavedChats.has(id);
   savePending = false;
   conversationId = stored.id;
+  pendingUpdates = pendingUpdates.filter(update => update.contextId === conversationId);
   conversationTitle = stored.title;
   conversationAt = stored.at; conversationRevision = stored.revision || '';
   transcript = stored.turns.slice();
@@ -498,6 +501,7 @@ function openChat(id) {
   const wanted = `#/chat/${encodeURIComponent(stored.id)}`;
   if (location.hash !== wanted) replaceHash(wanted);
   renderChatList();
+  refreshCodexSessions();
   return transcript.length;
 }
 function replaceHash(hash) {
@@ -513,6 +517,7 @@ function startFreshChat() {
   // the old conversation stays in the list untouched.
   if (transcript.length || !conversationId) {
     conversationId = newConversationId();
+    pendingUpdates = pendingUpdates.filter(update => update.contextId === conversationId);
     conversationTitle = '';
     conversationAt = 0;
     transcript = [];
@@ -526,6 +531,7 @@ function startFreshChat() {
   renderTurnCount();
   renderChatList();
   replaceHash('');
+  refreshCodexSessions();
 }
 function restoreChat() {
   const wanted = chatIdFromHash();
@@ -626,21 +632,22 @@ async function armGlow() {
   // silent.  So build it only from a user gesture, only once the context says
   // it is running, and only ever once per media element.  Anything less
   // ambitious leaves the element on the native output -- no glow beats no audio.
-  if (glowArmed) return;
   try {
     const Audio = window.AudioContext || window.webkitAudioContext;
     if (!Audio || !window.AnalyserNode) return;
     if (!context || context.state === 'closed') context = new Audio();
     watchAudioContext();
     const ctx = context;
+    // A cached page keeps its element/graph pairing but suspends rendering.
+    // Resume on this gesture even when the graph has already been built.
+    if (ctx.state !== 'running') await ctx.resume();
+    if (ctx.state !== 'running' || glowArmed) return;
     // createMediaElementSource is a method of the AudioContext, not of the media
     // element, so this capability check is one no browser can pass.  Asking the
     // element made armGlow return before building the graph, which silently
     // killed three things at once: the glow while the assistant speaks, the
     // echo reference barge-in needs, and barge-in itself.
     if (typeof ctx.createMediaElementSource !== 'function') return;
-    if (ctx.state === 'suspended') await ctx.resume();
-    if (ctx.state !== 'running') return;
     glowArmed = true;
     mediaSource = ctx.createMediaElementSource(player);
     playbackAnalyser = ctx.createAnalyser(); playbackAnalyser.fftSize = 1024;
@@ -873,6 +880,84 @@ function listen() {
   }
   captureTimer = setTimeout(tick, 25);
 }
+// ------------------------------------------------------- named Codex sessions
+// Selection belongs to this browser conversation and is owned by the manager.
+// A background completion can update a card, but never selects its session.
+let codexRefreshRunning = false, codexRefreshAgain = false;
+let codexSelectionPending = false, codexSnapshot = null, codexContextId = '', codexSelectionRevision = 0;
+function renderCodexSessions(snapshot) {
+  const panel = $('codex-sessions'), cards = $('codex-session-list');
+  if (!panel || !cards) return;
+  codexSnapshot = snapshot;
+  panel.hidden = !snapshot || snapshot.enabled === false || !Array.isArray(snapshot.sessions);
+  cards.replaceChildren();
+  if (panel.hidden) return;
+  const selected = snapshot.sessions.find(session => session.session_id === snapshot.selected_session_id);
+  $('codex-selected').textContent = selected ? `Selected: ${selected.name}` : 'No session selected';
+  if (!snapshot.sessions.length) {
+    const empty = document.createElement('p'); empty.className = 'context-note';
+    empty.textContent = 'Ask to start a named Codex session on a project.'; cards.append(empty);
+  }
+  for (const session of snapshot.sessions) {
+    const card = document.createElement('button'); card.type = 'button'; card.className = 'codex-session';
+    card.dataset.sessionId = session.session_id;
+    card.setAttribute('aria-pressed', String(session.session_id === snapshot.selected_session_id));
+    card.disabled = codexSelectionPending;
+    const name = document.createElement('strong'); name.textContent = session.name;
+    const state = document.createElement('span'); state.className = 'codex-state'; state.textContent = session.state || 'unknown';
+    const cwd = document.createElement('small'); cwd.textContent = session.cwd || '';
+    card.append(name, state, cwd);
+    if (session.working_on) {
+      const task = document.createElement('small'); task.textContent = session.working_on; card.append(task);
+    }
+    card.onclick = () => selectCodexSession(session.session_id);
+    cards.append(card);
+  }
+}
+async function refreshCodexSessions() {
+  if (!conversationId) return;
+  if (codexRefreshRunning || codexSelectionPending) { codexRefreshAgain = true; return; }
+  codexRefreshRunning = true;
+  const contextId = conversationId, revision = codexSelectionRevision;
+  if (codexContextId !== contextId) { codexContextId = contextId; renderCodexSessions(null); }
+  try {
+    const response = await fetch(`/codex/sessions?context_id=${encodeURIComponent(contextId)}`);
+    if (!response.ok) throw new Error('Session list unavailable');
+    const snapshot = await response.json();
+    if (contextId === conversationId && revision === codexSelectionRevision) renderCodexSessions(snapshot);
+  } catch (_) {
+    if (contextId === conversationId && revision === codexSelectionRevision) renderCodexSessions(null);
+  } finally {
+    codexRefreshRunning = false;
+    if (codexRefreshAgain || contextId !== conversationId) {
+      codexRefreshAgain = false; refreshCodexSessions();
+    }
+  }
+}
+async function selectCodexSession(session) {
+  if (codexSelectionPending) return;
+  const contextId = conversationId;
+  codexSelectionRevision++;
+  codexSelectionPending = true; renderCodexSessions(codexSnapshot);
+  try {
+    const response = await fetch('/codex/sessions/select', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({context_id: contextId, session})});
+    const snapshot = await response.json();
+    if (!response.ok) throw new Error(snapshot.error || 'Could not select session');
+    if (contextId === conversationId) {
+      // Selection replies contain one session, while discovery returns the list.
+      const sessions = Array.isArray(snapshot.sessions) ? snapshot.sessions
+        : (codexSnapshot?.sessions || []).map(item => item.session_id === snapshot.session?.session_id ? snapshot.session : item);
+      renderCodexSessions({...snapshot, sessions});
+    }
+  } catch (error) {
+    if (contextId === conversationId) $('codex-selected').textContent = error.message;
+  } finally {
+    codexSelectionPending = false;
+    for (const card of $('codex-session-list').children) card.disabled = false;
+    codexRefreshAgain = false; refreshCodexSessions();
+  }
+}
 // ---------------------------------------------------------------- pushed updates
 // The bridge speaks first exactly once per finished Claude Code turn, over
 // /events (server-sent events).  Nothing here polls: the connection is held
@@ -882,9 +967,27 @@ function listen() {
 // Which coding agent spoke: the bridge names the MCP server an update came
 // from, and two of them exist (Claude Code, and Codex on the local model).
 function agentName(server) { return server === 'codex' ? 'Codex' : 'Claude Code'; }
-function clearAgentPending(agent) {
-  for (const item of document.querySelectorAll('.message.claude.pending'))
-    if (item.querySelector('.role')?.textContent === agent) item.remove();
+function eventAgent(event) {
+  const name = typeof event?.session_name === 'string' ? event.session_name.trim().slice(0, 120) : '';
+  return event?.server === 'codex' && name ? `Codex · ${name}` : agentName(event?.server);
+}
+function eventContextMatches(event) { return !event?.context_id || event.context_id === conversationId; }
+const seenAgentEvents = new Set();
+function acceptAgentEvent(event, type) {
+  if (!event || !eventContextMatches(event)) return false;
+  if (!event.event_id) return true;
+  const key = `${type}:${event.event_id}`;
+  if (seenAgentEvents.has(key)) return false;
+  seenAgentEvents.add(key);
+  if (seenAgentEvents.size > 512) seenAgentEvents.delete(seenAgentEvents.values().next().value);
+  return true;
+}
+function clearAgentPending(agent, sessionId = '', turnId = '') {
+  for (const item of document.querySelectorAll('.message.claude.pending')) {
+    const matches = sessionId ? item.dataset.sessionId === sessionId
+      : !item.dataset.sessionId && item.querySelector('.role')?.textContent === agent;
+    if (matches && (!turnId || item.dataset.turnId === turnId)) item.remove();
+  }
 }
 // The agent console (2026-09-12): the raw output of a Claude Code or Codex turn
 // as it happens -- every command, edit, tool call and reply, one clipped line
@@ -912,33 +1015,39 @@ $('console-clear')?.addEventListener('click', event => {
 function connectUpdates() {
   if (updateSource || typeof EventSource !== 'function') return;
   updateSource = new EventSource('/events');
+  updateSource.addEventListener('session', () => refreshCodexSessions());
   updateSource.addEventListener('trace', event => {
     let trace; try { trace = JSON.parse(event.data); } catch (_) { return; }
+    if (!acceptAgentEvent(trace, 'trace')) return;
     const line = typeof trace?.line === 'string' ? trace.line.slice(0, 400) : '';
     if (!line.trim()) return;
-    consoleLine(agentName(trace.server), typeof trace.kind === 'string' ? trace.kind.slice(0, 16) : 'text', line);
+    consoleLine(eventAgent(trace), typeof trace.kind === 'string' ? trace.kind.slice(0, 16) : 'text', line);
   });
   updateSource.addEventListener('working', event => {
     // The agent has the job.  Shown, not spoken: a person waiting wants to see
     // that the instruction landed, not to be told so out loud.
     let notice; try { notice = JSON.parse(event.data); } catch (_) { return; }
+    if (!acceptAgentEvent(notice, 'working')) return;
     const instruction = typeof notice?.instruction === 'string' ? notice.instruction.trim().slice(0, 200) : '';
-    consoleLine(agentName(notice?.server), 'instruction', instruction || '(none)');
-    clearAgentPending(agentName(notice?.server));
+    consoleLine(eventAgent(notice), 'instruction', instruction || '(none)');
+    clearAgentPending(eventAgent(notice), notice.session_id || '');
     $('messages').querySelector('.empty')?.remove();
     const item = document.createElement('div'); item.className = 'message claude pending';
-    const label = document.createElement('span'); label.className = 'role'; label.textContent = agentName(notice?.server);
+    const label = document.createElement('span'); label.className = 'role'; label.textContent = eventAgent(notice);
+    item.dataset.sessionId = notice.session_id || ''; item.dataset.turnId = notice.turn_id || '';
     const body = document.createElement('p'); body.textContent = instruction ? `Working on it: ${instruction}` : 'Working on it…';
     item.append(label, body); $('messages').append(item); $('messages').scrollTop = $('messages').scrollHeight;
   });
   updateSource.addEventListener('update', event => {
     let update; try { update = JSON.parse(event.data); } catch (_) { return; }
+    if (!acceptAgentEvent(update, 'update')) return;
     const spoken = typeof update?.spoken === 'string' ? update.spoken.trim().slice(0, 600) : '';
     if (!spoken) return;
     const activity = update.activity && typeof update.activity === 'object' ? update.activity : {};
-    consoleLine(agentName(update.server), update.is_error === true ? 'error' : 'done', spoken);
+    consoleLine(eventAgent(update), update.is_error === true ? 'error' : 'done', spoken);
     pendingUpdates.push({spoken, detail: typeof update.detail === 'string' ? update.detail.slice(0, 4500) : '', isError: update.is_error === true,
-                         seconds: Number.isFinite(update.seconds) ? update.seconds : null, agent: agentName(update.server),
+                         seconds: Number.isFinite(update.seconds) ? update.seconds : null, agent: eventAgent(update), sessionId: update.session_id || '', turnId: update.turn_id || '', contextId: update.context_id || conversationId,
+                         speech: update.server === 'codex' && update.session_name ? `${eventAgent(update)}: ${spoken}` : spoken,
                          commands: Number(activity.commands) || 0, filesEdited: Number(activity.files_edited) || 0});
     drainUpdates();
   });
@@ -959,6 +1068,7 @@ function updateNote(update) {
 const UPDATE_QUIET_MS = 1000;
 function drainUpdates() {
   clearTimeout(updateTimer); updateTimer = 0;
+  pendingUpdates = pendingUpdates.filter(update => update.contextId === conversationId);
   if (!pendingUpdates.length) return;
   if (paused) return;
   const talking = active && phase === 'listening' && performance.now() - micLastVoiceAt < UPDATE_QUIET_MS;
@@ -984,12 +1094,12 @@ async function announceUpdate(update) {
   const id = ++epoch, controller = new AbortController(); abort = controller;
   const check = () => {if(id !== epoch || controller.signal.aborted) throw new DOMException('Stopped','AbortError');};
   try {
-    clearAgentPending(update.agent);
+    clearAgentPending(update.agent, update.sessionId, update.turnId);
     message('claude', update.spoken, null, {note: updateNote(update), detail: update.detail, agent: update.agent});
     noteUpdateInHistory(update);
     saveConversation();
     setState('synthesizing', `${update.agent} has an update…`);
-    await speakReply(update.spoken, controller.signal,
+    await speakReply(update.speech || update.spoken, controller.signal,
       () => setState('speaking', active ? `${update.agent} has an update. Press Space to interrupt; listening resumes after.` : `${update.agent} has an update.`));
     check(); busy = false;
     if (active) listen(); else setState('idle', 'Send another message, or start a voice conversation.');
@@ -1646,8 +1756,8 @@ async function runTurn(input, forced = false, voicedMs = null, voiceText = false
     let reply;
     try {
       reply = streaming
-        ? await responseProgress('/chat/completions', JSON.stringify({messages: pending, ...(conversationSummary ? {summary: conversationSummary} : {})}), controller.signal, progress)
-        : await responseJSON('/chat/completions', JSON.stringify({messages: pending, ...(conversationSummary ? {summary: conversationSummary} : {})}), controller.signal);
+        ? await responseProgress('/chat/completions', JSON.stringify({context_id: conversationId, messages: pending, ...(conversationSummary ? {summary: conversationSummary} : {})}), controller.signal, progress)
+        : await responseJSON('/chat/completions', JSON.stringify({context_id: conversationId, messages: pending, ...(conversationSummary ? {summary: conversationSummary} : {})}), controller.signal);
     } catch (error) {
       // A refusal from the bridge ("ran out of room", "too long", "busy") is a
       // turn that failed, not a conversation that ended.  Measured live
@@ -1970,7 +2080,25 @@ function refreshApprovals() {
 // and it kept a background request in flight forever, which is both a timer on a
 // page whose whole job is the microphone and enough to wedge the browser suite.
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshApprovals(); });
-window.addEventListener('pagehide',()=>{stopSession();releaseAudioContext();updateSource?.close();});
+let restoreUpdates = false;
+window.addEventListener('pagehide', event => {
+  stopSession();
+  // BFCache retains this document and its media element. Closing the context
+  // strands that element on a dead graph: it cannot be attached a second time.
+  // Keep the pairing, but release microphone capture and suspend rendering.
+  if (event.persisted) {
+    if (context?.state === 'running') context.suspend().catch(() => {});
+  } else releaseAudioContext();
+  restoreUpdates = !!updateSource;
+  updateSource?.close(); updateSource = null;
+});
+window.addEventListener('pageshow', event => {
+  if (!event.persisted) return;
+  if (restoreUpdates) connectUpdates();
+  restoreUpdates = false;
+  refreshApprovals();
+  refreshCodexSessions();
+});
 // Before the first fetch, so a reload cannot let a turn be sent against a
 // transcript the page has not rebuilt yet.
 (async()=>{

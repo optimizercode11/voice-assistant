@@ -1,0 +1,61 @@
+{
+  "campaign": "voice-workspace-20260920",
+  "command": [
+    "python3",
+    "deploy/campaigns/workspace-20260920/acceptance.py",
+    "--output",
+    "run/workspace-acceptance.json"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "28-31",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stack/voice-workspace-20260920",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-20T17:13:43.295991444Z",
+  "git_head": "ea4f6b5b510c962f03096ad1ad5cd5e5b1615c95",
+  "inputs": [
+    {
+      "bytes": 12290,
+      "exists": true,
+      "path": "config/host.toml",
+      "sha256": "eed5799edd4d60c386d4be680d0e7feb339944b2717350f90dab9dcd6e2c68f2",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 26102,
+      "exists": true,
+      "path": "tools/voice_chat.py",
+      "sha256": "c05d1de695b1e63be072ea5830a2c5e7e0da5e89fc71cd0f402ab50fd849361a",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 18943,
+      "exists": true,
+      "path": "tools/mcp_workspace.py",
+      "sha256": "1dc286e033b950af3890d952c199933239ff6c6a80a4adbdea05e36d65594424",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 6724,
+      "exists": true,
+      "path": "deploy/campaigns/workspace-20260920/acceptance.py",
+      "sha256": "7fd0622ba59d85ae39974ed1093747dd35070b3bb9312b97837eff7754a993f3",
+      "verification": "current_local"
+    }
+  ],
+  "label": "live-workspace",
+  "log": "/home/ambudsharma/qwen36/voice-stack/voice-workspace-20260920/evidence/guarded-voice-workspace-20260920-20260920T171328Z-2462226.log",
+  "run_id": "voice-workspace-20260920-20260920T171328Z-2462226",
+  "schema_version": 2,
+  "source_fingerprint": "f19e9a5decc8b0f31facd128127d4a2aa74ec51c010f1963a83d4f8e005a483b",
+  "started_utc": "2026-09-20T17:13:29.873149752Z",
+  "status": "PASS"
+}

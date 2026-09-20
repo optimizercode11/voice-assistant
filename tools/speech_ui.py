@@ -25,7 +25,7 @@ import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 import wave
 
 MAX_BYTES = 20 * 1024 * 1024
@@ -330,6 +330,29 @@ class Progress:
             pass
 
 
+def session_snapshot(value):
+    """Only bounded display fields cross the bridge from an agent session."""
+    if not isinstance(value, dict):
+        return {}
+    limits = {"session_id": 120, "name": 120, "cwd": 1024, "state": 40,
+              "thread_id": 160, "turn_id": 160, "working_on": 1000,
+              "last_update": 1000, "error": 1000, "created_at": 80, "updated_at": 80,
+              "model": 120, "model_provider": 120, "profile": 120}
+    result = {}
+    for key, limit in limits.items():
+        item = value.get(key)
+        if isinstance(item, str):
+            result[key] = re.sub(r"[\x00-\x1f\x7f]", "", item)[:limit]
+        elif item is None and key in value:
+            result[key] = None
+    for key in ("queued", "queue_size"):
+        if type(value.get(key)) is int:
+            result[key] = max(0, min(value[key], 10000))
+    if type(value.get("requires_attention")) is bool:
+        result["requires_attention"] = value["requires_attention"]
+    return result
+
+
 class Events:
     """Server-sent events: the one path on which the bridge speaks FIRST.
 
@@ -354,6 +377,7 @@ class Events:
     METHOD = "notifications/voice/update"
     WORKING = "notifications/voice/working"
     TRACE = "notifications/voice/trace"     # the agent's raw output, one clipped line per event; shown, never spoken
+    SESSION = "notifications/voice/session"
     BACKLOG = 20
     MAX_TRACE = 400
     MAX_SPOKEN = 600
@@ -369,9 +393,27 @@ class Events:
     def on_notification(self, server: str, method: str, params) -> None:
         if not isinstance(params, dict):
             return
+        identity = {}
+        for key, limit in (("session_id", 120), ("session_name", 120), ("context_id", 80),
+                           ("turn_id", 160), ("event_id", 160), ("state", 40)):
+            if isinstance(params.get(key), str):
+                identity[key] = re.sub(r"[\x00-\x1f\x7f]", "", params[key])[:limit]
+        if method == self.SESSION:
+            snapshot = session_snapshot(params.get("session"))
+            if not snapshot.get("session_id"):
+                return
+            event = {"type": "session", "server": str(server)[:40],
+                     "session": snapshot, **identity}
+            if "selected_session_id" in params:
+                selected = params["selected_session_id"]
+                if selected is None or isinstance(selected, str):
+                    event["selected_session_id"] = (re.sub(r"[\x00-\x1f\x7f]", "", selected)[:120]
+                                                      if selected is not None else None)
+            self.publish(event)
+            return
         if method == self.WORKING:
             self.publish({"type": "working", "server": str(server)[:40],
-                          "instruction": str(params.get("instruction") or "")[:200]})
+                          "instruction": str(params.get("instruction") or "")[:200], **identity})
             return
         if method == self.TRACE:
             # A console line is only worth anything while someone is watching:
@@ -380,7 +422,7 @@ class Events:
             if line.strip():
                 self.publish({"type": "trace", "server": str(server)[:40],
                               "kind": re.sub(r"[^a-z_]", "", str(params.get("kind") or "text").lower())[:16] or "text",
-                              "line": line}, keep=False)
+                              "line": line, **identity}, keep=False)
             return
         if method != self.METHOD:
             return
@@ -399,6 +441,7 @@ class Events:
             "activity": {key: int(value) for key, value in activity.items()
                          if key in ("commands", "files_edited", "files_read", "other_tools")
                          and isinstance(value, int)},
+            **identity,
         }
         self.publish(event)
 
@@ -659,6 +702,9 @@ class Handler(BaseHTTPRequestHandler):
                                     "max_bytes": MAX_BYTES, "max_seconds": MAX_SECONDS})
         if self.command == "GET" and path == "/approvals":
             return self.approvals()
+        if ((self.command == "GET" and path == "/codex/sessions") or
+                (self.command == "POST" and path == "/codex/sessions/select")):
+            return self.codex_sessions()
         if self.command == "GET" and path == "/events":
             # EventSource sends an Origin header only cross-origin, which is
             # exactly the case to refuse: another site must not listen in on
@@ -799,6 +845,87 @@ class Handler(BaseHTTPRequestHandler):
     def _sse(self, event: dict) -> None:
         payload = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
         self._sse_write(f"id: {event.get('id', 0)}\nevent: {event.get('type', 'message')}\ndata: {payload}\n\n".encode("utf-8"))
+
+    def codex_sessions(self):
+        """Read/select sessions directly; page controls never invoke the model."""
+        if not self.same_origin():
+            raise RequestError(403, "Use the speech UI on this server to manage Codex sessions.")
+        if self.command == "GET":
+            query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+            if any(len(values) != 1 for values in query.values()):
+                raise RequestError(400, "Session query parameters must not be repeated.")
+            claim = {key: values[0] for key, values in query.items()}
+        else:
+            try:
+                claim = json.loads(self.body(4096))
+            except (ValueError, UnicodeDecodeError) as error:
+                raise RequestError(400, "The session request must be a JSON object.") from error
+            if not isinstance(claim, dict):
+                raise RequestError(400, "The session request must be a JSON object.")
+        context_id = claim.get("context_id", "voice")
+        if not isinstance(context_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", context_id):
+            raise RequestError(400, "context_id must contain 1 to 80 letters, digits, underscores or hyphens.")
+        arguments = {"context_id": context_id}
+        action = "list_sessions"
+        if self.command == "POST":
+            session = claim.get("session")
+            if (not isinstance(session, str) or not session.strip() or len(session) > 120
+                    or re.search(r"[\x00-\x1f\x7f]", session)):
+                raise RequestError(400, "session must be a name or ID of at most 120 printable characters.")
+            arguments["session"] = session
+            action = "select_session"
+        registry = self.server.registry
+        tool = "mcp__codex__" + action
+        if registry is None or tool not in registry.names():
+            return self.reply(200, {"enabled": False, "sessions": [],
+                                    "selected_session_id": None, "context_id": context_id})
+        deadline = time.monotonic() + 10
+
+        def execute_page(arguments):
+            if time.monotonic() >= deadline:
+                raise RequestError(503, "Codex session listing timed out.")
+            result = registry.execute(tool, arguments, deadline)
+            if not result.ok:
+                raise RequestError(503, str(result.error or "Codex session manager is unavailable.")[:1000])
+            try:
+                value = json.loads(result.content)
+            except (TypeError, ValueError) as error:
+                raise RequestError(502, "Codex session manager returned an invalid response.") from error
+            if not isinstance(value, dict):
+                raise RequestError(502, "Codex session manager returned an invalid response.")
+            return value
+
+        value = execute_page(arguments)
+        if action == "list_sessions":
+            # MCP results fit the model's per-tool context budget. The browser
+            # needs the complete list, so fetch bounded pages without invoking
+            # the model, preserving the same context and overall deadline.
+            pages, offset = [], 0
+            while True:
+                rows = value.get("sessions")
+                if not isinstance(rows, list) or len(pages) + len(rows) > 32:
+                    raise RequestError(502, "Codex session manager returned an invalid session list.")
+                pages.extend(rows)
+                next_offset = value.get("next_offset")
+                if next_offset is None:
+                    break
+                if type(next_offset) is not int or not offset < next_offset < 32 or not rows:
+                    raise RequestError(502, "Codex session manager returned invalid pagination.")
+                offset = next_offset
+                value = execute_page({**arguments, "offset": offset})
+            value = {**value, "sessions": pages}
+        response = {"enabled": True, "context_id": context_id}
+        if isinstance(value.get("sessions"), list):
+            response["sessions"] = [session_snapshot(item) for item in value["sessions"][:100]
+                                    if isinstance(item, dict) and isinstance(item.get("session_id"), str)]
+        if isinstance(value.get("session"), dict):
+            response["session"] = session_snapshot(value["session"])
+        if "selected_session_id" in value:
+            selected = value["selected_session_id"]
+            if selected is None or isinstance(selected, str):
+                response["selected_session_id"] = (re.sub(r"[\x00-\x1f\x7f]", "", selected)[:120]
+                                                    if selected is not None else None)
+        return self.reply(200, response)
 
     def approvals(self):
         """The directory-grant queue.  GET reads it; POST is a human's click on it.

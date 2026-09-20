@@ -1,0 +1,40 @@
+{
+  "transcript": "The quick brown fox jumps over the lazy dog.",
+  "reply": "That\u2019s the classic pangram. What would you like to do with it?",
+  "english": {
+    "frames": 77400,
+    "rms": 0.04773888690863257
+  },
+  "hindi": {
+    "frames": 42600,
+    "rms": 0.11133724070648571
+  },
+  "context_correction": [
+    "Four.",
+    "Five."
+  ],
+  "asr": {
+    "backend": "qasr",
+    "engine": {
+      "audio_ms": 2.107,
+      "prefill_ms": 6.244,
+      "decode_ms": 26.171,
+      "total_ms": 34.618,
+      "audio_rows": 35,
+      "prompt_len": 50,
+      "steps": 14,
+      "gemm_wide": 0,
+      "gemm_narrow": 0,
+      "gemv": 0,
+      "weight_bytes_read": 0
+    },
+    "frontend_ms": 2.949,
+    "frames": 272
+  },
+  "tls_verified": true,
+  "source": "3ce06259100ebd912492839262aa083e378e6c9f994bfc5db477c7dd36d3f383",
+  "pgid": 488299,
+  "gpu": 4,
+  "llm_url": "http://127.0.0.1:8080",
+  "time": 1789932708.514027
+}

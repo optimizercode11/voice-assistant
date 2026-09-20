@@ -1,0 +1,39 @@
+{
+  "campaign": "voice-workspace-20260920",
+  "command": [
+    "python3",
+    "-c",
+    "import json, sys, ssl, urllib.request, uuid\nfrom pathlib import Path\nsys.path.insert(0, 'tools')\nimport mcp_client\nname = 'voice-default-check-' + uuid.uuid4().hex + '.txt'\nexpected = 'The default voice workspace works.'\nprompt = 'Save a new file named ' + name + ' containing exactly this text with no trailing newline: ' + expected + ' Use your default workspace.'\nrequest = urllib.request.Request('https://192.168.228.113:8094/chat/completions', data=json.dumps({'messages':[{'role':'user','content':prompt}]}).encode(), headers={'Content-Type':'application/json'})\nwith urllib.request.urlopen(request, context=ssl._create_unverified_context(), timeout=180) as response:\n    result=json.load(response)\nPath('run/default-workspace-acceptance.json').write_text(json.dumps({'name':name,'expected_content':expected,'response':result},indent=2)+'\\n')\nassert result['tools'] and all(row['ok'] and row['source']=='mcp:workspace' for row in result['tools']), result\nassert any(row['name']=='mcp__workspace__write_file' for row in result['tools']), result\nserver=mcp_client.MCPServer('workspace','ssh',['-T','codex-workspace'],timeout=10)\ntry:\n    tools={tool.name:tool for tool in server.start()}\n    raw, error=server.call(tools['read_file'], {'path':name})\n    read=json.loads(raw)\n    assert not error and read['text']==expected and read['path']=='/mnt/voice-workspace/'+name, read\n    raw, error=server.call(tools['run_shell'], {'command':'pwd'})\n    shell=json.loads(raw)\n    assert not error and shell['stdout'].strip()=='/mnt/voice-workspace', shell\nfinally:\n    server.stop()\nprint(json.dumps({'passed':True, 'default_workspace': '/mnt/voice-workspace','filename':name,'reply':result['text']}))\n"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "28-31",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stack/voice-workspace-20260920",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-20T17:14:55.991026690Z",
+  "git_head": "ea4f6b5b510c962f03096ad1ad5cd5e5b1615c95",
+  "inputs": [
+    {
+      "bytes": 12290,
+      "exists": true,
+      "path": "config/host.toml",
+      "sha256": "eed5799edd4d60c386d4be680d0e7feb339944b2717350f90dab9dcd6e2c68f2",
+      "verification": "current_local"
+    }
+  ],
+  "label": "default-workspace",
+  "log": "/home/ambudsharma/qwen36/voice-stack/voice-workspace-20260920/evidence/guarded-voice-workspace-20260920-20260920T171451Z-2467484.log",
+  "run_id": "voice-workspace-20260920-20260920T171451Z-2467484",
+  "schema_version": 2,
+  "source_fingerprint": "f19e9a5decc8b0f31facd128127d4a2aa74ec51c010f1963a83d4f8e005a483b",
+  "started_utc": "2026-09-20T17:14:52.694301841Z",
+  "status": "PASS"
+}

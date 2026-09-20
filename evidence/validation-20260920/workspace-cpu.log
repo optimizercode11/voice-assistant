@@ -1,0 +1,74 @@
+Command: make test-workspace test-files
+Started UTC: 2026-09-20T17:41:19.756103+00:00
+CUDA_VISIBLE_DEVICES: empty
+
+CUDA_VISIBLE_DEVICES="" python3 -W error::ResourceWarning -u tests/mcp_workspace_test.py
+test_doctor_reports_cwd_without_starting_protocol (__main__.WorkspaceCLITests.test_doctor_reports_cwd_without_starting_protocol) ... ok
+test_explicit_existing_cwd_is_required (__main__.WorkspaceCLITests.test_explicit_existing_cwd_is_required) ... ok
+test_transport_eof_finishes_accepted_file_calls (__main__.WorkspaceCLITests.test_transport_eof_finishes_accepted_file_calls) ... ok
+test_absolute_parent_and_home_paths_are_supported (__main__.WorkspaceMCPTests.test_absolute_parent_and_home_paths_are_supported) ... ok
+test_busy_server_rejects_mutation_without_executing_it_later (__main__.WorkspaceMCPTests.test_busy_server_rejects_mutation_without_executing_it_later) ... ok
+test_create_write_read_append_list_and_overwrite (__main__.WorkspaceMCPTests.test_create_write_read_append_list_and_overwrite) ... ok
+test_directory_parents_flag_is_observed (__main__.WorkspaceMCPTests.test_directory_parents_flag_is_observed) ... ok
+test_discovery_marks_mutating_tools (__main__.WorkspaceMCPTests.test_discovery_marks_mutating_tools) ... ok
+test_fast_read_answers_while_another_chat_runs_shell (__main__.WorkspaceMCPTests.test_fast_read_answers_while_another_chat_runs_shell) ... ok
+test_invalid_argument_shapes_do_not_crash_server (__main__.WorkspaceMCPTests.test_invalid_argument_shapes_do_not_crash_server) ... ok
+test_invalid_types_bounds_and_unknown_keys_are_rejected (__main__.WorkspaceMCPTests.test_invalid_types_bounds_and_unknown_keys_are_rejected) ... ok
+test_large_directory_output_is_capped_json (__main__.WorkspaceMCPTests.test_large_directory_output_is_capped_json) ... ok
+test_nonzero_shell_exit_preserves_diagnostics (__main__.WorkspaceMCPTests.test_nonzero_shell_exit_preserves_diagnostics) ... ok
+test_paths_and_content_are_literal_unicode (__main__.WorkspaceMCPTests.test_paths_and_content_are_literal_unicode) ... ok
+test_read_and_shell_output_caps_keep_json_valid (__main__.WorkspaceMCPTests.test_read_and_shell_output_caps_keep_json_valid) ... ok
+test_read_byte_cap_and_write_utf8_byte_limit (__main__.WorkspaceMCPTests.test_read_byte_cap_and_write_utf8_byte_limit) ... ok
+test_server_shutdown_terminates_active_shell_descendants (__main__.WorkspaceMCPTests.test_server_shutdown_terminates_active_shell_descendants) ... ok
+test_shell_reports_streams_exit_status_and_cwd (__main__.WorkspaceMCPTests.test_shell_reports_streams_exit_status_and_cwd) ... ok
+test_special_files_and_directories_are_rejected_without_blocking (__main__.WorkspaceMCPTests.test_special_files_and_directories_are_rejected_without_blocking) ... ok
+test_timeout_kills_background_descendants_before_delayed_write (__main__.WorkspaceMCPTests.test_timeout_kills_background_descendants_before_delayed_write) ... ok
+test_transport_eof_terminates_active_shell_descendants (__main__.WorkspaceMCPTests.test_transport_eof_terminates_active_shell_descendants) ... ok
+test_unknown_tool_is_an_error_and_server_stays_alive (__main__.WorkspaceMCPTests.test_unknown_tool_is_an_error_and_server_stays_alive) ... ok
+
+----------------------------------------------------------------------
+Ran 22 tests in 11.573s
+
+OK
+CUDA_VISIBLE_DEVICES="" python3 -W error::ResourceWarning -u tests/mcp_files_test.py
+/mnt/voice-assistant/tests/mcp_files_test.py:179: SyntaxWarning: invalid escape sequence '\s'
+  'anchors and \s must be regex, not literals: one line has exactly two words')
+test_a_scope_refusal_points_at_request_directory_only_when_grants_exist (__main__.FileMCPProcessTests.test_a_scope_refusal_points_at_request_directory_only_when_grants_exist) ... ok
+test_arguments_must_be_an_object (__main__.FileMCPProcessTests.test_arguments_must_be_an_object) ... ok
+test_doctor_names_every_exposed_directory (__main__.FileMCPProcessTests.test_doctor_names_every_exposed_directory) ... ok
+test_garbage_on_stdin_does_not_kill_the_server (__main__.FileMCPProcessTests.test_garbage_on_stdin_does_not_kill_the_server) ... ok
+test_missing_root_directory_refuses (__main__.FileMCPProcessTests.test_missing_root_directory_refuses) ... ok
+test_no_roots_refuses_to_start (__main__.FileMCPProcessTests.test_no_roots_refuses_to_start) ... ok
+test_several_roots_must_be_named_by_the_caller (__main__.FileMCPProcessTests.test_several_roots_must_be_named_by_the_caller) ... ok
+test_a_huge_result_is_trimmed_not_sliced (__main__.FileMCPTests.test_a_huge_result_is_trimmed_not_sliced)
+The output cap must never hand back JSON that does not parse. ... ok
+test_absolute_and_home_refused (__main__.FileMCPTests.test_absolute_and_home_refused) ... ok
+test_binary_refused_without_content (__main__.FileMCPTests.test_binary_refused_without_content) ... ok
+test_directory_says_use_list_dir (__main__.FileMCPTests.test_directory_says_use_list_dir) ... ok
+test_dot_git_is_not_walkable (__main__.FileMCPTests.test_dot_git_is_not_walkable) ... ok
+test_dotdot_refused (__main__.FileMCPTests.test_dotdot_refused) ... ok
+test_find_by_glob (__main__.FileMCPTests.test_find_by_glob) ... ok
+test_grep_ignore_case_and_glob (__main__.FileMCPTests.test_grep_ignore_case_and_glob) ... ok
+test_grep_match_cap (__main__.FileMCPTests.test_grep_match_cap) ... ok
+test_grep_regex_metacharacters_are_regex (__main__.FileMCPTests.test_grep_regex_metacharacters_are_regex) ... ok
+test_grep_reports_file_and_line_number (__main__.FileMCPTests.test_grep_reports_file_and_line_number) ... ok
+test_grep_skips_binary_and_keeps_going (__main__.FileMCPTests.test_grep_skips_binary_and_keeps_going) ... ok
+test_invalid_regex_is_an_error_not_a_crash (__main__.FileMCPTests.test_invalid_regex_is_an_error_not_a_crash) ... ok
+test_list_dir_hides_dotfiles_by_default (__main__.FileMCPTests.test_list_dir_hides_dotfiles_by_default) ... ok
+test_read_byte_cap_is_reported_not_silent (__main__.FileMCPTests.test_read_byte_cap_is_reported_not_silent) ... ok
+test_read_file_pages_with_offset (__main__.FileMCPTests.test_read_file_pages_with_offset) ... ok
+test_read_file_returns_numbered_lines (__main__.FileMCPTests.test_read_file_returns_numbered_lines) ... ok
+test_roots_reports_what_is_exposed (__main__.FileMCPTests.test_roots_reports_what_is_exposed) ... ok
+test_symlink_to_directory_cannot_escape (__main__.FileMCPTests.test_symlink_to_directory_cannot_escape) ... ok
+test_symlink_to_file_cannot_escape (__main__.FileMCPTests.test_symlink_to_file_cannot_escape) ... ok
+test_tools_listed_are_read_only (__main__.FileMCPTests.test_tools_listed_are_read_only) ... ok
+test_unknown_tool_is_an_error_not_a_crash (__main__.FileMCPTests.test_unknown_tool_is_an_error_not_a_crash) ... ok
+test_walk_never_follows_links_out (__main__.FileMCPTests.test_walk_never_follows_links_out)
+grep over the whole root must not read through `escape` into /etc/passwd. ... ok
+
+----------------------------------------------------------------------
+Ran 30 tests in 0.285s
+
+OK
+
+Exit status: 0

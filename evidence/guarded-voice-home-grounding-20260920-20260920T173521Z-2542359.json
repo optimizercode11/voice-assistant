@@ -1,0 +1,53 @@
+{
+  "campaign": "voice-home-grounding-20260920",
+  "command": [
+    "bash",
+    "-c",
+    "set -e; python3 deploy/prepare-service.py; python3 deploy/campaigns/home-grounding-20260920/acceptance.py --candidate --output run/home-candidate.json"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "28-31",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stack/voice-home-grounding-20260920",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-20T17:35:37.385113572Z",
+  "git_head": "ea4f6b5b510c962f03096ad1ad5cd5e5b1615c95",
+  "inputs": [
+    {
+      "bytes": 12651,
+      "exists": true,
+      "path": "config/host.toml",
+      "sha256": "8d263ea2f05ec38fee48f9984bb94db8c2404487b4b5fa144a6ca0d935ddd3ad",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 26573,
+      "exists": true,
+      "path": "tools/voice_chat.py",
+      "sha256": "44f69853a63e4e1c6b0a00f1dffa004a168ca964a296620a9d1c9785ba2c30dc",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 3761,
+      "exists": true,
+      "path": "deploy/campaigns/home-grounding-20260920/acceptance.py",
+      "sha256": "035dd7183c7e48069a59d8f684cfa5d3a5d90630a76e2589a4a194a91153ba18",
+      "verification": "current_local"
+    }
+  ],
+  "label": "candidate-check-fixed",
+  "log": "/home/ambudsharma/qwen36/voice-stack/voice-home-grounding-20260920/evidence/guarded-voice-home-grounding-20260920-20260920T173521Z-2542359.log",
+  "run_id": "voice-home-grounding-20260920-20260920T173521Z-2542359",
+  "schema_version": 2,
+  "source_fingerprint": "5543c553463b5455ab4a17c47856e3856462faf1cff9b87d4ca07fd5b06742fc",
+  "started_utc": "2026-09-20T17:35:22.597202318Z",
+  "status": "PASS"
+}

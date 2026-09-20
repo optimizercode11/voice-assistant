@@ -1,0 +1,15 @@
+Sun Sep 20 19:39:07 UTC 2026
+MainPID=0
+Id=q38-server.service
+ActiveState=failed
+SubState=failed
+
+MainPID=488306
+Id=voice-stack-gpu4.service
+ActiveState=active
+SubState=running
+LISTEN 0      5            0.0.0.0:8093       0.0.0.0:*    users:(("python3",pid=489101,fd=3))
+LISTEN 0      5            0.0.0.0:8094       0.0.0.0:*    users:(("python3",pid=489101,fd=21))
+LISTEN 0      128          0.0.0.0:8090       0.0.0.0:*    users:(("kserver",pid=488672,fd=37))
+LISTEN 0      128        127.0.0.1:18192      0.0.0.0:*    users:(("q38_27_server",pid=515357,fd=39))
+LISTEN 0      5          127.0.0.1:8095       0.0.0.0:*    users:(("python",pid=488756,fd=7))

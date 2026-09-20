@@ -1,0 +1,201 @@
+{
+  "names": [
+    "VoiceProbeAd98fab",
+    "VoiceProbeBd98fab"
+  ],
+  "contexts": [
+    "probe_a_d98fab",
+    "probe_b_d98fab"
+  ],
+  "turns": [
+    {
+      "request": "Create a Codex session named VoiceProbeAd98fab. Use its default isolated workspace. Do not start a task yet.",
+      "context_id": "probe_a_d98fab",
+      "text": "Created the Codex session VoiceProbeAd98fab in its default isolated workspace. It's idle and selected, with no task started.",
+      "usage": {
+        "prompt_tokens": 12821,
+        "completion_tokens": 63,
+        "total_tokens": 12884
+      },
+      "tools": [
+        {
+          "name": "mcp__codex__create_session",
+          "ok": true,
+          "ms": 4,
+          "source": "mcp:codex",
+          "call_id": "call_153_0"
+        }
+      ],
+      "sources": [],
+      "controls": {}
+    },
+    {
+      "request": "Create a Codex session named VoiceProbeBd98fab. Use its default isolated workspace. Do not start a task yet.",
+      "context_id": "probe_b_d98fab",
+      "text": "Created the Codex session VoiceProbeBd98fab in its isolated workspace at /mnt/voice-workspace/sessions/s_e8fb3b52ac7c. It's idle and selected, with no task started.",
+      "usage": {
+        "prompt_tokens": 12818,
+        "completion_tokens": 84,
+        "total_tokens": 12902
+      },
+      "tools": [
+        {
+          "name": "mcp__codex__create_session",
+          "ok": true,
+          "ms": 3,
+          "source": "mcp:codex",
+          "call_id": "call_155_0"
+        }
+      ],
+      "sources": [],
+      "controls": {}
+    },
+    {
+      "request": "Switch the selected Codex session to VoiceProbeAd98fab.",
+      "context_id": "probe_a_d98fab",
+      "text": "Done. VoiceProbeAd98fab is now the selected Codex session. It's idle and ready for a task.",
+      "usage": {
+        "prompt_tokens": 12790,
+        "completion_tokens": 60,
+        "total_tokens": 12850
+      },
+      "tools": [
+        {
+          "name": "mcp__codex__select_session",
+          "ok": true,
+          "ms": 2,
+          "source": "mcp:codex",
+          "call_id": "call_157_0"
+        }
+      ],
+      "sources": [],
+      "controls": {}
+    },
+    {
+      "request": "Tell the selected Codex session to implement probe.py containing square(x) that returns x*x, and run Python assertions for square(-3)==9 and square(0)==0. Use only its own project directory.",
+      "context_id": "probe_a_d98fab",
+      "text": "I've sent the task to the selected Codex session. It's now working on creating probe.py with the square function and running the assertions in its own project directory. I'll let you know once it finishes.",
+      "usage": {
+        "prompt_tokens": 12973,
+        "completion_tokens": 107,
+        "total_tokens": 13080
+      },
+      "tools": [
+        {
+          "name": "mcp__codex__send",
+          "ok": true,
+          "ms": 241,
+          "source": "mcp:codex",
+          "call_id": "call_159_0"
+        }
+      ],
+      "sources": [],
+      "controls": {}
+    },
+    {
+      "request": "What is the status of the selected Codex session?",
+      "context_id": "probe_a_d98fab",
+      "text": "The selected Codex session, VoiceProbeAd98fab, is idle. It finished its last task: it wrote a probe file with a square function and both test assertions passed. It's ready for a new instruction.",
+      "usage": {
+        "prompt_tokens": 12854,
+        "completion_tokens": 63,
+        "total_tokens": 12917
+      },
+      "tools": [
+        {
+          "name": "mcp__codex__status",
+          "ok": true,
+          "ms": 1,
+          "source": "mcp:codex",
+          "call_id": "call_161_0"
+        }
+      ],
+      "sources": [],
+      "controls": {}
+    },
+    {
+      "request": "Read /mnt/voice-workspace/sessions/s_b46b4d269c19/probe.py using the direct workspace file tools.",
+      "context_id": "probe_a_d98fab",
+      "text": "The file is a small Python script with a square function that returns x times x. It has a main block with two assertions: square of negative 3 equals 9, and square of 0 equals 0. If both pass, it prints \"All assertions passed.\"",
+      "usage": {
+        "prompt_tokens": 12696,
+        "completion_tokens": 107,
+        "total_tokens": 12803
+      },
+      "tools": [
+        {
+          "name": "mcp__workspace__read_file",
+          "ok": true,
+          "ms": 1,
+          "source": "mcp:workspace",
+          "call_id": "call_163_0"
+        }
+      ],
+      "sources": [],
+      "controls": {}
+    },
+    {
+      "request": "Archive the finished Codex session named VoiceProbeAd98fab. Keep all project files.",
+      "context_id": "probe_a_d98fab",
+      "text": "Done. The VoiceProbeAd98fab session is archived, and all its project files are kept.",
+      "usage": {
+        "prompt_tokens": 12594,
+        "completion_tokens": 56,
+        "total_tokens": 12650
+      },
+      "tools": [
+        {
+          "name": "mcp__codex__archive_session",
+          "ok": true,
+          "ms": 13,
+          "source": "mcp:codex",
+          "call_id": "call_165_0"
+        }
+      ],
+      "sources": [],
+      "controls": {}
+    },
+    {
+      "request": "Archive the finished Codex session named VoiceProbeBd98fab. Keep all project files.",
+      "context_id": "probe_b_d98fab",
+      "text": "Done. The VoiceProbeBd98fab session is archived, and all its project files were kept.",
+      "usage": {
+        "prompt_tokens": 12595,
+        "completion_tokens": 58,
+        "total_tokens": 12653
+      },
+      "tools": [
+        {
+          "name": "mcp__codex__archive_session",
+          "ok": true,
+          "ms": 2,
+          "source": "mcp:codex",
+          "call_id": "call_167_0"
+        }
+      ],
+      "sources": [],
+      "controls": {}
+    }
+  ],
+  "checks": {
+    "separate_selections": true,
+    "real_coding_completion": {
+      "session_id": "s_b46b4d269c19",
+      "name": "VoiceProbeAd98fab",
+      "cwd": "/mnt/voice-workspace/sessions/s_b46b4d269c19",
+      "state": "idle",
+      "thread_id": "01a0c04e-e53c-7850-9b53-129ab166f391",
+      "turn_id": "01a0c04e-e571-7721-803d-23107cd8f257",
+      "working_on": "Implement probe.py containing square(x) that returns x*x. Run Python assertions for square(-3)==9 and square(0)==0. Use only its own project directory.",
+      "last_update": "Done. I wrote the probe file with the square function and both assertions passed cleanly.",
+      "error": "",
+      "model": "qwen3.8-flash-next-nvfp4",
+      "model_provider": "q38f",
+      "profile": "q38f",
+      "requires_attention": false
+    },
+    "direct_read_path": "/mnt/voice-workspace/sessions/s_b46b4d269c19/probe.py",
+    "archived_without_deleting_projects": true
+  },
+  "passed": true
+}

@@ -1,0 +1,6 @@
+guarded-run: campaign=voice-workspace-20260920 label=install mode=cpu cpus=28-31
+command: bash deploy/campaigns/workspace-20260920/promote.sh
+Stopping orphaned processes owned by the failed voice unit.
+indexed 6 documents into 251 chunks in 0.017s at var/notes.sqlite
+active
+enabled

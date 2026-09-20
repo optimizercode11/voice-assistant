@@ -1,0 +1,24 @@
+guarded-run: campaign=voice-home-repro-20260920 label=reproduce mode=cpu cpus=28-31
+command: python3 -c $'import json, sys, ssl, urllib.request\nfrom pathlib import Path\nsys.path.insert(0,\'tools\')\nimport mcp_client\ns=mcp_client.MCPServer(\'workspace\',\'ssh\',[\'-T\',\'codex-workspace\'],timeout=10)\ntry:\n    ts={t.name:t for t in s.start()}\n    raw,error=s.call(ts[\'run_shell\'],{\'command\':\'printf "HOME=%s\\\\n" "$HOME"; printf "CWD="; pwd; printf "USER="; id -un; printf "HOST="; hostname\'})\n    assert not error, raw\n    actual=json.loads(raw)\nfinally:\n    s.stop()\nquestion="What\'s your home directory?"\nr=urllib.request.Request(\'https://192.168.228.113:8094/chat/completions\',data=json.dumps({\'messages\':[{\'role\':\'user\',\'content\':question}]}).encode(),headers={\'Content-Type\':\'application/json\'})\nwith urllib.request.urlopen(r,context=ssl._create_unverified_context(),timeout=120) as response:\n    answer=json.load(response)\ndoc={\'actual_environment\':actual,\'question\':question,\'response\':answer}\nPath(\'run\').mkdir(exist_ok=True)\nPath(\'run/home-before.json\').write_text(json.dumps(doc,indent=2)+\'\\n\')\nprint(json.dumps(doc,indent=2))\n'
+{
+  "actual_environment": {
+    "cwd": "/mnt/voice-workspace",
+    "stdout": "HOME=/home/ambudsharma\nCWD=/mnt/voice-workspace\nUSER=ambudsharma\nHOST=codex\n",
+    "stderr": "",
+    "exit_code": 0,
+    "timed_out": false,
+    "truncated": false
+  },
+  "question": "What's your home directory?",
+  "response": {
+    "text": "My default working directory on codex is /mnt/voice-workspace.",
+    "usage": {
+      "prompt_tokens": 4834,
+      "completion_tokens": 15,
+      "total_tokens": 4849
+    },
+    "tools": [],
+    "sources": [],
+    "controls": {}
+  }
+}

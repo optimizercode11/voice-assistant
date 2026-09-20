@@ -1,10 +1,58 @@
 # Tools, RAG and MCP
 
-The assistant can look things up.  This file says what it can reach, who said
-so, and what happens when a lookup goes wrong.
+The assistant can look things up and perform quick file and shell operations
+directly. This file says what each configured tool can reach and how it runs.
 
 Nothing here is on by default.  A deployment with no config file offers no
 tools and behaves exactly as it did before this existed.
+
+## Named Codex sessions (2026-09-20)
+
+The host's `codex` MCP source now uses `tools/mcp_codex_sessions.py` and Codex
+App Server. The older `mcp_codex.py` exec adapter remains for compatibility.
+The configured `q38f` model/provider is passed to every new or resumed thread;
+saved sessions refuse a silently changed model/profile. The voice router still
+uses Q38-27B and ordinary file/shell tasks still use direct workspace tools.
+
+| Tool under `mcp__codex__` | Behavior |
+| --- | --- |
+| `create_session(name, cwd?)` | Create and select a named session; no model work starts. Existing project paths must exist. Omitted cwd creates a separate directory under `/mnt/voice-workspace/sessions/`. |
+| `list_sessions(offset?, limit?)` | Actual states and this conversation's selection; bounded pagination. |
+| `select_session(session)` | Change only this conversation's selected session. |
+| `send(instruction, session?)` | Start work or resume a saved thread. Busy sessions refuse a second task. |
+| `status(session?)` | State, thread/turn identities, latest report and pending question IDs. |
+| `steer(instruction, session?)` | Add instructions to the exact active turn. |
+| `interrupt(session?)` | Request cancellation and wait for an interrupted event; does not pause listening or claim to stop detached terminals. |
+| `answer(session, request_id, answers)` | Answer exact pending question IDs for that session and turn. |
+| `updates(session?, detail?)` | Consume bounded pages of new reports; technical detail only when requested. |
+| `archive_session(session)` | Remove an idle session from the voice list and archive its Codex history; project files remain. |
+
+Names match exactly, ignoring case; IDs also work. Omitted session uses the
+manager's saved selection, never the last background announcement. The bridge
+injects the browser conversation ID into tool calls and overrides any routing
+key produced by the model. Cards, pending indicators and spoken updates retain
+session/turn identity. Live event IDs suppress repeat announcements in a page.
+
+State is SQLite under `/mnt/voice-workspace/.codex-sessions`, on codex. A browser
+reload reconnects without stopping jobs. Stopping the manager interrupts its
+owned work; restarting retains thread IDs and per-conversation selection, and
+the next explicit send resumes the saved thread. Unconfirmed turn starts are
+not replayed automatically. There is no live adoption of unrelated terminal
+sessions in this release.
+
+The manager admits at most three active workers, reserving a coordinator slot,
+and disables nested Codex agents. It rejects active sessions whose project
+directories overlap; use separate Git worktrees for concurrent work on one
+repository. This cap covers managed workers, not unrelated external CLI
+processes. Directory checks enforce scheduling ownership, not a filesystem
+sandbox. Existing full-access permissions remain unchanged.
+
+Run `tools/mcp_codex_sessions.py --doctor` to inspect the pinned profile and
+tool list. `make test-codex` covers transport, persistence, MCP, bridge routes
+and model-tool routing using subprocess fixtures. The named-session browser
+suite verifies selection and spoken-update isolation. The guarded live harness
+under `deploy/campaigns/codex-sessions-20260920/` drives the real voice model and
+real local Codex profile against isolated coding projects.
 
 ```
    "what port is the bridge on?"
@@ -196,6 +244,94 @@ tools without `request_directory`, so shipping the current host config also
 adds this request-and-click surface. That is separate from barge-in's local
 audio gate; no new model tool is needed to stop playback.
 
+### Direct project operations: `tools/mcp_workspace.py`
+
+The `workspace` MCP server offers `read_file`, `write_file`, `make_directory`,
+`list_directory` and `run_shell`. The model sees names such as
+`mcp__workspace__read_file`. These tools execute on the project host without
+starting Claude Code or Codex: use them to inspect a README, save supplied
+text, create a directory, list projects or run a quick command. Only substantial
+engineering/coding work goes to a coding agent by default; an explicit
+request to use Claude Code or Codex goes to that agent.
+
+The host profile uses `/mnt/voice-workspace` on codex as its default working
+and output directory. New notes, lists and documents belong there unless the
+user chooses another location. Existing projects stay at their actual paths;
+the assistant can access them by absolute path. Configure the SSH forced
+command with that same working directory so the prompt and server agree.
+
+`write_file` creates or replaces UTF-8 content by default; `append: true`
+adds to an existing file. Its parent directory must already exist.
+`make_directory` creates missing parents by default. `read_file` accepts a
+1-based `offset` and a line `limit` (default 200, maximum 2000), within the
+initial byte budget; `byte_capped` reports when that budget excludes the rest
+of a file. `list_directory` includes hidden entries.
+
+Start the server with an explicit, existing `--cwd`. Paths may be absolute,
+relative to that directory, or start with `~`. **The working directory is not
+a sandbox:** these tools have the filesystem and shell authority of the OS
+account running the server. The separate `files` server still provides
+read-only access to configured roots on the GPU host, including its existing
+directory approval flow; those grants do not control `workspace`.
+
+| Setting | Default | Behavior |
+|---|---|---|
+| `--max-read-bytes` | 65536 | Bounds file content returned by a read. |
+| `--max-write-bytes` | 65536 | Bounds the UTF-8 content accepted by a write. |
+| `--max-output-chars` | 4000 | Bounds tool output, with truncation reported. |
+| Shell timeout | 5 seconds, at most 8 | Runs `/bin/bash -c`; timeout kills the command's process group. |
+
+The voice bridge also caps serialized tool arguments at 8000 characters, so a
+single voice-driven write must fit that limit as well as the server's byte cap.
+
+Shell results include stdout, stderr, exit code, timeout and truncation
+information. Keep commands short enough to finish within the tool call.
+A timeout does not make a basic computer task an engineering task: report the
+limit instead of automatically delegating it to Claude.
+
+**Transport setup is required.** `config/host.toml` selects
+`ssh -T codex-workspace`, which needs its own SSH alias and key on the GPU
+host and an authorized forced command on the project host. The repository
+configuration alone does not install that key or enable remote access.
+Keep the existing `codex-claude` and `codex-codex` aliases and keys in place.
+
+For example, generate a separate key on the GPU host:
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_voice_workspace -N ''
+```
+
+Add an entry to the GPU host's `~/.ssh/config`, replacing `PROJECT_HOST` and
+`PROJECT_USER` with the project machine's hostname and account:
+
+```sshconfig
+Host codex-workspace
+    HostName PROJECT_HOST
+    User PROJECT_USER
+    IdentityFile ~/.ssh/id_ed25519_voice_workspace
+    IdentitiesOnly yes
+    BatchMode yes
+```
+
+Append that key's public part to the project account's `~/.ssh/authorized_keys`
+with this prefix (the example assumes the repository is at
+`/mnt/voice-assistant`):
+
+```text
+restrict,command="python3 /mnt/voice-assistant/tools/mcp_workspace.py --cwd /mnt/voice-workspace" ssh-ed25519 PUBLIC_KEY voice-workspace
+```
+
+The forced command limits which server this key starts; `run_shell` still
+executes commands with the project account's permissions. Install the server
+file on the project host and create `/mnt/voice-workspace` before probing the
+transport. On that host,
+`python3 /mnt/voice-assistant/tools/mcp_workspace.py --cwd /mnt/voice-workspace --doctor`
+prints the resolved working directory, authority and limits. From the GPU host,
+`voicectl mcp list --config config/host.toml` starts the configured servers and
+lists their tools; `voicectl doctor --probe --config config/host.toml` checks
+startup failures before a bridge restart. `make test-workspace` exercises the
+direct server locally without either coding agent or a model.
+
 ### Browsing the public web: `tools/mcp_web.py`
 
 `search` and `read_page` — stdlib only, read-only GET, any *public* host.
@@ -255,12 +391,11 @@ dies mid-turn becomes an error update that says so, and the next `send`
 starts a fresh session.  SIGTERM to the server reaps the child.
 
 Permissions are **Claude Code's own** — bypass mode, by the operator's
-decision — and nothing here second-guesses them.  This is deliberately unlike
-every other server in this file: it is the one capability that acts on the
-world, and the judgement about *whether* to act belongs to the model doing the
-acting, not to a wrapper.  What the wrapper fixes is *where*: the session's
-working directory, `--add-dir`, model and permission mode are in the server's
-argv.
+decision — and nothing here second-guesses them. Claude Code and the direct
+`workspace` tools can both change project files. The judgement about *whether*
+to act belongs to the model doing the acting. What the Claude wrapper fixes
+is *where*: the session's working directory, `--add-dir`, model and permission
+mode are in the server's argv.
 
 **Deployment transport.**  The bridge runs on the GPU host; the repositories
 and the logged-in `claude` are on codex.  So the MCP child in `host.toml` is
@@ -341,11 +476,12 @@ with `restrict,command="python3 /mnt/voice-assistant/tools/mcp_codex.py --codex
 python3 tools/mcp_codex.py --doctor --codex /usr/local/bin/codex --profile q38f --cwd ~ --add-dir /mnt --push
 ```
 
-**Choosing the agent** is the model's, from a `[prompt] where` line: Codex
-only when the user says Codex or asks for the local model, Claude Code
-otherwise.  On the page an update is labelled by the server that sent it
-(`agentName()` in `chat.js`; `voice_push_browser.mjs` asserts a Codex bubble
-is never shown as Claude Code).
+**Choosing the agent** is the model's, from a `[prompt] where` line: quick
+project file and shell operations use `workspace` directly. For delegated
+work, use Codex when the user says Codex or asks for the local model, and
+Claude Code otherwise. On the page an update is labelled by the server that
+sent it (`agentName()` in `chat.js`; `voice_push_browser.mjs` asserts a Codex
+bubble is never shown as Claude Code).
 
 ### Updates that arrive on their own: `/events`
 
@@ -474,21 +610,24 @@ transcript:
 - On the page, a bridge refusal keeps the conversation: the reason goes on the
   status line and listening resumes, instead of "Something went wrong" ending
   the session (`voice_pause_browser.mjs` asserts it).
-- **`[prompt] where`** (2026-09-12): the manifest can end with operator-written
-  lines under *Where things are*.  A `purpose` says what a server is for; it
-  cannot say which machine the server sees, and on the live bridge that is the
+- **`[prompt] where`** (historical measurement, 2026-09-12): the manifest can
+  end with operator-written lines under *Where things are*. A `purpose` says
+  what a server is for; it cannot say which machine the server sees, and on
+  the live bridge that is the
   whole question: the `files` server reads the GPU host's disk, and the `/mnt`
-  a person approved on the page is that host's directory of model weights,
-  while the repositories are on codex behind the `claude` server.  Measured
-  against Flash-Next with reasoning off, "look up my inference engine project
-  in /mnt" went to the file tools 12/12 and found `/mnt/engine2` on the wrong
+  a person approved on the page is that host's directory of model weights.
+  At the time, the repositories were reachable through the `claude` server.
+  Measured against Flash-Next with reasoning off, "look up my inference engine
+  project in /mnt" went to the file tools 12/12 and found `/mnt/engine2` on the wrong
   machine; "read the readme of the inference engine project" read this
   repository's README.  Rewording the two purposes alone moved only the edit
-  requests.  With the two `where` lines in `config/host.toml`, 16/16 project
+  requests. With the two `where` lines then in `config/host.toml`, 16/16 project
   requests (find, read the README, summarise, edit, which branch) went to
   `mcp__claude__send`, and the bridge port, the runbook and the deployed folder
-  stayed on the local tools.  At most six lines of 400 characters; every one
-  is sent on every turn (`tests/agent_tools_test.py`).
+  stayed on the local tools. The current config routes quick project operations
+  through `workspace`; the 16/16 result describes the older routing policy,
+  not a measurement of that new path. At most six lines of 400 characters;
+  every one is sent on every turn (`tests/agent_tools_test.py`).
 
 ## Progress, and why it is opt-in
 
@@ -529,6 +668,8 @@ discarded, so a hung MCP tool costs the turn its patience and nothing else.
 ## What is deliberately not here
 
 - **No builtins that edit project files, run a shell or control devices.**
+  Direct file writes and shell commands are offered by the separately
+  configured `workspace` MCP server.
   `request_directory` does persist a pending access request in the configured
   approvals file; a new grant still requires the page's approval action.
 - **No embeddings, no vector store, no reranker.**  Not available offline here,

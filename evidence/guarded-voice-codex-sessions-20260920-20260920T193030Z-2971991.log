@@ -1,0 +1,11 @@
+guarded-run: campaign=voice-codex-sessions-20260920 label=preflight mode=cpu cpus=28-31
+command: bash -c python3\ tools/voicectl.py\ --config\ config/host.toml\ index\ build\ \&\&\ python3\ tools/voicectl.py\ --config\ config/host.toml\ doctor
+indexed 6 documents into 260 chunks in 0.024s at var/notes.sqlite
+tools (4): now, pause_listening, request_directory, search_notes
+  now                                builtin
+  pause_listening                    builtin
+  request_directory                  builtin
+  search_notes                       retrieval
+limits: rounds=5 per_call=10.0s turn=600.0s result_chars=6000
+warn: ffmpeg is not on PATH; the bridge cannot decode uploads
+doctor: ok

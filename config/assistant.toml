@@ -66,3 +66,16 @@ schemes = ["https"]
 # deny = []
 # timeout_seconds = 15
 # enabled = true
+
+# Direct filesystem and shell tools when the bridge runs on the project host.
+# Choose an existing working directory; absolute paths are also accepted and
+# the process has your OS account's permissions (cwd is not a sandbox).
+# Keep per_call_seconds >= 10; shell commands time out after at most 8 seconds.
+# For a remote project host, see the workspace entry in config/host.toml.
+# [[mcp.server]]
+# name = "workspace"
+# purpose = "direct local file reads/writes, directory creation and short shell commands"
+# command = "python3"
+# args = ["tools/mcp_workspace.py", "--cwd", "/path/to/projects"]
+# timeout_seconds = 10
+# enabled = true

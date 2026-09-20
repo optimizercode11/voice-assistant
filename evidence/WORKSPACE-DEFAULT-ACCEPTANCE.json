@@ -1,0 +1,23 @@
+{
+  "name": "voice-default-check-a644c80fc7b64c4595e19b20bbfa9290.txt",
+  "expected_content": "The default voice workspace works.",
+  "response": {
+    "text": "Saved to /mnt/voice-workspace/voice-default-check-a644c80fc7b64c4595e19b20bbfa9290.txt.",
+    "usage": {
+      "prompt_tokens": 9921,
+      "completion_tokens": 121,
+      "total_tokens": 10042
+    },
+    "tools": [
+      {
+        "name": "mcp__workspace__write_file",
+        "ok": true,
+        "ms": 1,
+        "source": "mcp:workspace",
+        "call_id": "call_55_0"
+      }
+    ],
+    "sources": [],
+    "controls": {}
+  }
+}

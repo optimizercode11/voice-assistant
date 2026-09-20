@@ -449,7 +449,7 @@ class Registry:
             registry._add(Tool(tool.tool_name, tool.description or f"MCP tool {tool.name} on {tool.server}.",
                                tool.input_schema or {"type": "object", "properties": {}},
                                _mcp_handler(tool), f"mcp:{tool.server}",
-                               _server_timeout(config, tool.server)))
+                               _server_timeout(config, tool.server), read_only=tool.read_only))
         registry.mcp_failures = failures
         return registry
 
@@ -594,7 +594,9 @@ def _mcp_handler(tool):
             return ToolResult(False, "", error=f"{tool.tool_name} failed: {error}",
                               source=f"mcp:{tool.server}", meta={"name": tool.tool_name})
         if is_error:
-            return ToolResult(False, "", error=f"{tool.tool_name} reported: {text[:400]}",
+            # Shell failures carry exit status and stderr as structured text;
+            # clipping to 400 characters can remove the actual diagnosis.
+            return ToolResult(False, "", error=f"{tool.tool_name} reported: {text[:context.config.limits.result_chars]}",
                               source=f"mcp:{tool.server}", meta={"name": tool.tool_name})
         return ToolResult(True, text, source=f"mcp:{tool.server}", meta={"name": tool.tool_name})
     return call
@@ -630,5 +632,4 @@ class _Guarded(threading.Thread):
                                      source=self.tool.source)
         finally:
             self.done.set()
-
 

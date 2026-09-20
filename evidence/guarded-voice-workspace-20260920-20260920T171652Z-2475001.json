@@ -1,0 +1,49 @@
+{
+  "campaign": "voice-workspace-20260920",
+  "command": [
+    "python3",
+    "tools/voicectl.py",
+    "--config",
+    "config/host.toml",
+    "index",
+    "build"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "28-31",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stack/voice-workspace-20260920",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-20T17:16:54.256610609Z",
+  "git_head": "ea4f6b5b510c962f03096ad1ad5cd5e5b1615c95",
+  "inputs": [
+    {
+      "bytes": 51731,
+      "exists": true,
+      "path": "RUNBOOK.md",
+      "sha256": "7db9dfb5b7c263cb4c757341f360bf47de0508a4e6f19e3e2508e682c774ea39",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 39960,
+      "exists": true,
+      "path": "TOOLS.md",
+      "sha256": "960fc663ce7c0eddda00e4f177f368d47a593d371cfcf612f77dcd2b585fb3e9",
+      "verification": "current_local"
+    }
+  ],
+  "label": "deploy-record",
+  "log": "/home/ambudsharma/qwen36/voice-stack/voice-workspace-20260920/evidence/guarded-voice-workspace-20260920-20260920T171652Z-2475001.log",
+  "run_id": "voice-workspace-20260920-20260920T171652Z-2475001",
+  "schema_version": 2,
+  "source_fingerprint": "f19e9a5decc8b0f31facd128127d4a2aa74ec51c010f1963a83d4f8e005a483b",
+  "started_utc": "2026-09-20T17:16:54.177111982Z",
+  "status": "PASS"
+}

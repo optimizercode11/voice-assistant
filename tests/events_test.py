@@ -32,6 +32,7 @@ sys.path.insert(0, str(HERE.parent / 'tools'))
 sys.path.insert(0, str(HERE))
 
 import mcp_client
+import speech_ui
 from tool_loop_test import Upstream, answered, calling, socket_free_port
 
 assert os.environ.get('CUDA_VISIBLE_DEVICES') == ''
@@ -129,6 +130,45 @@ class EventStream:
         except OSError:
             pass
         self.connection.close()
+
+
+class SessionEventTests(unittest.TestCase):
+    def setUp(self):
+        self.events = speech_ui.Events()
+        self.queue, _ = self.events.subscribe()
+
+    def test_each_progress_event_keeps_its_session_identity(self):
+        identity = {"session_id": "backend", "session_name": "Backend", "context_id": "chat-1",
+                    "turn_id": "turn-1", "event_id": "notice-1", "state": "working"}
+        for method in (self.events.WORKING, self.events.TRACE, self.events.METHOD):
+            with self.subTest(method=method):
+                self.events.on_notification("codex", method, {**identity, "line": "reading code",
+                                             "spoken": "Finished", "instruction": "fix API",
+                                             "secret": "do not forward"})
+                event = self.queue.get_nowait()
+                for key, value in identity.items():
+                    self.assertEqual(event[key], value)
+                self.assertNotIn("secret", event)
+
+    def test_session_snapshot_has_only_bounded_display_fields(self):
+        self.events.on_notification("codex", self.events.SESSION, {
+            "context_id": "chat-2", "selected_session_id": "frontend", "spoken": "never speak this",
+            "session": {"session_id": "frontend", "name": "Front\x00end", "state": "idle",
+                        "working_on": "x" * 1200, "requires_attention": True, "secret": "token"}})
+        event = self.queue.get_nowait()
+        self.assertEqual(event["type"], "session")
+        self.assertEqual(event["context_id"], "chat-2")
+        self.assertEqual(event["selected_session_id"], "frontend")
+        self.assertEqual(event["session"]["name"], "Frontend")
+        self.assertEqual(len(event["session"]["working_on"]), 1000)
+        self.assertTrue(event["session"]["requires_attention"])
+        self.assertNotIn("spoken", event)
+        self.assertNotIn("secret", event["session"])
+
+    def test_malformed_session_and_unknown_notifications_are_dropped(self):
+        self.events.on_notification("codex", self.events.SESSION, {"session": {"name": "no id"}})
+        self.events.on_notification("codex", "notifications/message", {"session_id": "backend", "spoken": "ignored"})
+        self.assertTrue(self.queue.empty())
 
 
 class EventsTests(unittest.TestCase):

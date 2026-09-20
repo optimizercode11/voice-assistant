@@ -1,0 +1,42 @@
+{
+  "campaign": "voice-home-grounding-20260920",
+  "command": [
+    "python3",
+    "tools/voicectl.py",
+    "--config",
+    "config/host.toml",
+    "index",
+    "build"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "28-31",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stack/voice-home-grounding-20260920",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-20T17:37:31.060679445Z",
+  "git_head": "ea4f6b5b510c962f03096ad1ad5cd5e5b1615c95",
+  "inputs": [
+    {
+      "bytes": 52943,
+      "exists": true,
+      "path": "RUNBOOK.md",
+      "sha256": "e6176098992ef5c98bf353165a19ed2f1a10a1a2e445f866e27232ffc706d516",
+      "verification": "current_local"
+    }
+  ],
+  "label": "deploy-record",
+  "log": "/home/ambudsharma/qwen36/voice-stack/voice-home-grounding-20260920/evidence/guarded-voice-home-grounding-20260920-20260920T173729Z-2551194.log",
+  "run_id": "voice-home-grounding-20260920-20260920T173729Z-2551194",
+  "schema_version": 2,
+  "source_fingerprint": "5543c553463b5455ab4a17c47856e3856462faf1cff9b87d4ca07fd5b06742fc",
+  "started_utc": "2026-09-20T17:37:30.975994526Z",
+  "status": "PASS"
+}

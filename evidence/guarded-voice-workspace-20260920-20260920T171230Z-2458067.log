@@ -1,0 +1,60 @@
+guarded-run: campaign=voice-workspace-20260920 label=deploy-preflight mode=cpu cpus=28-31
+command: bash -c set\ -e\;\ python3\ deploy/prepare-service.py\;\ python3\ deploy/check_site.py\ --require-assets\;\ python3\ tools/voicectl.py\ --config\ config/host.toml\ index\ build\;\ python3\ tools/voicectl.py\ --config\ config/host.toml\ doctor\ --probe\;\ systemctl\ --user\ show\ voice-stack-gpu4.service\ -p\ ControlGroup
+Speech asset hashes verified; staged source fingerprint: f19e9a5decc8b0f31facd128127d4a2aa74ec51c010f1963a83d4f8e005a483b
+== site profile: /home/ambudsharma/qwen36/voice-stack/voice-workspace-20260920 unit=voice-stack-gpu4.service gpu=4 ==
+  ok   ports are unique: (8090, 8093, 8094, 8095)
+  ok   HTTP and HTTPS listeners use different ports
+  ok   campaign id is guard-safe: voice-workspace-20260920
+  ok   1 binaries are pinned by full sha256
+  ok   certificate and key are a pair in one directory
+  ok   unit WorkingDirectory=['%h/qwen36/voice-stack/voice-workspace-20260920'] points inside %h/qwen36/voice-stack/voice-workspace-20260920
+  ok   unit PIDFile=['%h/qwen36/voice-stack/voice-workspace-20260920/run/stack.pid'] points inside %h/qwen36/voice-stack/voice-workspace-20260920
+  ok   unit ExecStart=['/bin/bash %h/qwen36/voice-stack/voice-workspace-20260920/deploy/start-voice-stack.sh'] points inside %h/qwen36/voice-stack/voice-workspace-20260920
+  ok   unit ExecStart is the guarded start wrapper
+  ok   start wrapper takes campaign/device/inputs from site_config, not literals
+  ok   guard binds 108 inputs (checkpoints, binaries, source)
+  ok   inputs include checkpoint/config assets
+  ok   inputs include executables
+  ok   inputs include files from this checkout
+  ok   inputs bind tools/speech_ui.py
+  ok   inputs bind web/chat.html
+  ok   inputs bind web/chat.js
+  ok   inputs bind deploy/site_config.py
+  ok   inputs bind deploy/voice_stack.py
+  ok   all 108 bound inputs exist on this machine
+== PASS: 20 checks, 0 failures ==
+indexed 6 documents into 251 chunks in 0.025s at var/notes.sqlite
+tools (22): mcp__claude__send, mcp__claude__stop, mcp__claude__updates, mcp__codex__send, mcp__codex__updates, mcp__files__find, mcp__files__grep, mcp__files__list_dir, mcp__files__read_file, mcp__files__roots, mcp__stack__health, mcp__web__read_page, mcp__web__search, mcp__workspace__list_directory, mcp__workspace__make_directory, mcp__workspace__read_file, mcp__workspace__run_shell, mcp__workspace__write_file, now, pause_listening, request_directory, search_notes
+  mcp__claude__send                  mcp:claude
+  mcp__claude__stop                  mcp:claude
+  mcp__claude__updates               mcp:claude
+  mcp__codex__send                   mcp:codex
+  mcp__codex__updates                mcp:codex
+  mcp__files__find                   mcp:files
+  mcp__files__grep                   mcp:files
+  mcp__files__list_dir               mcp:files
+  mcp__files__read_file              mcp:files
+  mcp__files__roots                  mcp:files
+  mcp__stack__health                 mcp:stack
+  mcp__web__read_page                mcp:web
+  mcp__web__search                   mcp:web
+  mcp__workspace__list_directory     mcp:workspace
+  mcp__workspace__make_directory     mcp:workspace
+  mcp__workspace__read_file          mcp:workspace
+  mcp__workspace__run_shell          mcp:workspace
+  mcp__workspace__write_file         mcp:workspace
+  now                                builtin
+  pause_listening                    builtin
+  request_directory                  builtin
+  search_notes                       retrieval
+mcp:
+  stack            up    1 tools  restarts=0
+  web              up    2 tools  restarts=0
+  claude           up    3 tools  restarts=0
+  codex            up    2 tools  restarts=0
+  files            up    5 tools  restarts=0
+  workspace        up    5 tools  restarts=0
+limits: rounds=5 per_call=10.0s turn=600.0s result_chars=6000
+warn: ffmpeg is not on PATH; the bridge cannot decode uploads
+doctor: ok
+ControlGroup=/user.slice/user-1000.slice/user@1000.service/app.slice/voice-stack-gpu4.service

@@ -1,0 +1,64 @@
+{
+  "campaign": "codex-sessions-20260920",
+  "command": [
+    "python3",
+    "-u",
+    "deploy/campaigns/codex-sessions-20260920/acceptance.py",
+    "--workspace",
+    "/mnt/voice-workspace/validation-codex-sessions-20260920-a",
+    "--output",
+    "evidence/codex-sessions-20260920/live-acceptance.json"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "0-3",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/mnt/voice-assistant",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-20T19:26:52.412258181Z",
+  "git_head": "ea4f6b5b510c962f03096ad1ad5cd5e5b1615c95",
+  "inputs": [
+    {
+      "bytes": 28291,
+      "exists": true,
+      "path": "tools/codex_sessions.py",
+      "sha256": "fdfc5aa3516be5c8def0d80fea5eaeb836e89ab1aedae418239187fa0e9b9fc8",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 11928,
+      "exists": true,
+      "path": "tools/codex_app_server.py",
+      "sha256": "400217c593c28b18ce838a812588b7e42ae73d3754723bfab604cac7c93b5638",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 8540,
+      "exists": true,
+      "path": "tools/mcp_codex_sessions.py",
+      "sha256": "8eafcc0801a3a47cefd693101ecca9b9b879c33c974b64c2984680637ed77e05",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 28346,
+      "exists": true,
+      "path": "tools/voice_chat.py",
+      "sha256": "324739fd9cedffd6c9d7d94fb72410c84fb3c159b7a65f8f65f6dc1662c132aa",
+      "verification": "current_local"
+    }
+  ],
+  "label": "real-session-acceptance",
+  "log": "/mnt/voice-assistant/evidence/guarded-codex-sessions-20260920-20260920T192539Z-2951565.log",
+  "run_id": "codex-sessions-20260920-20260920T192539Z-2951565",
+  "schema_version": 2,
+  "source_fingerprint": "e0b9b4d525ceb4fae9f6a3a1875096d9f035776bbb37b91a676cd9dc70d098d7",
+  "started_utc": "2026-09-20T19:25:39.992781430Z",
+  "status": "PASS"
+}

@@ -3,6 +3,21 @@
 Two kinds, and the difference matters: the Python suites test the **bridge**,
 the browser suites test the **page**.  Neither runs a model.
 
+`make test-codex` includes the legacy exec adapter and the named-session stack:
+App Server transport, persistent manager, MCP tools, HTTP session routes, and
+the real voice-tool loop against a scripted model and subprocess Codex fixture.
+`voice_codex_sessions_browser.mjs` checks cards, conversation focus, two sessions
+finishing out of order, turn-specific pending indicators and attributed speech.
+The separate guarded live acceptance harness runs actual Qwen routing and
+actual Codex tasks in an isolated workspace; it is not part of offline tests.
+
+`tests/browser/voice_audio_output_browser.mjs` measures a nonzero waveform through
+the real Chromium output analyser before and after persisted page lifecycle
+events. It covers native-element and streamed gapless output, resuming an
+existing audio context on Send, and reconnecting updates once. This catches
+silent output that completion-only tests using silent WAVs cannot detect. It
+does not verify physical speakers or whether a browser admits a page to BFCache.
+
 ## Bridge contracts (CPU, no browser)
 
 ```bash
@@ -11,11 +26,19 @@ CUDA_VISIBLE_DEVICES="" python3 tests/voice_chat_test.py    #  5 tests   adapter
 CUDA_VISIBLE_DEVICES="" python3 tests/agent_tools_test.py   # 20 tests   registry, validator, config
 CUDA_VISIBLE_DEVICES="" python3 tests/retrieval_test.py     # 11 tests   FTS5 index, staleness, misses
 CUDA_VISIBLE_DEVICES="" python3 tests/mcp_test.py           # 12 tests   real stdio MCP peer
+CUDA_VISIBLE_DEVICES="" python3 tests/mcp_workspace_test.py # direct project files and shell, no coding agent
 CUDA_VISIBLE_DEVICES="" python3 tests/tool_loop_test.py     # 12 tests   the loop, over a real TLS bridge
 CUDA_VISIBLE_DEVICES="" python3 tests/mcp_claude_test.py    # 16 tests   Claude Code session server, over a fake `claude`
 CUDA_VISIBLE_DEVICES="" python3 tests/mcp_codex_test.py     # 18 tests   Codex-on-the-local-model server, over a fake `codex exec --json`
 CUDA_VISIBLE_DEVICES="" python3 tests/events_test.py        #  8 tests   /events: a finished turn pushed through the real bridge
 ```
+
+`make test-workspace` runs `mcp_workspace_test.py` against the direct
+`workspace` MCP server. It uses temporary directories and local shell
+commands, without SSH, Claude Code, Codex or model inference. The server's
+working directory is a default for paths, not a containment boundary; the
+separate read-only `files` server retains its root restrictions. Remote SSH
+setup is an additional deployment check, described in `TOOLS.md`.
 
 `mcp_test.py` is run under `-W error::ResourceWarning`: an MCP server is
 spawned and reaped many times, and a leaked pipe per restart is a real defect

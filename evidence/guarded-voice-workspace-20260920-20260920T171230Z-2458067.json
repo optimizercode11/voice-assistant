@@ -1,0 +1,53 @@
+{
+  "campaign": "voice-workspace-20260920",
+  "command": [
+    "bash",
+    "-c",
+    "set -e; python3 deploy/prepare-service.py; python3 deploy/check_site.py --require-assets; python3 tools/voicectl.py --config config/host.toml index build; python3 tools/voicectl.py --config config/host.toml doctor --probe; systemctl --user show voice-stack-gpu4.service -p ControlGroup"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "28-31",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stack/voice-workspace-20260920",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-20T17:12:39.778461084Z",
+  "git_head": "ea4f6b5b510c962f03096ad1ad5cd5e5b1615c95",
+  "inputs": [
+    {
+      "bytes": 12290,
+      "exists": true,
+      "path": "config/host.toml",
+      "sha256": "eed5799edd4d60c386d4be680d0e7feb339944b2717350f90dab9dcd6e2c68f2",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 18943,
+      "exists": true,
+      "path": "tools/mcp_workspace.py",
+      "sha256": "1dc286e033b950af3890d952c199933239ff6c6a80a4adbdea05e36d65594424",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 7338,
+      "exists": true,
+      "path": "deploy/site_config.py",
+      "sha256": "0ecf79ff5548d3d8e3da2ab35ea733aa5c08021613b19473cb825e0d9a9ef135",
+      "verification": "current_local"
+    }
+  ],
+  "label": "deploy-preflight",
+  "log": "/home/ambudsharma/qwen36/voice-stack/voice-workspace-20260920/evidence/guarded-voice-workspace-20260920-20260920T171230Z-2458067.log",
+  "run_id": "voice-workspace-20260920-20260920T171230Z-2458067",
+  "schema_version": 2,
+  "source_fingerprint": "f19e9a5decc8b0f31facd128127d4a2aa74ec51c010f1963a83d4f8e005a483b",
+  "started_utc": "2026-09-20T17:12:35.473560278Z",
+  "status": "PASS"
+}

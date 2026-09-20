@@ -1,0 +1,9 @@
+guarded-run: campaign=voice-home-grounding-20260920 label=candidate-check-fixed mode=cpu cpus=28-31
+command: bash -c set\ -e\;\ python3\ deploy/prepare-service.py\;\ python3\ deploy/campaigns/home-grounding-20260920/acceptance.py\ --candidate\ --output\ run/home-candidate.json
+Speech asset hashes verified; staged source fingerprint: 5543c553463b5455ab4a17c47856e3856462faf1cff9b87d4ca07fd5b06742fc
+home-1 PASS My home directory is `/home/ambudsharma`.
+home-2 PASS My home directory is /home/ambudsharma.
+home-3 PASS My home directory is /home/ambudsharma.
+cwd PASS My current working directory is /mnt/voice-workspace.
+account PASS My workspace tools on codex run under the user account “ambudsharma.”
+earlier-wrong-answer PASS My home directory is /home/ambudsharma.

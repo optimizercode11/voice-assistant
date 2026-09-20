@@ -1,0 +1,45 @@
+{
+  "campaign": "voice-workspace-20260920",
+  "command": [
+    "bash",
+    "deploy/campaigns/workspace-20260920/promote.sh"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "28-31",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stack/voice-workspace-20260920",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-20T17:13:16.477984381Z",
+  "git_head": "ea4f6b5b510c962f03096ad1ad5cd5e5b1615c95",
+  "inputs": [
+    {
+      "bytes": 1524,
+      "exists": true,
+      "path": "deploy/campaigns/workspace-20260920/promote.sh",
+      "sha256": "74a5ae23533ebe2e42f62cb53520ab6f6e54f6a3d7e6d58e5181eea7429db3e0",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 695,
+      "exists": true,
+      "path": "deploy/voice-stack-gpu4.service",
+      "sha256": "e8d5a994b08fcc4f94e8cbedb6dd378073448371d62d550347c7053147b42782",
+      "verification": "current_local"
+    }
+  ],
+  "label": "install",
+  "log": "/home/ambudsharma/qwen36/voice-stack/voice-workspace-20260920/evidence/guarded-voice-workspace-20260920-20260920T171257Z-2460012.log",
+  "run_id": "voice-workspace-20260920-20260920T171257Z-2460012",
+  "schema_version": 2,
+  "source_fingerprint": "f19e9a5decc8b0f31facd128127d4a2aa74ec51c010f1963a83d4f8e005a483b",
+  "started_utc": "2026-09-20T17:12:58.484542682Z",
+  "status": "PASS"
+}

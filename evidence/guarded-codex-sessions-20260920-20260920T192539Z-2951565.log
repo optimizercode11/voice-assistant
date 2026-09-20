@@ -1,0 +1,21 @@
+guarded-run: campaign=codex-sessions-20260920 label=real-session-acceptance mode=cpu cpus=0-3
+command: python3 -u deploy/campaigns/codex-sessions-20260920/acceptance.py --workspace /mnt/voice-workspace/validation-codex-sessions-20260920-a --output evidence/codex-sessions-20260920/live-acceptance.json
+VOICE: Create a Codex session named Backend in /mnt/voice-workspace/validation-codex-sessions-20260920-a/backend. Do not start work yet.
+REPLY: Created the Backend session in the requested directory. It's idle and ready; no work has been started.
+VOICE: Create a Codex session named Tests in /mnt/voice-workspace/validation-codex-sessions-20260920-a/tests. Do not start work yet.
+REPLY: Created the Codex session named Tests in that directory. It's idle and ready; no work has been started.
+VOICE: Switch the selected Codex session to Backend.
+REPLY: Done. The selected Codex session is now Backend, which is currently idle.
+VOICE: Tell the selected Codex session to implement arithmetic.py with add(a,b) returning a+b and test it with Python assertions including negative numbers. Work only in its project directory.
+REPLY: I've sent the task to the selected Backend session. It's now working on implementing arithmetic.py with add(a, b) and negative-number assertions, staying in its project directory.
+VOICE: Tell the selected Codex session to implement text_tools.py with reverse(text) returning the reversed string and test it with Python assertions including the empty string. Work only in its project directory.
+REPLY: I've sent the task to the Tests session. It's now working on implementing text_tools.py with the reverse function and assertions, including the empty string case.
+VOICE: What is the current status of the Backend Codex session?
+REPLY: The Backend session is idle and finished its last task. It implemented an `add` function in `arithmetic.py` with tests, including negative-number cases, and all five tests passed. No questions or errors are pending.
+VOICE: Steer the running Backend Codex task: after waiting, keep the final report to one sentence.
+REPLY: Steered the Backend session to keep its final report to one sentence after the wait completes.
+VOICE: Cancel the Backend Codex task now. Keep listening and leave Tests running.
+REPLY: I've requested cancellation of the Backend task. Tests is still running, and I'm still listening.
+VOICE: Read note.txt from your workspace directly.
+REPLY: I read it directly from /mnt/voice-workspace. The file contains one line: DIRECT_WORKSPACE_ACCEPTANCE.
+LIVE CODEX SESSION ACCEPTANCE PASS

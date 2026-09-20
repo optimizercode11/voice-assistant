@@ -1,0 +1,3 @@
+guarded-run: campaign=voice-home-grounding-20260920 label=deploy-record mode=cpu cpus=28-31
+command: python3 tools/voicectl.py --config config/host.toml index build
+indexed 6 documents into 253 chunks in 0.023s at var/notes.sqlite

@@ -1,0 +1,29 @@
+guarded-run: campaign=voice-codex-sessions-20260920 label=ssh-mcp-preflight mode=cpu cpus=28-31
+command: python3 -c $'import sys,json\nsys.path.insert(0,"tools")\nimport agent_config,mcp_client\nconfig=agent_config.load("config/host.toml")\nentry=next(x for x in config.mcp if x.name=="codex")\npeer=mcp_client.MCPServer(entry.name,entry.command,entry.args,entry.env,entry.timeout_seconds)\ntry:\n tools={t.name:t for t in peer.start()}\n assert set(tools)=={"create_session","list_sessions","select_session","send","status","steer","interrupt","answer","updates","archive_session"},list(tools)\n text,error=peer.call(tools["list_sessions"],{"context_id":"preflight"})\n assert not error,text\n print(json.dumps({"server":peer.server_info,"tools":sorted(tools),"state":json.loads(text)},indent=2))\nfinally:peer.stop()\n'
+{
+  "server": {
+    "name": "voice-codex-sessions",
+    "version": "1.0"
+  },
+  "tools": [
+    "answer",
+    "archive_session",
+    "create_session",
+    "interrupt",
+    "list_sessions",
+    "select_session",
+    "send",
+    "status",
+    "steer",
+    "updates"
+  ],
+  "state": {
+    "sessions": [],
+    "selected_session_id": null,
+    "context_id": "preflight",
+    "total": 0,
+    "next_offset": null,
+    "active": 0,
+    "max_active": 3
+  }
+}

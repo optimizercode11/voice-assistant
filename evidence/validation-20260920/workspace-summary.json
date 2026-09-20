@@ -1,0 +1,25 @@
+{
+  "command": "make test-workspace test-files",
+  "started_utc": "2026-09-20T17:41:19.756103+00:00",
+  "elapsed_seconds": 11.956,
+  "exit_status": 0,
+  "suites": [
+    {
+      "tests": 22,
+      "seconds": 11.573,
+      "name": "test-workspace"
+    },
+    {
+      "tests": 30,
+      "seconds": 0.285,
+      "name": "test-files"
+    }
+  ],
+  "tests_total": 52,
+  "warnings": [
+    "/mnt/voice-assistant/tests/mcp_files_test.py:179: SyntaxWarning: invalid escape sequence '\\s'"
+  ],
+  "log": "evidence/validation-20260920/workspace-cpu.log",
+  "fixtures": "isolated temporary directory, removed after run",
+  "failures": 0
+}

@@ -63,6 +63,7 @@ transition:opacity .09s linear,transform .09s ease-out}
 .approvals .granted{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:11px;color:var(--muted)}
 .approvals .granted button{font-size:11px;padding:3px 8px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer}
 .context-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.context-actions button{font-size:12px;padding:7px 12px}.context-note{font-size:12px;color:var(--muted);margin:6px 0}#compact-summary{font-size:12px;margin:8px 0}#compact-summary-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto}details[hidden]{display:none}
+.codex-sessions{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:12px}.codex-sessions h3{font-size:13px;margin:0 0 4px}.codex-sessions>p{font-size:12px;color:var(--muted);margin:0 0 8px}.codex-session-list{display:flex;gap:8px;overflow-x:auto}.codex-session{flex:0 0 175px;min-width:0;text-align:left;padding:9px 11px;background:var(--surface);border:1px solid var(--line);border-radius:9px;overflow-wrap:anywhere}.codex-session[aria-pressed="true"]{border-color:var(--green);background:var(--soft)}.codex-session strong,.codex-session small{display:block}.codex-session small{font-size:11px;color:var(--muted);margin-top:4px}.codex-state{font-size:11px;color:var(--green)}
 </style>
 </head>
 <body>
@@ -85,6 +86,7 @@ red skeleton = Ritz-Carlton</textarea></label><small id="corrections-note" role=
 <p id="compact-status" class="context-note" role="status"></p>
 <details id="compact-summary" hidden><summary>Context summary — full transcript kept below</summary><p class="context-note">Summaries can omit details. Recent turns are sent alongside this summary.</p><pre id="compact-summary-text"></pre></details>
 <div id="chats" class="chats" hidden aria-label="Saved conversations"></div>
+<div id="codex-sessions" class="codex-sessions" hidden aria-label="Codex sessions"><h3>Codex sessions</h3><p id="codex-selected" role="status">No session selected</p><div id="codex-session-list" class="codex-session-list"></div></div>
 <div id="approvals" class="approvals" hidden aria-live="polite"></div>
 <div id="messages" role="log" aria-live="polite"><div class="empty"><strong>What's on your mind?</strong><p>Start talking, or write a message below.</p></div></div>
 <details id="console" class="console" hidden><summary>Agent console <span id="console-note"></span><button type="button" id="console-clear">Clear</button></summary><pre id="console-log" aria-live="off"></pre></details>

@@ -1,0 +1,46 @@
+{
+  "campaign": "voice-validation-20260920",
+  "command": [
+    "python3",
+    "-c",
+    "import json, sys\nfrom pathlib import Path\nsys.path.insert(0, 'tools')\nimport agent_config, agent_tools, voice_chat, mcp_workspace\nconfig=agent_config.load('config/host.toml')\nconfig.retrieval.enabled=False\nconfig.approvals.enabled=False\nconfig.builtins={}\nregistry=agent_tools.Registry(config)\nspec=next(t for t in mcp_workspace.TOOLS if t['name']=='run_shell')\ndef unavailable(arguments, context):\n    return agent_tools.ToolResult(False, '', error='Workspace host is unavailable; no command was executed.')\nregistry._add(agent_tools.Tool('mcp__workspace__run_shell',spec['description'],spec['inputSchema'],unavailable,'mcp:workspace',read_only=False))\ncases=[\n  ('fresh',[{'role':'user','content':\"What's your home directory?\"}]),\n  ('wrong-history',[{'role':'user','content':\"What's your home directory?\"},{'role':'assistant','content':'My home directory is /home/voice.'},{'role':'user','content':\"What's your home directory?\"}])\n]\nrecords=[]\ntry:\n    for name,messages in cases:\n        result=voice_chat.turn('http://127.0.0.1:8080',json.dumps({'messages':messages}).encode(),lambda:False,registry=registry,limits=config.limits)\n        attempted=any(row['name']=='mcp__workspace__run_shell' and not row['ok'] for row in result['tools'])\n        assert attempted and not any(row['ok'] for row in result['tools']), result\n        records.append({'case':name,'simulated_error':'Workspace host is unavailable; no command was executed.','result':result})\n        print(name,json.dumps(result),flush=True)\nfinally:\n    registry.close()\n    Path('run/unavailable-tool.json').write_text(json.dumps(records,indent=2)+'\\n')\n"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "28-31",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-validation/voice-validation-20260920",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-20T17:43:04.071522194Z",
+  "git_head": "ea4f6b5b510c962f03096ad1ad5cd5e5b1615c95",
+  "inputs": [
+    {
+      "bytes": 12651,
+      "exists": true,
+      "path": "config/host.toml",
+      "sha256": "8d263ea2f05ec38fee48f9984bb94db8c2404487b4b5fa144a6ca0d935ddd3ad",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 26573,
+      "exists": true,
+      "path": "tools/voice_chat.py",
+      "sha256": "44f69853a63e4e1c6b0a00f1dffa004a168ca964a296620a9d1c9785ba2c30dc",
+      "verification": "current_local"
+    }
+  ],
+  "label": "unavailable-tool",
+  "log": "/home/ambudsharma/qwen36/voice-validation/voice-validation-20260920/evidence/guarded-voice-validation-20260920-20260920T174300Z-2572438.log",
+  "run_id": "voice-validation-20260920-20260920T174300Z-2572438",
+  "schema_version": 2,
+  "source_fingerprint": "5543c553463b5455ab4a17c47856e3856462faf1cff9b87d4ca07fd5b06742fc",
+  "started_utc": "2026-09-20T17:43:01.689315538Z",
+  "status": "PASS"
+}

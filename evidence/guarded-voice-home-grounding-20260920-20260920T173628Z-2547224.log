@@ -1,0 +1,8 @@
+guarded-run: campaign=voice-home-grounding-20260920 label=live-check mode=cpu cpus=28-31
+command: python3 deploy/campaigns/home-grounding-20260920/acceptance.py --output run/home-live.json
+home-1 PASS My home directory is /home/ambudsharma. My current working directory is /mnt/voice-workspace.
+home-2 PASS My home directory on the project machine is /home/ambudsharma.
+home-3 PASS My home directory is /home/ambudsharma.
+cwd PASS My current working directory is /mnt/voice-workspace.
+account PASS My computer tools run under the user account “ambudsharma.”
+earlier-wrong-answer PASS My home directory is /home/ambudsharma.

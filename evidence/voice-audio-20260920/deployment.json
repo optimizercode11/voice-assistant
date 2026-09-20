@@ -1,0 +1,13 @@
+{
+  "time": "2026-09-20T19:02:10.468612+00:00",
+  "target": "/home/ambudsharma/qwen36/voice-stack/voice-home-grounding-20260920/web/chat.js",
+  "old_sha256": "863d5346ac320cbc11153eadb2a9352dc97d7404e298c213a8c7cb982e95be10",
+  "new_sha256": "758e06e1de98a9dae452180c4b30c7d59475163450fcdf4df5cc867a1264e5f5",
+  "backup": "/home/ambudsharma/qwen36/voice-validation/browser-audio-fix-20260920/rollback/chat.js",
+  "https_matches": true,
+  "service_identities_unchanged": {
+    "voice-stack-gpu4.service": "MainPID=177991\nNRestarts=0\nActiveState=active",
+    "q38-server.service": "MainPID=1839\nNRestarts=0\nActiveState=active"
+  },
+  "deployment_kind": "atomic static asset update; no service restart"
+}

@@ -33,6 +33,17 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(config.fetch.enabled)
         self.assertEqual(config.mcp, [])
 
+    def test_host_routes_routine_project_operations_to_direct_tools(self):
+        config = agent_config.load(Path(__file__).resolve().parents[1] / 'config' / 'host.toml')
+        workspace = next(server for server in config.mcp if server.name == 'workspace')
+        self.assertTrue(workspace.enabled)
+        self.assertEqual((workspace.command, workspace.args), ('ssh', ['-T', 'codex-workspace']))
+        self.assertGreaterEqual(config.limits.per_call_seconds, 10)
+        where = '\n'.join(config.prompt.where)
+        self.assertIn('mcp__workspace__', where)
+        self.assertIn('do not silently send routine file or shell work to Claude Code', where)
+        self.assertNotIn('which only Claude Code reaches', where)
+
     def test_a_named_file_that_is_missing_is_fatal(self):
         with self.assertRaises(agent_config.ConfigError):
             agent_config.load(self.root / 'nope.toml')

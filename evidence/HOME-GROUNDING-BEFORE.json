@@ -1,0 +1,22 @@
+{
+  "actual_environment": {
+    "cwd": "/mnt/voice-workspace",
+    "stdout": "HOME=/home/ambudsharma\nCWD=/mnt/voice-workspace\nUSER=ambudsharma\nHOST=codex\n",
+    "stderr": "",
+    "exit_code": 0,
+    "timed_out": false,
+    "truncated": false
+  },
+  "question": "What's your home directory?",
+  "response": {
+    "text": "My default working directory on codex is /mnt/voice-workspace.",
+    "usage": {
+      "prompt_tokens": 4834,
+      "completion_tokens": 15,
+      "total_tokens": 4849
+    },
+    "tools": [],
+    "sources": [],
+    "controls": {}
+  }
+}

@@ -1,0 +1,5 @@
+guarded-run: campaign=voice-home-grounding-20260920 label=install mode=cpu cpus=28-31
+command: bash deploy/update-service.sh
+indexed 6 documents into 252 chunks in 0.017s at var/notes.sqlite
+active
+enabled

@@ -109,7 +109,7 @@ CHAT_URL = f"https://{LAN_ORIGIN}:{HTTPS_PORT}/chat"
 STUDIO_URL = f"https://{LAN_ORIGIN}:{HTTPS_PORT}/"
 
 # The G2P sidecar and kserver meet on this unix socket.
-G2P_SOCKET = _text("VOICE_G2P_SOCKET", "/tmp/kokoro-voice-stop-turns-20260920.sock")
+G2P_SOCKET = _text("VOICE_G2P_SOCKET", "/tmp/kokoro-voice-codex-sessions-20260920.sock")
 
 # --------------------------------------------------------------------------
 # Device authorization.  GPU 4 is the voice stack's authorized device; the
@@ -124,9 +124,9 @@ NICE = 10
 # The live deployment: where the checkout is installed on the host, the unit
 # that owns it, and the campaign its guarded start records evidence under.
 # --------------------------------------------------------------------------
-DEPLOY_ROOT = _path("VOICE_DEPLOY_ROOT", str(HOST_ROOT / "voice-stack/voice-stop-turns-20260920"))
+DEPLOY_ROOT = _path("VOICE_DEPLOY_ROOT", str(HOST_ROOT / "voice-stack/voice-codex-sessions-20260920"))
 UNIT = _text("VOICE_UNIT", "voice-stack-gpu4.service")
-CAMPAIGN = _text("VOICE_CAMPAIGN", "voice-stop-turns-20260920")
+CAMPAIGN = _text("VOICE_CAMPAIGN", "voice-codex-sessions-20260920")
 # Written by the deploy campaign; the supervisor's evidence lands beside it.
 DEPLOY_RECORDS = DEPLOY_ROOT / "evidence/deploy-voice-gpu4"
 
@@ -140,7 +140,7 @@ TOOLS_CONFIG = _text("VOICE_TOOLS_CONFIG", "config/host.toml")
 # Compatibility wrapper uses the same public ports and external LLM.
 TOOLS_HTTP_PORT = 8093
 TOOLS_HTTPS_PORT = 8094
-TOOLS_CAMPAIGN = _text("VOICE_TOOLS_CAMPAIGN", "voice-stop-turns-20260920")
+TOOLS_CAMPAIGN = _text("VOICE_TOOLS_CAMPAIGN", "voice-codex-sessions-20260920")
 
 # The 27B server has two active slots; additional app requests wait boundedly.
 CHAT_CONCURRENCY = 2

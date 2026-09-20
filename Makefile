@@ -8,7 +8,7 @@ CPU = CUDA_VISIBLE_DEVICES=""
 NODE   ?= /tmp/kokoro-playback-browser/node_modules/.bin/node
 PLAYWRIGHT ?= /tmp/kokoro-playback-browser/node_modules/playwright/index.mjs
 
-.PHONY: help test test-bridge test-chat test-tools test-retrieval test-mcp test-files test-web test-claude test-codex test-events test-approvals \
+.PHONY: help test test-bridge test-chat test-tools test-retrieval test-mcp test-files test-workspace test-web test-claude test-codex test-events test-approvals \
         test-barge test-echo test-loop test-speech test-browser \
         sabotage sabotage-selftest check check-site doctor fingerprint inputs
 
@@ -22,7 +22,7 @@ help:
 	                '  check         everything that runs offline' \
 	                '  inputs        the asset list a guarded start binds with --input'
 
-test: test-bridge test-chat test-retrieval test-tools test-mcp test-files test-web test-claude test-codex test-events test-approvals test-barge \
+test: test-bridge test-chat test-retrieval test-tools test-mcp test-files test-workspace test-web test-claude test-codex test-events test-approvals test-barge \
       test-echo test-loop test-turn test-speech
 
 test-bridge:
@@ -51,6 +51,9 @@ test-mcp:
 test-files:
 	$(CPU) $(PYTHON) -W error::ResourceWarning -u tests/mcp_files_test.py
 
+test-workspace:
+	$(CPU) $(PYTHON) -W error::ResourceWarning -u tests/mcp_workspace_test.py
+
 test-web:
 	$(CPU) $(PYTHON) -W error::ResourceWarning -u tests/mcp_web_test.py
 
@@ -66,6 +69,11 @@ test-claude:
 # -c overrides (resume rejects --profile), stdin closed (the CLI blocks on it).
 test-codex:
 	$(CPU) $(PYTHON) -W error::ResourceWarning -u tests/mcp_codex_test.py
+	$(CPU) $(PYTHON) -W error::ResourceWarning -u tests/codex_app_server_test.py
+	$(CPU) $(PYTHON) -W error::ResourceWarning -u tests/codex_sessions_test.py
+	$(CPU) $(PYTHON) -W error::ResourceWarning -u tests/mcp_codex_sessions_test.py
+	$(CPU) $(PYTHON) -W error::ResourceWarning -u tests/codex_routes_test.py
+	$(CPU) $(PYTHON) -W error::ResourceWarning -u tests/codex_voice_loop_test.py
 
 # The bridge speaking first: a finished Claude Code turn becomes a notification
 # up the MCP pipe and a server-sent event to every open page, over the real
@@ -111,7 +119,7 @@ doctor:
 	$(CPU) $(PYTHON) -u tools/voicectl.py --config config/assistant.toml doctor
 
 test-browser:
-	@for suite in voice_recovery_browser voice_chat_browser voice_carry_browser voice_barge_browser voice_controls_browser voice_language_browser stt_browser voice_tools_browser voice_think_browser voice_tts_browser voice_history_browser voice_compact_browser voice_pause_browser voice_push_browser voice_wake_browser voice_silence_browser; do \
+	@for suite in voice_codex_sessions_browser voice_audio_output_browser voice_recovery_browser voice_chat_browser voice_carry_browser voice_barge_browser voice_controls_browser voice_language_browser stt_browser voice_tools_browser voice_think_browser voice_tts_browser voice_history_browser voice_compact_browser voice_pause_browser voice_push_browser voice_wake_browser voice_silence_browser; do \
 	  echo "== $$suite =="; \
 	  $(CPU) PLAYWRIGHT="$(PLAYWRIGHT)" "$(NODE)" tests/browser/$$suite.mjs || exit 1; \
 	done

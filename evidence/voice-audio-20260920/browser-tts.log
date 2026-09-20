@@ -1,0 +1,3 @@
+speech stats {"gapless":3,"element":0}
+ASSERTIONS COMPLETE: browser reply pipelining
+PASS chromium: multi-sentence reply pipelined (6 requests, first bite 19 chars), word-for-word lossless, single sentence unsplit, no per-sentence stall label

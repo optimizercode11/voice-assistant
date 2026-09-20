@@ -42,6 +42,7 @@ class MCPTool:
     tool_name: str                  # mcp__<server>__<name>, what the model sees
     description: str
     input_schema: dict = field(default_factory=dict)
+    read_only: bool = False
 
 
 def _text_of(result) -> tuple[str, bool]:
@@ -141,9 +142,12 @@ class MCPServer:
             if row["name"] in self.deny:
                 continue
             schema = row.get("inputSchema")
+            annotations = row.get("annotations")
+            read_only = isinstance(annotations, dict) and annotations.get("readOnlyHint") is True
             captured.append(MCPTool(self.name, row["name"], visible,
                                     str(row.get("description") or "")[:1000],
-                                    schema if isinstance(schema, dict) else {"type": "object"}))
+                                    schema if isinstance(schema, dict) else {"type": "object"},
+                                    read_only=read_only))
         # Captured once, here.  Mid-turn re-listing is the hole this closes.
         self.tools = captured
         self.state = "ready"

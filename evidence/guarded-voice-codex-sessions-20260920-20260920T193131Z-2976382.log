@@ -1,0 +1,5 @@
+guarded-run: campaign=voice-codex-sessions-20260920 label=promote mode=cpu cpus=28-31
+command: bash deploy/update-service.sh
+indexed 6 documents into 260 chunks in 0.019s at var/notes.sqlite
+active
+enabled

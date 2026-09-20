@@ -1,0 +1,45 @@
+{
+  "campaign": "voice-codex-sessions-20260920",
+  "command": [
+    "bash",
+    "deploy/update-service.sh"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "28-31",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stack/voice-codex-sessions-20260920",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-20T19:31:51.549993988Z",
+  "git_head": "ea4f6b5b510c962f03096ad1ad5cd5e5b1615c95",
+  "inputs": [
+    {
+      "bytes": 7358,
+      "exists": true,
+      "path": "deploy/site_config.py",
+      "sha256": "f51a90c691a3a4801d02573e904581ff051be1229f02c2817d9939dc72e1e46d",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 710,
+      "exists": true,
+      "path": "deploy/voice-stack-gpu4.service",
+      "sha256": "cb5730a8ad056296f9b7248903cde65524f892ff5745759a4b0b127601022161",
+      "verification": "current_local"
+    }
+  ],
+  "label": "promote",
+  "log": "/home/ambudsharma/qwen36/voice-stack/voice-codex-sessions-20260920/evidence/guarded-voice-codex-sessions-20260920-20260920T193131Z-2976382.log",
+  "run_id": "voice-codex-sessions-20260920-20260920T193131Z-2976382",
+  "schema_version": 2,
+  "source_fingerprint": "3ce06259100ebd912492839262aa083e378e6c9f994bfc5db477c7dd36d3f383",
+  "started_utc": "2026-09-20T19:31:32.483159168Z",
+  "status": "PASS"
+}

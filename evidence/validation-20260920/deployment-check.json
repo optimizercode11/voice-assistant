@@ -1,0 +1,30 @@
+{
+  "source_files": [
+    {
+      "path": "tools/voice_chat.py",
+      "sha256": "44f69853a63e4e1c6b0a00f1dffa004a168ca964a296620a9d1c9785ba2c30dc",
+      "matches_local": true
+    },
+    {
+      "path": "tools/mcp_client.py",
+      "sha256": "49db894cfe143db4977e8a1b2fb27c4658f627a747123a419a60358b94998f21",
+      "matches_local": true
+    },
+    {
+      "path": "tools/agent_tools.py",
+      "sha256": "d78bd5e90677dbb7db2117f12e63358bff9d3d6de80e47ea9bfc43e92c541bb4",
+      "matches_local": true
+    },
+    {
+      "path": "tools/mcp_workspace.py",
+      "sha256": "1dc286e033b950af3890d952c199933239ff6c6a80a4adbdea05e36d65594424",
+      "matches_local": true
+    },
+    {
+      "path": "config/host.toml",
+      "sha256": "8d263ea2f05ec38fee48f9984bb94db8c2404487b4b5fa144a6ca0d935ddd3ad",
+      "matches_local": true
+    }
+  ],
+  "status": "MainPID=177991\nNRestarts=0\nId=voice-stack-gpu4.service\nActiveState=active\n\nMainPID=1839\nNRestarts=0\nId=q38-server.service\nActiveState=active\n\nMainPID=0\nNRestarts=0\nId=q36-server.service\nActiveState=inactive\n"
+}

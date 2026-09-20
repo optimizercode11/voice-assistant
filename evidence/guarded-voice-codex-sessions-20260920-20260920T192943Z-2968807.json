@@ -1,0 +1,66 @@
+{
+  "campaign": "voice-codex-sessions-20260920",
+  "command": [
+    "python3",
+    "deploy/prepare-service.py"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "28-31",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/home/ambudsharma/qwen36/voice-stack/voice-codex-sessions-20260920",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-20T19:29:51.696673449Z",
+  "git_head": "ea4f6b5b510c962f03096ad1ad5cd5e5b1615c95",
+  "inputs": [
+    {
+      "bytes": 8540,
+      "exists": true,
+      "path": "tools/mcp_codex_sessions.py",
+      "sha256": "8eafcc0801a3a47cefd693101ecca9b9b879c33c974b64c2984680637ed77e05",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 28291,
+      "exists": true,
+      "path": "tools/codex_sessions.py",
+      "sha256": "fdfc5aa3516be5c8def0d80fea5eaeb836e89ab1aedae418239187fa0e9b9fc8",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 56761,
+      "exists": true,
+      "path": "tools/speech_ui.py",
+      "sha256": "57b554e4ae84cf0a243ad04b04005b3141d6a8f37eae3a5165b9cbdfe193f804",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 121463,
+      "exists": true,
+      "path": "web/chat.js",
+      "sha256": "9a444d7cbbb0cf8440d031aba5c1369972b6e6852ea56898dd7c4dd22d9792ff",
+      "verification": "current_local"
+    },
+    {
+      "bytes": 7358,
+      "exists": true,
+      "path": "deploy/site_config.py",
+      "sha256": "f51a90c691a3a4801d02573e904581ff051be1229f02c2817d9939dc72e1e46d",
+      "verification": "current_local"
+    }
+  ],
+  "label": "prepare",
+  "log": "/home/ambudsharma/qwen36/voice-stack/voice-codex-sessions-20260920/evidence/guarded-voice-codex-sessions-20260920-20260920T192943Z-2968807.log",
+  "run_id": "voice-codex-sessions-20260920-20260920T192943Z-2968807",
+  "schema_version": 2,
+  "source_fingerprint": "3ce06259100ebd912492839262aa083e378e6c9f994bfc5db477c7dd36d3f383",
+  "started_utc": "2026-09-20T19:29:48.595492915Z",
+  "status": "PASS"
+}

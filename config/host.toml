@@ -5,9 +5,8 @@
 # say so, with the file named in the reply.  The MCP server is a real second
 # process that reports the stack's own health.
 #
-# Nothing here writes, deletes, or leaves the machine.  It does *read* local
-# files now, which is the one capability worth reading twice about -- see the
-# [mcp.server] named "files" at the bottom for what is actually exposed.
+# The workspace server directly reads/writes files and runs short shell commands
+# on codex. The files server remains read-only on this GPU bridge host.
 
 [limits]
 # 5, not 2: measured live, "look at that folder" is roots -> request_directory
@@ -21,25 +20,16 @@ result_chars = 6000
 turn_seconds = 600
 generation_seconds = 600
 
-# Where things are.  The tool schemas say how to call a tool and the `purpose`
-# lines say what a server is for; neither can say WHICH MACHINE a server sees,
-# and on this deployment that is the whole question.  The "files" server below
-# reads this host's disk (vllm: the deployed tree, plus whatever a person
-# approved on the page -- and /mnt here is a directory of model weights, not
-# the user's projects).  The user's repositories live on codex, reachable only
-# through the "claude" server.  Without these lines "look up my inference
-# engine project in /mnt" went to the file tools twelve times out of twelve,
-# found vllm's /mnt/engine2, and "read the readme of the inference engine
-# project" read this repository's README instead (2026-09-12, Flash-Next with
-# reasoning off).  With them, sixteen of sixteen project requests went to
-# Claude Code and the local questions (the bridge port, the runbook, the
-# deployed folder) stayed local.  Each line is sent on every turn: keep them
-# few and plain.
+# The bridge host and the user's project host have different disks. Routine
+# project operations use direct tools over SSH, without another model session.
 [prompt]
 where = [
-  "The user's own projects, repositories and code (the inference engine, everything under /mnt and the home directory on the user's computer) live on the user's computer, which only Claude Code reaches. Any request about them, even just finding a project, reading its README or a file, or summarising it, goes to mcp__claude__send; the files tools cannot see them.",
-  "The files tools and search_notes see only this bridge host: the deployed voice-stack tree, its docs, and folders approved on the page.",
-  "Two coding agents run on the user's computer: Claude Code (mcp__claude__send) and Codex on the local Flash-Next model (mcp__codex__send). Use Codex only when the user says Codex or asks for the local model; otherwise use Claude Code.",
+  "The user's projects, repositories, /mnt and home directory are on codex. Use mcp__workspace__list_directory, read_file, write_file, make_directory and run_shell there for routine file operations and short commands. These tools execute directly without Claude Code.",
+  "Your default working directory is /mnt/voice-workspace on codex. Save new notes, lists, documents and other output there unless the user names another location. Relative paths resolve there. For existing projects, use the project's actual path rather than copying it into your workspace.",
+  "Questions about your home directory, current directory or account refer to the workspace tools on codex. Before answering, use mcp__workspace__run_shell to inspect HOME, pwd or id -un as appropriate. HOME is the OS account's home; /mnt/voice-workspace is the separate default working directory. Earlier assistant claims about these paths are not evidence.",
+  "The files tools and search_notes see only this bridge host: the deployed voice-stack tree, its docs, and folders approved on the page. They cannot access the user's project machine.",
+  "Basic computer tasks use workspace tools. Delegate substantial coding or explicit Claude requests to Claude Code. For Codex, use named-session tools: list_sessions, create_session, select_session, send, status, steer, interrupt. Unnamed Codex follow-ups use this conversation's selected session. Background updates never select a session. Verify progress with tools; accepted is not completed.",
+  "If workspace tools are unavailable, say so; do not silently send routine file or shell work to Claude Code. The workspace shell is for short commands, with an eight-second maximum; do not start background jobs to evade its timeout.",
 ]
 
 [builtins]
@@ -182,37 +172,44 @@ enabled = true
 # page hears about finished work only when someone asks.
 [[mcp.server]]
 name = "claude"
-purpose = "the user's own projects, repositories and code live on the user's computer, which only Claude Code reaches: send hands it any request to find, look up, read, summarise, explain or change them (the answer is pushed back and spoken when ready); stop cancels its current and queued work without pausing the microphone; updates says what it has done since; use detail only when the user asks for specifics"
+purpose = "delegate only substantial engineering/coding or explicit Claude Code requests; basic computer tasks use workspace tools. send starts work; updates reports progress; stop cancels Claude work without pausing the microphone"
 command = "ssh"
 args = ["-T", "codex-claude"]
 timeout_seconds = 20
 enabled = true
 
-# Guiding Codex by voice, on the local model (2026-09-12).
-#
-# The same two tools as the `claude` server, folded as mcp__codex__send and
-# mcp__codex__updates, fronting `codex exec` on codex with the `q38f` profile:
-# Qwen3.8-Flash-Next on this host's port 8038, the model that also answers the
-# voice turn.  Same transport (a second single-purpose key, alias
-# `codex-codex`, forced to `python3 .../tools/mcp_codex.py --codex ... --profile
-# q38f --cwd ~ --add-dir /mnt --push`), same push route to the page.  Codex's
-# own sandbox cannot start on codex (bubblewrap is refused by the kernel), so
-# the server runs it with approvals and sandbox bypassed, the operator's
-# decision as for Claude Code.  The model picks between the two agents from
-# the `where` lines above: Codex only when named or when the local model is
-# asked for.  TOOLS.md, "Guiding Codex by voice".
+# Named Codex sessions (2026-09-20), using App Server and the pinned q38f
+# profile: Qwen3.8-Flash-Next on port8038. The voice router uses Q38-27B on8080.
+# A dedicated SSH key/alias codex-sessions is forced to mcp_codex_sessions.py
+# on codex. SQLite state lives in /mnt/voice-workspace/.codex-sessions.
+# The existing full-access policy is retained; this is not a filesystem sandbox.
+# Up to three managed workers, with nested agent spawning disabled. The older
+# one-thread adapter/key remain available for rollback. See TOOLS.md.
 [[mcp.server]]
 name = "codex"
-purpose = "hand a spoken instruction to Codex, the coding agent on the user's computer that runs on the local Flash-Next model (send), and hear what it has done since (updates); only when the user says Codex or asks for the local model"
+purpose = "manage named Codex coding sessions on the user's project machine: create/list/select, send a task, steer running work, read status/updates, answer a pending question, interrupt or archive. The configured local Flash-Next profile stays pinned. Routine files and shell use workspace tools"
 command = "ssh"
-args = ["-T", "codex-codex"]
+args = ["-T", "codex-sessions"]
 timeout_seconds = 20
 enabled = true
 
 [[mcp.server]]
 name = "files"
-purpose = "list, read and grep files on this bridge host only (the deployed voice-stack tree and folders approved on the page); the user's projects and repositories are NOT on this host, so send those to Claude Code instead"
+purpose = "list, read and grep files on this bridge host only (the deployed voice-stack tree and folders approved on the page); use workspace tools for the user's projects on codex"
 command = "python3"
 args = ["tools/mcp_files.py", "--root", ".", "--roots-file", "var/approvals.json"]
 timeout_seconds = 20
+enabled = true
+
+# Direct filesystem and shell operations on the project machine. This SSH
+# alias uses its own forced-command key, running
+# mcp_workspace.py --cwd /mnt/voice-workspace.
+# See TOOLS.md for transport setup. cwd is a starting directory, not a sandbox:
+# calls have the SSH account's filesystem and shell permissions.
+[[mcp.server]]
+name = "workspace"
+purpose = "directly list/read/write files, create directories and run short shell commands on codex, the user's project machine; no coding-agent session. Default working and output directory: /mnt/voice-workspace. Shell timeout at most eight seconds"
+command = "ssh"
+args = ["-T", "codex-workspace"]
+timeout_seconds = 10
 enabled = true

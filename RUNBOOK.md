@@ -1,13 +1,132 @@
 # Runbook
 
-## Four-second idle pause (local update, 2026-09-20)
+## Named Codex sessions (deployed, 2026-09-20)
+
+Campaign `voice-codex-sessions-20260920` deployed at 19:31 UTC to
+`vllm:~/qwen36/voice-stack/voice-codex-sessions-20260920`, retaining the browser
+audio recovery fix. The active user unit is `voice-stack-gpu4.service`; the
+tools bridge runs inside that stack, rather than the separate historical
+`voice-tools-bridge.service`. HTTPS remains on port 8094. Reload existing tabs
+to load the session cards.
+
+Ten Codex tools create, list, select, send, inspect status, steer, interrupt,
+answer questions, fetch updates, and archive named sessions. Each browser
+conversation has its own selection. Default project directories are
+`/mnt/voice-workspace/sessions/<session-id>` on codex; persistent manager state
+is `/mnt/voice-workspace/.codex-sessions`. The `codex-sessions` SSH alias uses a
+dedicated forced command running `tools/mcp_codex_sessions.py` with profile
+`q38f`. Routine file and shell operations continue to use workspace tools.
+
+The manager admits at most three active managed workers, disables nested
+Codex agents, and rejects concurrent overlapping project directories. It does
+not count unrelated CLI sessions. Browser reloads preserve tasks; manager
+restarts interrupt active tasks and retain thread history for the next send.
+Archiving an inactive session preserves its files and native Codex history.
+
+Validation passed: 117 CPU tests, 19 site checks, two deployment ownership
+tests, three browser suites, nine candidate and eight deployed real-model
+tool-routing turns, and the deployment ASR/TTS smoke test. Actual coding
+artifacts were independently checked. The startup guard reported clean
+containment; source fingerprint is
+`3ce06259100ebd912492839262aa083e378e6c9f994bfc5db477c7dd36d3f383`.
+See [validation report](evidence/codex-sessions-20260920/REPORT.md).
+
+After acceptance, at 19:33:39 UTC, the separately managed Q38 voice model was
+stopped while an independent GPU2 experiment was running. Subsequent
+inspection found `q38-server.service` failed, no listener on port 8080, and
+the new voice stack still active. This blocks voice model replies despite
+healthy speech services. Coordinate with the GPU2 experiment owner before
+restoring Q38; do not start a competing model on that GPU.
+
+The previous unit is retained at the new deployment root's
+`rollback/voice-unit.service`; its `voice-home-grounding-20260920` tree and
+legacy `codex-codex` SSH alias remain available. This rollback does not restore
+the independently managed Q38 service.
+
+## Browser audio restore (deployed, 2026-09-20)
+
+At 19:02 UTC, campaign `browser-audio-fix-20260920` atomically updated only
+`web/chat.js` in the existing `voice-home-grounding-20260920` deployment. HTTPS
+serves SHA256 `758e06e1de98a9dae452180c4b30c7d59475163450fcdf4df5cc867a1264e5f5`.
+The original startup source fingerprint describes the base deployment; this
+static asset update is recorded separately in
+`evidence/guarded-browser-audio-fix-20260920-20260920T190208Z-2859053.json`.
+Voice MainPID177991 and Q38 MainPID1839 remained active, with no restarts.
+
+A persisted pagehide now suspends the existing audio graph instead of closing
+it permanently. The next Send/Start resumes that graph, and pageshow reconnects
+agent updates. Existing open tabs need a reload to receive the fix. The new
+nonzero-waveform browser regression failed before the fix and passes after it
+for both native-element and gapless playback. Audio recovery and spoken-update
+browser suites also pass. See `evidence/voice-audio-20260920/graph-audit.md`.
+
+The previous asset is retained at
+`vllm:~/qwen36/voice-validation/browser-audio-fix-20260920/rollback/chat.js`.
+Rollback is an atomic restore of that file to the current deployment's
+`web/chat.js`, followed by a browser reload; a model restart is unnecessary.
+
+## Environment answers (deployed, 2026-09-20)
+
+Campaign `voice-home-grounding-20260920` deployed at 17:36 UTC on the same
+GPU4 voice unit and HTTPS8094 origin. The user reported an invented home path,
+`/home/voice`; an independent reproduction answered with the workspace path
+without making any tool call. The actual project account HOME is
+`/home/ambudsharma`, and its working directory is `/mnt/voice-workspace`.
+
+The prompt now requires checking the appropriate host's tools for environment
+facts, distinguishes HOME from cwd, and rejects previous assistant claims as
+evidence. Six candidate and six deployed tests checked home (three independent
+turns), cwd, account, and a chat containing the earlier incorrect answer. Every
+case called the direct shell successfully and returned the verified value.
+This is prompt-level guidance, not a deterministic application gate against
+every unsupported statement. See [evidence](evidence/HOME-GROUNDING.md).
+
+The new deployment root is `~/qwen36/voice-stack/voice-home-grounding-20260920`.
+Fresh GPU4 and speech acceptance passed; Q38 MainPID1839 was unchanged.
+The previous workspace deployment remains available via the new root's
+`rollback/voice-unit.service`.
+
+## Direct file and shell tools (deployed, 2026-09-20)
+
+The source now provides `workspace` tools for reading/writing files, creating
+and listing directories, and running short shell commands directly on codex.
+The host prompt prefers these tools for routine project operations; Claude Code
+is reserved for substantial engineering/coding and explicit requests. New files
+default to `/mnt/voice-workspace` on codex unless the user names another location.
+Commands have bounded output and a maximum eight-second timeout with
+process-group cleanup. Transport EOF also cancels active shell commands.
+
+Deployed at 17:13 UTC as campaign `voice-workspace-20260920`, from
+`~/qwen36/voice-stack/voice-workspace-20260920`. The service is active/enabled
+with zero restarts. The separate `codex-workspace` SSH key/alias is installed;
+its forced command runs
+`/mnt/voice-assistant/tools/mcp_workspace.py --cwd /mnt/voice-workspace`
+on codex. Existing Claude/Codex keys and GPU-host read-only file tools are
+retained. The working directory is not a sandbox; tools run with the project
+account's permissions. Transport setup and limits are in
+[TOOLS.md](TOOLS.md#direct-project-operations-toolsmcp_workspacepy).
+
+The old boot left the previous supervisor running after its GPU guard rejected
+unrelated services initializing concurrently. Promotion gracefully stopped
+only the failed voice unit's remaining processes before installing the new
+unit. GPU4 acceptance is CLEAN; Q38 MainPID1839 stayed unchanged and Q36
+remained inactive/disabled. The previous unit and approvals are saved under
+the new tree's `rollback/`.
+
+Live typed requests exercised all five workspace tools with no Claude/Codex
+calls; actual saved bytes were checked on codex. A separate request without an
+absolute directory saved into `/mnt/voice-workspace`, and a direct `pwd`
+confirmed the shell default. English/Hindi speech and ASR round trip passed.
+The direct server has 22 passing CPU tests, including timeout, concurrent calls
+and transport-disconnect cleanup. See [deployment evidence](evidence/WORKSPACE-DEPLOYMENT.md).
+
+## Four-second idle pause (deployed, 2026-09-20)
 
 Campaign: `voice-idle4-20260920`. The current source defaults idle pause to four
 seconds and migrates browsers using either previous default. Custom timeouts and
 new explicit zero (continuous listening) choices persist. Resume, Space, typed
-replies, and agent updates retain their recovery behavior. Deployment is pending
-because the owner is shutting down `vllm`; the live deployment described below
-still uses the previous default until this update is deployed.
+replies, and agent updates retain their recovery behavior. This source update
+shipped with `voice-workspace-20260920` at 17:13 UTC.
 
 ## Voice stability and Claude stop (2026-09-20)
 

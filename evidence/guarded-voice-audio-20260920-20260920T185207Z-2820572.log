@@ -1,0 +1,12 @@
+guarded-run: campaign=voice-audio-20260920 label=bella-roundtrip mode=cpu cpus=28-31
+command: python3 -c $'import sys,json,datetime\nsys.path.insert(0,"deploy")\nimport voice_stack as v\ndata=v.request("/tts?format=wav&language=a&voice=af_bella&speed=1.2", b"The quick brown fox jumps over the lazy dog.")\nstats=v.audio(data)\ntranscript=json.loads(v.request("/stt",data))["text"]\nassert "quick brown fox" in transcript.lower(), transcript\nprint(json.dumps({"time":datetime.datetime.now(datetime.timezone.utc).isoformat(),"voice":"af_bella","bytes":len(data),"seconds":stats["frames"]/24000,**stats,"transcript":transcript,"passed":True},indent=2))\n'
+{
+  "time": "2026-09-20T18:52:08.822760+00:00",
+  "voice": "af_bella",
+  "bytes": 145244,
+  "seconds": 3.025,
+  "frames": 72600,
+  "rms": 0.046416933760250356,
+  "transcript": "The quick brown fox jumps over the lazy dog.",
+  "passed": true
+}

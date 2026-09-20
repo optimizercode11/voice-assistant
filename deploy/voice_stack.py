@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Restore the pinned GPU-2 voice stack; invoked by the guarded systemd unit."""
+"""Start speech on GPU 4 using the independently managed GPU-2 LLM; invoked by the guarded systemd unit."""
 import array
 import hashlib
 import http.client
@@ -54,9 +54,6 @@ def digest(path):
 
 def inputs():
     return list(PINNED) + [FFMPEG, CERT, LANG/'runtime/languages-manifest.json',
-        QMODEL/'model.safetensors', QMODEL/'config.json', QMODEL/'q38_tok.bin',
-        QMODEL/'chat_template.jinja', AMODEL/'config.json', AMODEL/'model.safetensors.index.json',
-        *sorted(AMODEL.glob('model-*.safetensors')), site.ASR_TOKENIZER,
         site.TTS_CONFIG, site.TTS_WEIGHTS, site.TTS_REF_S,
         *sorted(site.TTS_VOICES.glob('*.npy')),
         *sorted((ROOT/'deploy').glob('*.py')), *sorted((ROOT/'deploy').glob('*.sh')),
@@ -69,9 +66,7 @@ def inputs():
         QASR_MODEL/'tokenizer_config.json', QASR_MODEL/'vocab.json', QASR_MODEL/'merges.txt',
         QASR_MODEL/'chat_template.json', QASR_MODEL/'preprocessor_config.json',
         QASR_ENV/'transformers/__init__.py',
-        ROOT/'tools/g2p_sidecar.py', ROOT/'tools/speech_ui.py', ROOT/'tools/voice_chat.py',
-        ROOT/'tools/agent_config.py', ROOT/'tools/agent_tools.py', ROOT/'tools/retrieval.py',
-        ROOT/'tools/mcp_client.py', ROOT/'tools/voicectl.py',
+        *sorted((ROOT/'tools').glob('*.py')),
         ROOT/'web/index.html', ROOT/'web/chat.html', ROOT/'web/chat.js',
         # A capability config is an input only when this site actually named one.
         *([ROOT / site.TOOLS_CONFIG] if site.TOOLS_CONFIG else [])]
@@ -103,6 +98,8 @@ def audio(data):
 
 def smoke():
     assert json.loads(request('/health', port=site.LLM_PORT))['status'] == 'ok'
+    models = json.loads(request('/v1/models', port=site.LLM_PORT))['data']
+    assert any(row['id'] == 'qwen3.8-27b-nvfp4' for row in models), models
     assert json.loads(request('/chat/health'))['available']
     stt_health = json.loads(request('/stt/health'))
     assert not stt_health['busy'] and stt_health['backend'] == 'qasr', stt_health
@@ -139,7 +136,7 @@ def smoke():
                 'frontend_ms': asr.get('frontend_ms'), 'frames': asr.get('frames')},
         'tls_verified': True,
         'source': os.environ.get('GUARD_SOURCE_FP'), 'pgid': os.getpgrp(),
-        'gpu': 2, 'time': time.time()}
+        'gpu': int(site.GPU), 'llm_url': site.LLM_URL, 'time': time.time()}
     (RUN/'acceptance.json').write_text(json.dumps(result, indent=2)+'\n')
     print('VOICE STACK ACCEPTANCE PASS', json.dumps(result), flush=True)
 
@@ -200,11 +197,8 @@ def supervise():
             dict(env, CUDA_VISIBLE_DEVICES='', PYTHONPATH=str(LANG/'runtime/python')))
         wait_for(lambda: Path(SOCK).is_socket())
         owns_socket = True
-        launch('qwen', [QBINARY, '-m', QMODEL, '--port', str(site.LLM_PORT), '--ctx', '16384',
-            '--slots', '1', '--kv-quant', '--cache-ram', '8192', '--cache-min', '256',
-            '--cache-log', '--temp', '0.6', '--think-budget', '256', '--answer-budget', '512',
-            '--hide-think'], dict(env, Q38_ATTN_SPLIT='768', Q38_QK8='1', Q38_LONGGRAPH='1'))
-        wait_for(lambda: healthy(site.LLM_PORT, '/health'))
+        # q38-server.service owns the LLM on GPU 2. Never launch or stop it here.
+        wait_for(lambda: healthy(site.LLM_PORT, '/health'), seconds=180)
         launch('tts', [TBINARY, '--weights', site.TTS_WEIGHTS, '--config', site.TTS_CONFIG,
             '--ref-s', site.TTS_REF_S, '--voices', site.TTS_VOICES,
             '--g2p-socket', SOCK, '--g2p-multilingual', '--web', 'web', '--bind', '0.0.0.0',
@@ -236,12 +230,12 @@ def supervise():
             '--port', site.HTTP_PORT, '--https-port', site.HTTPS_PORT,
             '--tls-cert', CERT, '--tls-key', site.KEY,
             '--ffmpeg', FFMPEG, '--asr-url', f'http://127.0.0.1:{QASR_PORT}',
-            '--llm-url', f'http://127.0.0.1:{site.LLM_PORT}']
+            '--llm-url', site.LLM_URL]
         if site.TOOLS_CONFIG:
             # Refusing to start on a bad capability config is deliberate: a
             # half-loaded tool set is worse than a bridge that will not come up.
             bridge += ['--tools-config', str(ROOT / site.TOOLS_CONFIG)]
-        launch('bridge', bridge, env)
+        launch('bridge', bridge, dict(env, CUDA_VISIBLE_DEVICES=''))
         wait_for(lambda: healthy(site.HTTPS_PORT, '/stt/health'))
         (RUN/'children.json').write_text(json.dumps({name: child.pid for name, child in children}))
         (RUN/'ready').write_text(str(os.getpid()))
@@ -272,7 +266,7 @@ def start():
             stdin=subprocess.DEVNULL, stdout=log, stderr=log)
     (RUN/'stack.pid').write_text(str(child.pid)+'\n')
     try:
-        deadline = time.monotonic()+240
+        deadline = time.monotonic()+420
         while not (RUN/'ready').exists():
             assert child.poll() is None, 'supervisor exited; inspect run/supervisor.log'
             assert time.monotonic() < deadline, 'stack startup timed out'

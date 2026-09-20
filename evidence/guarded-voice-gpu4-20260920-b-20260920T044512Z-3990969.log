@@ -1,0 +1,7 @@
+guarded-run: campaign=voice-gpu4-20260920-b label=install mode=cpu cpus=28-31
+command: env VOICE_REPLACE_Q36=1 bash deploy/install-service.sh
+Removed "/home/ambudsharma/.config/systemd/user/default.target.wants/voice-tools-bridge.service".
+indexed 6 documents into 236 chunks in 0.026s at var/notes.sqlite
+Created symlink /home/ambudsharma/.config/systemd/user/default.target.wants/voice-stack-gpu4.service → /home/ambudsharma/.config/systemd/user/voice-stack-gpu4.service.
+active
+enabled

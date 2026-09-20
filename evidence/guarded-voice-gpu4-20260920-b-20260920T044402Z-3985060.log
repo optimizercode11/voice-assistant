@@ -1,0 +1,17 @@
+guarded-run: campaign=voice-gpu4-20260920-b label=negative mode=cpu cpus=0-3
+command: python3 tests/deploy_gpu4_test.py --sabotage
+test_external_llm_not_in_owned_resources (__main__.DeploymentTests.test_external_llm_not_in_owned_resources) ... ok
+test_supervisor_owns_only_speech_and_bridge (__main__.DeploymentTests.test_supervisor_owns_only_speech_and_bridge) ... FAIL
+
+======================================================================
+FAIL: test_supervisor_owns_only_speech_and_bridge (__main__.DeploymentTests.test_supervisor_owns_only_speech_and_bridge)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/voice-gpu4-20260920-b/tests/deploy_gpu4_test.py", line 58, in test_supervisor_owns_only_speech_and_bridge
+    self.assertEqual(len(children), 4, 'must not start an LLM on the speech GPU')
+AssertionError: 5 != 4 : must not start an LLM on the speech GPU
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.003s
+
+FAILED (failures=1)

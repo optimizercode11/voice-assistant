@@ -1,0 +1,40 @@
+{
+  "transcript": "The quick brown fox jumps over the lazy dog.",
+  "reply": "That\u2019s the classic pangram\u2014it uses every letter of the English alphabet. Did you want me to check something with that phrase, or were you just testing the mic?",
+  "english": {
+    "frames": 199800,
+    "rms": 0.0488628033837019
+  },
+  "hindi": {
+    "frames": 42600,
+    "rms": 0.11133724070648571
+  },
+  "context_correction": [
+    "Four.",
+    "Five."
+  ],
+  "asr": {
+    "backend": "qasr",
+    "engine": {
+      "audio_ms": 2.107,
+      "prefill_ms": 6.241,
+      "decode_ms": 26.147,
+      "total_ms": 34.593,
+      "audio_rows": 35,
+      "prompt_len": 50,
+      "steps": 14,
+      "gemm_wide": 0,
+      "gemm_narrow": 0,
+      "gemv": 0,
+      "weight_bytes_read": 0
+    },
+    "frontend_ms": 3.649,
+    "frames": 272
+  },
+  "tls_verified": true,
+  "source": "79cef734942ddb7e02cf42af73f23f43987c1fffb3648ec70aaf14431e400450",
+  "pgid": 3017145,
+  "gpu": 4,
+  "llm_url": "http://127.0.0.1:8080",
+  "time": 1789879536.178499
+}

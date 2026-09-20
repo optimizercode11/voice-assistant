@@ -1,0 +1,30 @@
+{
+  "campaign": "voice-gpu4-20260920-b",
+  "command": [
+    "python3",
+    "tests/deploy_gpu4_test.py"
+  ],
+  "command_exit_code": 0,
+  "containment": {
+    "cpus": "0-3",
+    "gpu_index": null,
+    "gpu_indices": [],
+    "gpu_uuid": null,
+    "gpu_uuids": [],
+    "mode": "cpu",
+    "nice": 10,
+    "verdict": "not_applicable"
+  },
+  "cwd": "/mnt/data/voice-gpu4-20260920-b",
+  "expected_exit_code": 0,
+  "finished_utc": "2026-09-20T04:44:02.140019308Z",
+  "git_head": "87b05bef1e220f256cc2c280f6a9bf12c8a596b6",
+  "inputs": [],
+  "label": "positive",
+  "log": "/mnt/data/voice-gpu4-20260920-b/evidence/guarded-voice-gpu4-20260920-b-20260920T044402Z-3985222.log",
+  "run_id": "voice-gpu4-20260920-b-20260920T044402Z-3985222",
+  "schema_version": 2,
+  "source_fingerprint": "79cef734942ddb7e02cf42af73f23f43987c1fffb3648ec70aaf14431e400450",
+  "started_utc": "2026-09-20T04:44:02.049826684Z",
+  "status": "PASS"
+}

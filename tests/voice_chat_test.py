@@ -66,6 +66,7 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(self.upstream.request['messages'][0],
                          {'role': 'system', 'content': speech_ui.voice_chat.system_prompt([])})
         self.assertIn('no live web', self.upstream.request['messages'][0]['content'])
+        self.assertEqual(self.upstream.request['model'], 'qwen3.8-27b-nvfp4')
         self.assertEqual(self.upstream.request['messages'][1:],messages)
         self.assertEqual(self.upstream.request['reasoning_effort'],'none');self.assertEqual(self.upstream.request['max_tokens'],384)
         self.request({'messages':[{'role':'user','content':'Independent tab'}]});self.assertEqual(len(self.upstream.request['messages']),2)

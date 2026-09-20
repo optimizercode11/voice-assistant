@@ -57,7 +57,7 @@ def main():
           "certificate and key are a pair in one directory")
 
     # -- the unit and the profile tell the same story -----------------------
-    unit = (HERE / "voice-stack-gpu2.service").read_text()
+    unit = (HERE / site.UNIT).read_text()
     root = str(site.DEPLOY_ROOT).replace(str(Path.home()), "%h")
     for field in ("WorkingDirectory", "PIDFile", "ExecStart"):
         values = re.findall(rf"^{field}=(.*)$", unit, re.M)

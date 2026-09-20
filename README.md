@@ -1,5 +1,12 @@
 # voice-assistant — a live speech-to-speech conversation with Qwen
 
+Deployment update (2026-09-20): the default profile is
+`voice-stack-gpu4.service`, serving `/chat` on HTTPS 8094. Kokoro and
+Qwen3-ASR-1.7B FP8 run on GPU 4; chat uses the independently managed
+Qwen3.8-27B server on GPU 2 at port 8080. See the first section of RUNBOOK.md.
+Older architecture and campaign descriptions below are historical.
+
+
 Point a browser at it, press **Start conversation**, talk, and the answer comes
 back as speech. Nothing is typed unless you want it to be. Voice processing
 runs on your own server; optional tools can reach configured external sources.

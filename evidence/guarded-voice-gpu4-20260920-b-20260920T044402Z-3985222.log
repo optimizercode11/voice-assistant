@@ -1,0 +1,9 @@
+guarded-run: campaign=voice-gpu4-20260920-b label=positive mode=cpu cpus=0-3
+command: python3 tests/deploy_gpu4_test.py
+test_external_llm_not_in_owned_resources (__main__.DeploymentTests.test_external_llm_not_in_owned_resources) ... ok
+test_supervisor_owns_only_speech_and_bridge (__main__.DeploymentTests.test_supervisor_owns_only_speech_and_bridge) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.003s
+
+OK

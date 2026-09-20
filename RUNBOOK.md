@@ -1,5 +1,40 @@
 # Runbook
 
+## GPU 4 speech deployment (2026-09-20)
+
+Campaign: `voice-gpu4-20260920-b`. The deployed default profile runs Kokoro
+and Qwen3-ASR-1.7B FP8 on GPU 4. The CPU bridge serves HTTP 8093 / HTTPS 8094
+and sends chat to `http://127.0.0.1:8080` (`q38-server.service`, GPU 2).
+It never starts, stops or replaces that external LLM. The service is
+`voice-stack-gpu4.service`, installed from
+`~/qwen36/voice-stack/voice-gpu4-20260920-b`.
+
+Deployed and enabled 2026-09-20 04:45Z after the owner stopped and disabled
+Qwen3.6 and authorized voice deployment on GPU4. Fresh `gpu-bugfix` guardrail
+GREEN: CPU app regression, supervisor ownership control, paired extra-LLM
+sabotage, original GPU2 conflict reproduction and full GPU4 speech acceptance.
+Kokoro PID3017786 (1342MiB) and QASR PID3018513 (3938MiB) were both attributed
+to guarded PGID3017145; supervisor MainPID3017152, active/enabled, zero restarts.
+Q38 guard MainPID2996026 on GPU2 remained unchanged; Qwen3.6 stays disabled.
+The TLS round trip transcribed the fox pangram exactly, spoke an English reply
+and Hindi audio, and preserved the correction Four→Five. Malformed audio/chat
+were refused. HTTPS8094/chat/health is reachable from the dev VM; all five MCP
+servers report ready and the documentation index is ready. The unit is enabled
+for boot; real microphone/speaker acoustic acceptance remains a user-device check.
+
+The old app directory and its approval store remain intact. The new deployment
+starts with no directory grants, rebuilds its documentation index, and keeps
+browser history at the same HTTPS origin. This is the existing voice app;
+durable cross-device note capture is not implemented by this deployment.
+
+For an explicit rollback after a successful installation, stop and disable
+`voice-stack-gpu4.service`, then run `python3 deploy/restore-service.py` from
+the campaign directory through the guarded wrapper. This restores the saved
+service states (Qwen3.6 remains disabled; the old bridge becomes active). It does not modify Q38-27B.
+
+The rest of this runbook describes earlier deployments and their evidence.
+
+
 This is the app deployment procedure for the existing GPU-2 host. Commands
 below were either run read-only or assembled from the cited scripts/manuals.
 **No host-changing deployment, restart or rollback was executed in this

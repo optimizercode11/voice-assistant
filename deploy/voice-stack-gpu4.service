@@ -1,0 +1,25 @@
+[Unit]
+Description=Voice assistant: Kokoro and Qwen3-ASR on GPU 4, external Qwen3.8-27B on GPU 2
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=900
+StartLimitBurst=3
+
+[Service]
+Type=forking
+WorkingDirectory=%h/qwen36/voice-stack/voice-gpu4-20260920-b
+PIDFile=%h/qwen36/voice-stack/voice-gpu4-20260920-b/run/stack.pid
+ExecStart=/bin/bash %h/qwen36/voice-stack/voice-gpu4-20260920-b/deploy/start-voice-stack.sh
+Environment=GUARD_SAMPLE_INTERVAL=1
+Environment=GUARD_PGID_INTERVAL=0.2
+Restart=on-failure
+RestartSec=10
+KillMode=mixed
+KillSignal=SIGTERM
+SendSIGKILL=no
+TimeoutStartSec=600
+TimeoutStopSec=300
+LimitNOFILE=65536
+
+[Install]
+WantedBy=default.target

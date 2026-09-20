@@ -16,15 +16,13 @@ from urllib.parse import urlsplit
 
 ENDPOINTS = {
     "tts": ("http://127.0.0.1:8090/health", "Kokoro TTS"),
-    # 2026-09-12: the bridge answers from the four-GPU Flash-Next server
-    # (q38f-server.service, port 8038); the 27B on 8080 was shut down.
-    "llm": ("http://127.0.0.1:8038/health", "Qwen3.8-Flash-Next"),
+    "llm": ("http://127.0.0.1:8080/health", "Qwen3.8-27B (GPU 2)"),
     "stt": ("http://127.0.0.1:8095/health", "Qwen3-ASR (resident)"),
     # 8091/8093 are the HTTP listeners; 8092/8094 are the TLS ones.  Probing a
     # TLS port over plain http gets a connection reset and the tool then tells
     # the model the bridge is down -- a wrong answer that reads like a real
     # outage, which is the worst kind for a health tool.
-    "bridge": ("http://127.0.0.1:8091/chat/health", "speech bridge"),
+    "bridge": ("http://127.0.0.1:8093/chat/health", "speech bridge"),
     "tools_bridge": ("http://127.0.0.1:8093/chat/health", "tools bridge"),
 }
 TOOLS = [{

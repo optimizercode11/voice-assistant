@@ -1,0 +1,3 @@
+guarded-run: campaign=voice-gpu4-20260920-b label=record mode=cpu cpus=28-31
+command: python3 tools/voicectl.py --config config/host.toml index build
+indexed 6 documents into 237 chunks in 0.019s at var/notes.sqlite

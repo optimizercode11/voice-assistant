@@ -7,7 +7,7 @@ binaries and their SHA-256 pins, ports, the TLS certificate, and the GPU.  It
 was lifted out of ``voice_stack.py`` (and of the campaign scripts that each
 repeated a copy of it) so that a new site is one file, not a grep.
 
-The values are the ones the live GPU-2 stack runs today; ``PROVENANCE.md``
+The defaults describe speech on GPU 4 with an external LLM on GPU 2; ``PROVENANCE.md``
 names the campaign that certified them.
 
 Overrides (environment, for a different site or a rehearsal):
@@ -68,8 +68,8 @@ QASR_MODEL = HOST_ROOT / "qasr-1p7b/qasr-1p7b-20260910/model"
 QASR_WEIGHTS = "fp8"
 
 # --------------------------------------------------------------------------
-# Accepted binaries and releases.  Qwen/TTS/vvasr are pinned by hash: a stale
-# binary must fail at startup, not at 3am.  The resident ASR server carries
+# Accepted speech binaries and releases. TTS is pinned by hash; the external
+# LLM is owned and verified by its own service.  The resident ASR server carries
 # its own RELEASE.json, so it is verified against itself instead of a hash
 # hand-copied in here.
 # --------------------------------------------------------------------------
@@ -90,9 +90,7 @@ G2P_PYTHON = TTS_MODEL_DIR / "oracle-env/bin/python"
 QASR_PYTHON = Path("/mnt/.venv/bin/python")
 
 PINS = {
-    LLM_BINARY: "60bdab2564539d5067796c2f3df171b2da1168088dcb7f335243c55e3d319050",
     TTS_BINARY: "a4da4411f3f2ab026f2255f1fa2d13404ca2d3d17eef07d1f8a81d48c7d4efae",
-    ASR_BINARY: "0b7d715043d00448427669ba62c92d065d5193833d6ad2143b0a6c77f6bedf7b",
 }
 
 # --------------------------------------------------------------------------
@@ -100,55 +98,46 @@ PINS = {
 # --------------------------------------------------------------------------
 LLM_PORT = 8080
 TTS_PORT = 8090
-HTTP_PORT = 8091
-HTTPS_PORT = 8092
+HTTP_PORT = 8093
+HTTPS_PORT = 8094
 QASR_PORT = 8095
-PORTS = (LLM_PORT, TTS_PORT, HTTP_PORT, HTTPS_PORT, QASR_PORT)
+LLM_URL = f"http://127.0.0.1:{LLM_PORT}"
+# The LLM is independently managed; never bind its port or launch its binary.
+PORTS = (TTS_PORT, HTTP_PORT, HTTPS_PORT, QASR_PORT)
 LAN_ORIGIN = "192.168.228.113"
 CHAT_URL = f"https://{LAN_ORIGIN}:{HTTPS_PORT}/chat"
 STUDIO_URL = f"https://{LAN_ORIGIN}:{HTTPS_PORT}/"
 
 # The G2P sidecar and kserver meet on this unix socket.
-G2P_SOCKET = _text("VOICE_G2P_SOCKET", "/tmp/kokoro-voice-restore-20260908.sock")
+G2P_SOCKET = _text("VOICE_G2P_SOCKET", "/tmp/kokoro-voice-gpu4-20260920-b.sock")
 
 # --------------------------------------------------------------------------
-# Device authorization.  GPU 2 is the voice stack's authorized device; the
+# Device authorization.  GPU 4 is the voice stack's authorized device; the
 # guard, the supervisor and the acceptance scripts all read it from here.
 # --------------------------------------------------------------------------
-GPU = _text("VOICE_GPU", "2")
-GPU_UUID = "GPU-79d34900-581c-5b37-3dde-f53a8592181a"
-CPUS = "24-27"
+GPU = _text("VOICE_GPU", "4")
+GPU_UUID = "GPU-343fd1b6-cbc3-c6e0-1ed8-78fcf8d0942e"
+CPUS = "28-31"
 NICE = 10
 
 # --------------------------------------------------------------------------
 # The live deployment: where the checkout is installed on the host, the unit
 # that owns it, and the campaign its guarded start records evidence under.
 # --------------------------------------------------------------------------
-DEPLOY_ROOT = _path("VOICE_DEPLOY_ROOT", str(HOST_ROOT / "voice-stack/voice-restore-20260908"))
-UNIT = _text("VOICE_UNIT", "voice-stack-gpu2.service")
-CAMPAIGN = _text("VOICE_CAMPAIGN", "voice-restore-20260908")
+DEPLOY_ROOT = _path("VOICE_DEPLOY_ROOT", str(HOST_ROOT / "voice-stack/voice-gpu4-20260920-b"))
+UNIT = _text("VOICE_UNIT", "voice-stack-gpu4.service")
+CAMPAIGN = _text("VOICE_CAMPAIGN", "voice-gpu4-20260920-b")
 # Written by the deploy campaign; the supervisor's evidence lands beside it.
-DEPLOY_RECORDS = DEPLOY_ROOT / "evidence/deploy-qasr-20260909"
+DEPLOY_RECORDS = DEPLOY_ROOT / "evidence/deploy-voice-gpu4"
 
-# Sampled per-process peaks on this 32607 MiB card, for context only: Qwen
-# 23372 MiB, ASR 5268 MiB, TTS 1288 MiB.  A conservative sum of samples, not
-# a worst-case memory guarantee.
+# Physical GPU capacity; actual speech memory is recorded at acceptance.
 GPU_MEMORY_MIB = 32607
 
 # --------------------------------------------------------------------------
-# Capabilities: tools, RAG, MCP.  Empty means "this site offers none", which
-# is what the live stack was certified with.  Naming a file here is the only
-# way the supervisor passes --tools-config, because a deployment that quietly
-# started offering tools is no longer the thing PROVENANCE.md certified.
-# Set VOICE_TOOLS_CONFIG=config/assistant.toml to turn them on for a site.
-# --------------------------------------------------------------------------
-TOOLS_CONFIG = _text("VOICE_TOOLS_CONFIG", "")
+# Capabilities for the default voice app. Generic assistant.toml remains opt-in.
+TOOLS_CONFIG = _text("VOICE_TOOLS_CONFIG", "config/host.toml")
 
-# The tools bridge runs side-by-side with the certified stack rather than
-# replacing it: the GPU has ~5 GiB free, so a second Qwen is impossible and the
-# new bridge reuses the resident q38 / qasr / Kokoro on device 2.  Separate
-# ports mean `systemctl stop voice-tools-bridge` can never take the live
-# assistant down with it.
+# Compatibility wrapper uses the same public ports and external LLM.
 TOOLS_HTTP_PORT = 8093
 TOOLS_HTTPS_PORT = 8094
-TOOLS_CAMPAIGN = _text("VOICE_TOOLS_CAMPAIGN", "voice-tools-20260910")
+TOOLS_CAMPAIGN = _text("VOICE_TOOLS_CAMPAIGN", "voice-gpu4-20260920-b")
